@@ -10,6 +10,16 @@ It reduces cognitive load for engineers by providing a small, stable interface f
 
 This repository is intentionally scoped as a realistic demo and proposal, not a production platform.
 
+## Problem statement
+
+Engineers often need to deploy and troubleshoot quickly, but deployment engines can be:
+- Too coupled to internal engine concepts
+- Too easy to misconfigure without guardrails
+- Too noisy to debug without normalized status and failures
+
+DXCP addresses this by providing a small, opinionated interface that encodes intent,
+applies safe defaults, and presents high signal status and failure information.
+
 ## Try it live (public demo)
 
 UI:
@@ -26,6 +36,8 @@ Notes:
 - Deployments are serialized (one active deploy at a time)
 
 ## Five minute reviewer flow
+
+Target: complete all steps in under 5 minutes.
 
 ### Step 1: Deploy from the UI (no setup)
 1. Open the UI
@@ -93,6 +105,13 @@ To prevent abuse and unexpected cost:
 - Rate limits and daily quotas
 - No per deploy infrastructure creation
 - Kill switch for mutating operations
+
+## Non-goals
+
+- Not a replacement for Spinnaker
+- Not a full CI system
+- Not an infrastructure provisioning tool
+- Not a production hardened platform
 
 ## Running locally
 

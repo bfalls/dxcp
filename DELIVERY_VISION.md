@@ -28,6 +28,15 @@ Secondary users
 - Platform engineers maintaining delivery templates and guardrails
 - Engineering leaders who want consistent delivery outcomes and visibility
 
+## Five Minute Reviewer Flow (summary)
+
+A reviewer should be able to complete this flow in under 5 minutes:
+
+1. Open the public demo UI and deploy the allowlisted service
+2. Watch status in a normalized timeline and verify the service URL output
+3. Clone the repo, change one calculation function, and publish a new build
+4. Deploy the new build from the UI and confirm the output changed
+
 ## Developer Experience Goals
 
 1. Intent first deployments  
