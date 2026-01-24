@@ -23,6 +23,9 @@ class Settings:
 
         self.spinnaker_mode = os.getenv("DXCP_SPINNAKER_MODE", "stub")
         self.spinnaker_base_url = os.getenv("DXCP_SPINNAKER_BASE_URL", "")
+        cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
+        self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
+        self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")
 
 
 SETTINGS = Settings()

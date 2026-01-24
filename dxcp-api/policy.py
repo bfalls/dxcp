@@ -27,13 +27,18 @@ class Guardrails:
         if not key:
             raise PolicyError(400, "IDMP_KEY_REQUIRED", "Idempotency-Key is required")
 
-    def validate_service(self, service: str) -> None:
-        if service not in SETTINGS.allowlisted_services:
+    def validate_service(self, service: str) -> dict:
+        entry = self.storage.get_service(service)
+        if not entry:
             raise PolicyError(403, "SERVICE_NOT_ALLOWLISTED", "Service is not allowlisted")
+        return entry
 
-    def validate_environment(self, env: str) -> None:
+    def validate_environment(self, env: str, service_entry: dict) -> None:
         if env != "sandbox":
             raise PolicyError(400, "INVALID_ENVIRONMENT", "Only sandbox environment is supported")
+        allowed = service_entry.get("allowed_environments", [])
+        if env not in allowed:
+            raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment not allowed for service")
 
     def validate_version(self, version: str) -> None:
         if not VERSION_PATTERN.match(version):
@@ -46,6 +51,15 @@ class Guardrails:
             raise PolicyError(400, "INVALID_ARTIFACT", "Artifact checksum must be sha256")
         if content_type not in SETTINGS.allowed_content_types:
             raise PolicyError(400, "INVALID_ARTIFACT", "Artifact content type not allowlisted")
+
+    def validate_artifact_source(self, artifact_ref: str, service_entry: dict) -> None:
+        allowed = service_entry.get("allowed_artifact_sources", [])
+        if not allowed:
+            return
+        for prefix in allowed:
+            if artifact_ref.startswith(prefix):
+                return
+        raise PolicyError(400, "INVALID_ARTIFACT", "Artifact source not allowlisted")
 
     def enforce_global_lock(self) -> None:
         if self.storage.has_active_deployment():

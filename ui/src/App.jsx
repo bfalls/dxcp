@@ -1,11 +1,7 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/v1'
 const API_TOKEN = import.meta.env.VITE_API_TOKEN || 'demo-token'
-const ALLOWLIST = (import.meta.env.VITE_ALLOWLIST || 'demo-service')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean)
 const SERVICE_URL_BASE = import.meta.env.VITE_SERVICE_URL_BASE || ''
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
@@ -79,7 +75,8 @@ function deriveTimeline(state) {
 export default function App() {
   const api = useApi()
   const [view, setView] = useState('deploy')
-  const [service, setService] = useState(ALLOWLIST[0] || '')
+  const [services, setServices] = useState([])
+  const [service, setService] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [changeSummary, setChangeSummary] = useState('Initial demo deploy')
   const [deployResult, setDeployResult] = useState(null)
@@ -99,6 +96,21 @@ export default function App() {
       setDeployments(Array.isArray(data) ? data : [])
     } catch (err) {
       setErrorMessage('Failed to load deployments')
+    }
+  }
+
+  async function loadServices() {
+    setErrorMessage('')
+    try {
+      const data = await api.get('/services')
+      if (Array.isArray(data)) {
+        setServices(data)
+        if (!service && data.length > 0) {
+          setService(data[0].service_name)
+        }
+      }
+    } catch (err) {
+      setErrorMessage('Failed to load services')
     }
   }
 
@@ -162,8 +174,20 @@ export default function App() {
     await refreshDeployments()
   }
 
+  useEffect(() => {
+    loadServices()
+  }, [])
+
   const timeline = deriveTimeline(selected?.state)
-  const serviceUrl = SERVICE_URL_BASE && selected ? `${SERVICE_URL_BASE}/${selected.service}` : ''
+  const selectedService = services.find((s) => s.service_name === selected?.service)
+  let serviceUrl = ''
+  if (selectedService?.stable_service_url_template) {
+    serviceUrl = selectedService.stable_service_url_template
+      .replace('{service}', selected?.service || '')
+      .replace('{version}', selected?.version || '')
+  } else if (SERVICE_URL_BASE && selected) {
+    serviceUrl = `${SERVICE_URL_BASE}/${selected.service}`
+  }
 
   return (
     <div className="app">
@@ -185,7 +209,13 @@ export default function App() {
           >
             Deployments
           </button>
-          <button className={view === 'detail' ? 'active' : ''} onClick={() => setView('detail')}>
+          <button
+            className={view === 'detail' ? 'active' : ''}
+            onClick={() => {
+              setView('detail')
+              if (services.length === 0) loadServices()
+            }}
+          >
             Detail
           </button>
         </nav>
@@ -203,10 +233,17 @@ export default function App() {
             <h2>Deploy intent</h2>
             <div className="field">
               <label>Service</label>
-              <select value={service} onChange={(e) => setService(e.target.value)}>
-                {ALLOWLIST.map((svc) => (
-                  <option key={svc} value={svc}>
-                    {svc}
+              <select
+                value={service}
+                onFocus={() => {
+                  if (services.length === 0) loadServices()
+                }}
+                onChange={(e) => setService(e.target.value)}
+              >
+                {services.length === 0 && <option value="">No services registered</option>}
+                {services.map((svc) => (
+                  <option key={svc.service_name} value={svc.service_name}>
+                    {svc.service_name}
                   </option>
                 ))}
               </select>

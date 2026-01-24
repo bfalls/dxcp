@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import uuid
 from typing import List, Optional
@@ -9,8 +10,9 @@ def utc_now() -> str:
 
 
 class Storage:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, registry_path: str) -> None:
         self.db_path = db_path
+        self.registry_path = registry_path
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -79,8 +81,76 @@ class Storage:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS services (
+                service_name TEXT PRIMARY KEY,
+                allowed_environments TEXT NOT NULL,
+                allowed_recipes TEXT NOT NULL,
+                allowed_artifact_sources TEXT NOT NULL,
+                stable_service_url_template TEXT
+            )
+            """
+        )
         conn.commit()
         conn.close()
+
+    def _read_registry(self) -> List[dict]:
+        try:
+            with open(self.registry_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except FileNotFoundError:
+            return []
+        if not isinstance(data, list):
+            print("service registry invalid: root must be a list")
+            return []
+        valid = []
+        for entry in data:
+            if self._is_valid_service_entry(entry):
+                valid.append(entry)
+        return valid
+
+    def _is_valid_service_entry(self, entry: dict) -> bool:
+        if not isinstance(entry, dict):
+            print("service registry invalid entry: not an object")
+            return False
+        name = entry.get("service_name")
+        if not name or not isinstance(name, str):
+            print("service registry invalid entry: missing service_name")
+            return False
+        allowed_envs = entry.get("allowed_environments", [])
+        if not isinstance(allowed_envs, list) or "sandbox" not in allowed_envs:
+            print(f"service registry invalid entry for {name}: allowed_environments must include sandbox")
+            return False
+        for field in ["allowed_recipes", "allowed_artifact_sources"]:
+            value = entry.get(field, [])
+            if not isinstance(value, list):
+                print(f"service registry invalid entry for {name}: {field} must be a list")
+                return False
+        return True
+
+    def list_services(self) -> List[dict]:
+        data = self._read_registry()
+        return sorted(
+            [
+                {
+                    "service_name": entry.get("service_name"),
+                    "allowed_environments": entry.get("allowed_environments", []),
+                    "allowed_recipes": entry.get("allowed_recipes", []),
+                    "allowed_artifact_sources": entry.get("allowed_artifact_sources", []),
+                    "stable_service_url_template": entry.get("stable_service_url_template"),
+                }
+                for entry in data
+                if entry.get("service_name")
+            ],
+            key=lambda item: item["service_name"],
+        )
+
+    def get_service(self, service_name: str) -> Optional[dict]:
+        for entry in self.list_services():
+            if entry["service_name"] == service_name:
+                return entry
+        return None
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()

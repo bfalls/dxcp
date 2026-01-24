@@ -26,7 +26,6 @@ Set these env vars before running the dev server:
 ```
 export VITE_API_BASE=http://127.0.0.1:8000/v1
 export VITE_API_TOKEN=demo-token
-export VITE_ALLOWLIST=demo-service
 export VITE_SERVICE_URL_BASE=
 ```
 
@@ -34,3 +33,4 @@ Notes:
 - Environment is fixed to sandbox.
 - Version input is validated locally before submit.
 - Rollback prompts for confirmation and uses idempotency keys.
+ - Services come from the backend registry (/v1/services).

@@ -1,0 +1,16 @@
+[
+  {
+    "service_name": "demo-service",
+    "allowed_environments": ["sandbox"],
+    "allowed_recipes": ["default"],
+    "allowed_artifact_sources": ["local:"],
+    "stable_service_url_template": "http://127.0.0.1:9000"
+  },
+  {
+    "service_name": "demo-service-2",
+    "allowed_environments": ["sandbox"],
+    "allowed_recipes": ["default"],
+    "allowed_artifact_sources": ["local:"],
+    "stable_service_url_template": "http://127.0.0.1:9001"
+  }
+]

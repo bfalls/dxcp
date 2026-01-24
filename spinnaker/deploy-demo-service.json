@@ -1,0 +1,34 @@
+{
+  "application": "dxcp",
+  "name": "deploy-demo-service",
+  "description": "Deploy demo-service artifact to existing sandbox target",
+  "keepWaitingPipelines": false,
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "name": "service",
+      "required": true
+    },
+    {
+      "name": "version",
+      "required": true
+    },
+    {
+      "name": "artifactRef",
+      "required": true
+    }
+  ],
+  "stages": [
+    {
+      "type": "webhook",
+      "name": "deploy-artifact",
+      "url": "https://demo-runtime.local/deploy",
+      "method": "POST",
+      "payload": {
+        "service": "${ parameters.service }",
+        "version": "${ parameters.version }",
+        "artifactRef": "${ parameters.artifactRef }"
+      }
+    }
+  ]
+}

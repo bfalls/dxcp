@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import SETTINGS
@@ -25,7 +26,15 @@ from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
 
 
 app = FastAPI(title="DXCP API", version="1.0.0")
-storage = Storage(SETTINGS.db_path)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=SETTINGS.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+storage = Storage(SETTINGS.db_path, SETTINGS.service_registry_path)
+print(f"service registry loaded: {len(storage.list_services())} services")
 rate_limiter = RateLimiter()
 idempotency = IdempotencyStore()
 spinnaker = SpinnakerAdapter(SETTINGS.spinnaker_base_url, SETTINGS.spinnaker_mode)
@@ -91,8 +100,8 @@ def create_deployment(
     if cached:
         return cached
 
-    guardrails.validate_service(intent.service)
-    guardrails.validate_environment(intent.environment)
+    service_entry = guardrails.validate_service(intent.service)
+    guardrails.validate_environment(intent.environment, service_entry)
     guardrails.validate_version(intent.version)
     guardrails.enforce_global_lock()
 
@@ -126,6 +135,13 @@ def list_deployments(
     rate_limiter.check_read(client_id)
     deployments = storage.list_deployments(service, state)
     return deployments
+
+
+@app.get("/v1/services")
+def list_services(request: Request, authorization: Optional[str] = Header(None)):
+    client_id = get_client_id(request, authorization)
+    rate_limiter.check_read(client_id)
+    return storage.list_services()
 
 
 @app.get("/v1/deployments/{deployment_id}")
@@ -177,8 +193,8 @@ def rollback_deployment(
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
 
-    guardrails.validate_service(deployment["service"])
-    guardrails.validate_environment(deployment["environment"])
+    service_entry = guardrails.validate_service(deployment["service"])
+    guardrails.validate_environment(deployment["environment"], service_entry)
     guardrails.enforce_global_lock()
 
     execution = spinnaker.trigger_rollback(deployment, idempotency_key)
@@ -257,9 +273,10 @@ def register_build(
     if cached:
         return cached
 
-    guardrails.validate_service(reg.service)
+    service_entry = guardrails.validate_service(reg.service)
     guardrails.validate_version(reg.version)
     guardrails.validate_artifact(reg.sizeBytes, reg.sha256, reg.contentType)
+    guardrails.validate_artifact_source(reg.artifactRef, service_entry)
 
     cap = storage.find_upload_capability(
         reg.service,
