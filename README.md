@@ -74,3 +74,42 @@ uvicorn main:app --reload
 ```
 
 Open http://127.0.0.1:8000/docs
+
+---
+
+## AWS deploy (CDK)
+
+Prereqs (from scratch):
+1) AWS CLI configured: `aws sts get-caller-identity` succeeds
+2) Node.js installed
+3) CDK bootstrap (once per account/region):
+```
+cd dxcp/cdk
+npx cdk bootstrap aws://ACCOUNT_ID/us-east-1
+```
+
+Optional config (examples):
+```
+export DXCP_API_TOKEN=your-token
+export DXCP_SPINNAKER_BASE_URL=http://localhost:8084
+export DXCP_CORS_ORIGINS=https://your-ui-url
+```
+
+Deploy:
+```
+cd dxcp
+./scripts/deploy_aws.sh
+```
+
+The script prints a summary block with UI URL, API base, and resource IDs.
+
+Sanity checks:
+```
+curl -sS https://YOUR_API_BASE/v1/health
+curl -sS https://YOUR_API_BASE/v1/deployments
+```
+
+Destroy everything:
+```
+./scripts/destroy_aws.sh
+```

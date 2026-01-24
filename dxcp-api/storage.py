@@ -1,8 +1,20 @@
 import json
+import os
 import sqlite3
 import uuid
-from typing import List, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import List, Optional
+
+try:
+    import boto3
+    from boto3.dynamodb.conditions import Attr, Key
+    from botocore.exceptions import ClientError
+except Exception:  # pragma: no cover - optional dependency for local mode
+    boto3 = None
+    Key = None
+    Attr = None
+    ClientError = None
 
 
 def utc_now() -> str:
@@ -364,3 +376,219 @@ class Storage:
         conn.close()
         record["id"] = build_id
         return record
+
+
+class DynamoStorage:
+    def __init__(self, table_name: str) -> None:
+        if not boto3:
+            raise RuntimeError("boto3 is required for DynamoDB storage")
+        self.table = boto3.resource("dynamodb").Table(table_name)
+
+    def _dec(self, value: int) -> Decimal:
+        return Decimal(str(value))
+
+    def list_services(self) -> List[dict]:
+        response = self.table.query(KeyConditionExpression=Key("pk").eq("SERVICE"))
+        items = response.get("Items", [])
+        services = []
+        for item in items:
+            services.append(
+                {
+                    "service_name": item.get("service_name"),
+                    "allowed_environments": item.get("allowed_environments", []),
+                    "allowed_recipes": item.get("allowed_recipes", []),
+                    "allowed_artifact_sources": item.get("allowed_artifact_sources", []),
+                    "stable_service_url_template": item.get("stable_service_url_template"),
+                }
+            )
+        return sorted([s for s in services if s.get("service_name")], key=lambda item: item["service_name"])
+
+    def get_service(self, service_name: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "SERVICE", "sk": service_name})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "service_name": item.get("service_name"),
+            "allowed_environments": item.get("allowed_environments", []),
+            "allowed_recipes": item.get("allowed_recipes", []),
+            "allowed_artifact_sources": item.get("allowed_artifact_sources", []),
+            "stable_service_url_template": item.get("stable_service_url_template"),
+        }
+
+    def has_active_deployment(self) -> bool:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("DEPLOYMENT") & Attr("state").eq("ACTIVE"),
+            Limit=1,
+        )
+        return response.get("Count", 0) > 0
+
+    def insert_deployment(self, record: dict, failures: List[dict]) -> None:
+        item = {
+            "pk": "DEPLOYMENT",
+            "sk": record["id"],
+            "id": record["id"],
+            "service": record["service"],
+            "environment": record["environment"],
+            "version": record["version"],
+            "state": record["state"],
+            "changeSummary": record["changeSummary"],
+            "createdAt": record["createdAt"],
+            "updatedAt": record["updatedAt"],
+            "spinnakerExecutionId": record["spinnakerExecutionId"],
+            "spinnakerExecutionUrl": record["spinnakerExecutionUrl"],
+            "failures": failures,
+        }
+        self.table.put_item(Item=item)
+
+    def update_deployment(self, deployment_id: str, state: str, failures: List[dict]) -> None:
+        self.table.update_item(
+            Key={"pk": "DEPLOYMENT", "sk": deployment_id},
+            UpdateExpression="SET #state = :state, updatedAt = :updatedAt, failures = :failures",
+            ExpressionAttributeNames={"#state": "state"},
+            ExpressionAttributeValues={
+                ":state": state,
+                ":updatedAt": utc_now(),
+                ":failures": failures,
+            },
+        )
+
+    def get_deployment(self, deployment_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "DEPLOYMENT", "sk": deployment_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "id": item.get("id"),
+            "service": item.get("service"),
+            "environment": item.get("environment"),
+            "version": item.get("version"),
+            "state": item.get("state"),
+            "changeSummary": item.get("changeSummary"),
+            "createdAt": item.get("createdAt"),
+            "updatedAt": item.get("updatedAt"),
+            "spinnakerExecutionId": item.get("spinnakerExecutionId"),
+            "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+            "failures": item.get("failures", []),
+        }
+
+    def list_deployments(self, service: Optional[str], state: Optional[str]) -> List[dict]:
+        response = self.table.query(KeyConditionExpression=Key("pk").eq("DEPLOYMENT"))
+        items = response.get("Items", [])
+        deployments = []
+        for item in items:
+            if service and item.get("service") != service:
+                continue
+            if state and item.get("state") != state:
+                continue
+            deployments.append(
+                {
+                    "id": item.get("id"),
+                    "service": item.get("service"),
+                    "environment": item.get("environment"),
+                    "version": item.get("version"),
+                    "state": item.get("state"),
+                    "changeSummary": item.get("changeSummary"),
+                    "createdAt": item.get("createdAt"),
+                    "updatedAt": item.get("updatedAt"),
+                    "spinnakerExecutionId": item.get("spinnakerExecutionId"),
+                    "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+                    "failures": item.get("failures", []),
+                }
+            )
+        deployments.sort(key=lambda d: d.get("createdAt", ""), reverse=True)
+        return deployments
+
+    def insert_upload_capability(
+        self,
+        service: str,
+        version: str,
+        size_bytes: int,
+        sha256: str,
+        content_type: str,
+        expires_at: str,
+        token: str,
+    ) -> dict:
+        cap_id = str(uuid.uuid4())
+        item = {
+            "pk": "UPLOAD_CAPABILITY",
+            "sk": cap_id,
+            "id": cap_id,
+            "service": service,
+            "version": version,
+            "expectedSizeBytes": self._dec(size_bytes),
+            "expectedSha256": sha256,
+            "expectedContentType": content_type,
+            "token": token,
+            "expiresAt": expires_at,
+            "createdAt": utc_now(),
+        }
+        self.table.put_item(Item=item)
+        return {
+            "id": cap_id,
+            "service": service,
+            "version": version,
+            "expectedSizeBytes": size_bytes,
+            "expectedSha256": sha256,
+            "expectedContentType": content_type,
+            "expiresAt": expires_at,
+            "token": token,
+        }
+
+    def find_upload_capability(
+        self,
+        service: str,
+        version: str,
+        size_bytes: int,
+        sha256: str,
+        content_type: str,
+    ) -> Optional[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("UPLOAD_CAPABILITY")
+            & Attr("service").eq(service)
+            & Attr("version").eq(version)
+            & Attr("expectedSizeBytes").eq(self._dec(size_bytes))
+            & Attr("expectedSha256").eq(sha256)
+            & Attr("expectedContentType").eq(content_type),
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            return None
+        item = items[0]
+        return {
+            "id": item.get("id"),
+            "expiresAt": item.get("expiresAt"),
+            "token": item.get("token"),
+        }
+
+    def delete_upload_capability(self, cap_id: str) -> None:
+        self.table.delete_item(Key={"pk": "UPLOAD_CAPABILITY", "sk": cap_id})
+
+    def insert_build(self, record: dict) -> dict:
+        build_id = str(uuid.uuid4())
+        item = {
+            "pk": "BUILD",
+            "sk": build_id,
+            "id": build_id,
+            "service": record["service"],
+            "version": record["version"],
+            "artifactRef": record["artifactRef"],
+            "sha256": record["sha256"],
+            "sizeBytes": self._dec(record["sizeBytes"]),
+            "contentType": record["contentType"],
+            "registeredAt": record["registeredAt"],
+        }
+        self.table.put_item(Item=item)
+        record["id"] = build_id
+        return record
+
+
+def build_storage():
+    table_name = os.getenv("DXCP_DDB_TABLE", "")
+    if table_name:
+        return DynamoStorage(table_name)
+    return Storage(
+        os.getenv("DXCP_DB_PATH", "./data/dxcp.db"),
+        os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
+    )

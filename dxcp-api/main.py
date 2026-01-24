@@ -14,13 +14,18 @@ from idempotency import IdempotencyStore
 from models import BuildRegistration, BuildUploadCapability, BuildUploadRequest, DeploymentIntent
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
-from storage import Storage, utc_now
+from storage import build_storage, utc_now
 
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SPINNAKER_PATH = os.path.join(REPO_ROOT, "spinnaker-adapter")
-if SPINNAKER_PATH not in sys.path:
-    sys.path.append(SPINNAKER_PATH)
+HERE = os.path.abspath(os.path.dirname(__file__))
+SPINNAKER_CANDIDATES = [
+    os.path.join(HERE, "spinnaker-adapter"),
+    os.path.join(os.path.dirname(HERE), "spinnaker-adapter"),
+]
+for candidate in SPINNAKER_CANDIDATES:
+    if os.path.isdir(candidate) and candidate not in sys.path:
+        sys.path.append(candidate)
+        break
 
 from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
 
@@ -33,12 +38,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-storage = Storage(SETTINGS.db_path, SETTINGS.service_registry_path)
+storage = build_storage()
 print(f"service registry loaded: {len(storage.list_services())} services")
 rate_limiter = RateLimiter()
 idempotency = IdempotencyStore()
 spinnaker = SpinnakerAdapter(SETTINGS.spinnaker_base_url, SETTINGS.spinnaker_mode)
 guardrails = Guardrails(storage)
+
+if os.getenv("DXCP_LAMBDA", "") == "1":
+    try:
+        from mangum import Mangum
+
+        handler = Mangum(app)
+    except Exception:
+        handler = None
 
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
@@ -142,6 +155,11 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
     client_id = get_client_id(request, authorization)
     rate_limiter.check_read(client_id)
     return storage.list_services()
+
+
+@app.get("/v1/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/v1/deployments/{deployment_id}")
