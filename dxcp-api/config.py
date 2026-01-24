@@ -30,7 +30,9 @@ class Settings:
         self.allowed_content_types = [c.strip() for c in content_types.split(",") if c.strip()]
 
         self.spinnaker_mode = os.getenv("DXCP_SPINNAKER_MODE", "stub")
-        self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
+        self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
+        if not self.spinnaker_base_url:
+            self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")

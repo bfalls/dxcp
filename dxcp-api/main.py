@@ -39,7 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 storage = build_storage()
-print(f"service registry loaded: {len(storage.list_services())} services")
+print(f"DXCP:     service registry loaded: {len(storage.list_services())} services")
 rate_limiter = RateLimiter()
 idempotency = IdempotencyStore()
 spinnaker = SpinnakerAdapter(SETTINGS.spinnaker_base_url, SETTINGS.spinnaker_mode)

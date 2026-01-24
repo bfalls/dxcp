@@ -5,7 +5,6 @@ import * as ssm from "aws-cdk-lib/aws-ssm";
 
 export interface DataStackProps extends StackProps {
   configPrefix: string;
-  spinnakerBaseUrl: string;
   killSwitch: string;
   demoMode: string;
   apiToken: string;
@@ -41,7 +40,6 @@ export class DataStack extends Stack {
       });
     };
 
-    param("spinnaker_base_url", props.spinnakerBaseUrl);
     param("kill_switch", props.killSwitch);
     param("demo_mode", props.demoMode);
     if (props.apiToken.trim().length > 0) {
