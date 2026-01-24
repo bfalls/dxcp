@@ -1,0 +1,411 @@
+openapi: 3.0.3
+info:
+  title: DXCP API
+  version: 1.0.0
+  description: |
+    DXCP Phase 3 API contract.
+
+    Policy and guardrails (enforced):
+    - Allowlisted service only.
+    - Single environment only: "sandbox".
+    - One active deployment at a time (global lock).
+    - Idempotency-Key required for mutating operations.
+    - Rate limits (default): 60 rpm read, 10 rpm mutate.
+    - Daily quotas (default): 25 deployments, 10 rollbacks, 50 build registrations, 50 upload capability requests per client.
+    - Strict input validation for version, size, and allowlisted artifacts.
+    - Kill switch can disable all mutating operations (returns 503 MUTATIONS_DISABLED).
+
+servers:
+  - url: /v1
+
+security:
+  - bearerAuth: []
+
+paths:
+  /deployments:
+    post:
+      summary: Trigger deployment by intent
+      operationId: createDeployment
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentIntent'
+      responses:
+        '201':
+          description: Deployment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '409':
+          $ref: '#/components/responses/DeploymentLocked'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+    get:
+      summary: List deployments
+      operationId: listDeployments
+      parameters:
+        - name: service
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/DeploymentState'
+      responses:
+        '200':
+          description: List of deployments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeploymentRecord'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /deployments/{deploymentId}:
+    get:
+      summary: Get deployment status
+      operationId: getDeployment
+      parameters:
+        - $ref: '#/components/parameters/DeploymentId'
+      responses:
+        '200':
+          description: Deployment record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentRecord'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /deployments/{deploymentId}/failures:
+    get:
+      summary: View normalized failures
+      operationId: getDeploymentFailures
+      parameters:
+        - $ref: '#/components/parameters/DeploymentId'
+      responses:
+        '200':
+          description: Normalized failures
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NormalizedFailure'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /deployments/{deploymentId}/rollback:
+    post:
+      summary: Trigger rollback
+      operationId: rollbackDeployment
+      parameters:
+        - $ref: '#/components/parameters/DeploymentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '409':
+          $ref: '#/components/responses/DeploymentLocked'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+
+  /builds/upload-capability:
+    post:
+      summary: Obtain upload capability
+      operationId: createUploadCapability
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildUploadRequest'
+      responses:
+        '201':
+          description: Upload capability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildUploadCapability'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+
+  /builds:
+    post:
+      summary: Register a build/version
+      operationId: registerBuild
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildRegistration'
+      responses:
+        '201':
+          description: Build registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildRegistration'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DeploymentId:
+      name: deploymentId
+      in: path
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Unique key required for mutating requests.
+
+  schemas:
+    DeploymentIntent:
+      type: object
+      required: [service, environment, version, changeSummary]
+      properties:
+        service:
+          type: string
+          description: Must be allowlisted.
+        environment:
+          type: string
+          enum: [sandbox]
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
+        changeSummary:
+          type: string
+          maxLength: 240
+    DeploymentRecord:
+      type: object
+      required:
+        - id
+        - service
+        - environment
+        - version
+        - state
+        - createdAt
+        - updatedAt
+        - spinnakerExecutionId
+        - spinnakerExecutionUrl
+      properties:
+        id:
+          type: string
+        service:
+          type: string
+        environment:
+          type: string
+          enum: [sandbox]
+        version:
+          type: string
+        state:
+          $ref: '#/components/schemas/DeploymentState'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        spinnakerExecutionId:
+          type: string
+        spinnakerExecutionUrl:
+          type: string
+          format: uri
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/NormalizedFailure'
+    DeploymentState:
+      type: string
+      enum: [PENDING, ACTIVE, SUCCEEDED, FAILED, ROLLED_BACK]
+    NormalizedFailure:
+      type: object
+      required: [category, summary, observedAt]
+      properties:
+        category:
+          type: string
+          enum: [INFRA, CONFIG, APP, POLICY, UNKNOWN]
+        summary:
+          type: string
+        detail:
+          type: string
+        actionHint:
+          type: string
+        observedAt:
+          type: string
+          format: date-time
+    BuildUploadRequest:
+      type: object
+      required: [service, version, expectedSizeBytes, expectedSha256, contentType]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
+        expectedSizeBytes:
+          type: integer
+          format: int64
+          maximum: 209715200
+          description: Max 200MB.
+        expectedSha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+        contentType:
+          type: string
+          enum: [application/zip, application/gzip]
+    BuildUploadCapability:
+      type: object
+      required: [uploadType, expiresAt, expectedSizeBytes, expectedSha256, expectedContentType]
+      properties:
+        uploadType:
+          type: string
+          enum: [SIGNED_URL, TOKEN]
+        uploadUrl:
+          type: string
+          format: uri
+        uploadToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        expectedSizeBytes:
+          type: integer
+          format: int64
+        expectedSha256:
+          type: string
+        expectedContentType:
+          type: string
+          enum: [application/zip, application/gzip]
+    BuildRegistration:
+      type: object
+      required: [service, version, artifactRef, sha256, sizeBytes, contentType]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
+        artifactRef:
+          type: string
+          description: Storage handle or path.
+        sha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+        sizeBytes:
+          type: integer
+          format: int64
+          maximum: 209715200
+        contentType:
+          type: string
+          enum: [application/zip, application/gzip]
+        registeredAt:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    BadRequest:
+      description: Invalid request or policy violation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceNotAllowlisted:
+      description: Service is not allowlisted.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DeploymentLocked:
+      description: Global deployment lock active.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Rate limit or quota exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    MutationsDisabled:
+      description: Mutating operations are disabled by kill switch.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
