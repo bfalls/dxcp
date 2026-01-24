@@ -1,0 +1,346 @@
+import React, { useMemo, useState } from 'react'
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/v1'
+const API_TOKEN = import.meta.env.VITE_API_TOKEN || 'demo-token'
+const ALLOWLIST = (import.meta.env.VITE_ALLOWLIST || 'demo-service')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+const SERVICE_URL_BASE = import.meta.env.VITE_SERVICE_URL_BASE || ''
+
+const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
+
+function useApi() {
+  const headers = {
+    Authorization: `Bearer ${API_TOKEN}`
+  }
+
+  const jsonHeaders = {
+    ...headers,
+    'Content-Type': 'application/json'
+  }
+
+  async function get(path) {
+    const res = await fetch(`${API_BASE}${path}`, { headers })
+    return res.json()
+  }
+
+  async function post(path, body, idempotencyKey) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        ...jsonHeaders,
+        'Idempotency-Key': idempotencyKey
+      },
+      body: JSON.stringify(body)
+    })
+    return res.json()
+  }
+
+  return { get, post }
+}
+
+function formatTime(value) {
+  if (!value) return '-'
+  try {
+    return new Date(value).toLocaleString()
+  } catch (err) {
+    return value
+  }
+}
+
+function statusClass(state) {
+  return `status ${state || ''}`
+}
+
+function deriveTimeline(state) {
+  const steps = [
+    { key: 'intent', title: 'Intent accepted', detail: 'Deployment intent validated and accepted.' },
+    { key: 'engine', title: 'Execution running', detail: 'Spinnaker pipeline executing.' },
+    { key: 'result', title: 'Execution result', detail: 'Deployment completed.' }
+  ]
+  if (state === 'ACTIVE') {
+    steps[0].active = true
+    steps[1].active = true
+  } else if (state === 'SUCCEEDED') {
+    steps.forEach((s) => (s.active = true))
+  } else if (state === 'FAILED') {
+    steps[0].active = true
+    steps[1].active = true
+    steps[2].active = true
+    steps[2].detail = 'Deployment failed.'
+  } else if (state === 'ROLLED_BACK') {
+    steps.forEach((s) => (s.active = true))
+    steps[2].detail = 'Rollback completed.'
+  }
+  return steps
+}
+
+export default function App() {
+  const api = useApi()
+  const [view, setView] = useState('deploy')
+  const [service, setService] = useState(ALLOWLIST[0] || '')
+  const [version, setVersion] = useState('1.0.0')
+  const [changeSummary, setChangeSummary] = useState('Initial demo deploy')
+  const [deployResult, setDeployResult] = useState(null)
+  const [deployments, setDeployments] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [failures, setFailures] = useState([])
+  const [statusMessage, setStatusMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [rollbackResult, setRollbackResult] = useState(null)
+
+  const validVersion = useMemo(() => VERSION_RE.test(version), [version])
+
+  async function refreshDeployments() {
+    setErrorMessage('')
+    try {
+      const data = await api.get('/deployments')
+      setDeployments(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setErrorMessage('Failed to load deployments')
+    }
+  }
+
+  async function handleDeploy() {
+    setErrorMessage('')
+    setStatusMessage('')
+    setDeployResult(null)
+    if (!validVersion) {
+      setErrorMessage('Version format is invalid')
+      return
+    }
+    const key = `deploy-${Date.now()}`
+    const payload = {
+      service,
+      environment: 'sandbox',
+      version,
+      changeSummary
+    }
+    const result = await api.post('/deployments', payload, key)
+    if (result && result.code) {
+      setErrorMessage(`${result.code}: ${result.message}`)
+      return
+    }
+    setDeployResult(result)
+    setStatusMessage(`Deployment created with id ${result.id}`)
+    await refreshDeployments()
+  }
+
+  async function openDeployment(deployment) {
+    setSelected(null)
+    setFailures([])
+    setRollbackResult(null)
+    setErrorMessage('')
+    try {
+      const detail = await api.get(`/deployments/${deployment.id}`)
+      if (detail && detail.code) {
+        setErrorMessage(`${detail.code}: ${detail.message}`)
+        return
+      }
+      setSelected(detail)
+      const failureData = await api.get(`/deployments/${deployment.id}/failures`)
+      setFailures(Array.isArray(failureData) ? failureData : [])
+      setView('detail')
+    } catch (err) {
+      setErrorMessage('Failed to load deployment detail')
+    }
+  }
+
+  async function handleRollback() {
+    if (!selected) return
+    setErrorMessage('')
+    const ok = window.confirm('Confirm rollback?')
+    if (!ok) return
+    const key = `rollback-${Date.now()}`
+    const result = await api.post(`/deployments/${selected.id}/rollback`, {}, key)
+    if (result && result.code) {
+      setErrorMessage(`${result.code}: ${result.message}`)
+      return
+    }
+    setRollbackResult(result)
+    await refreshDeployments()
+  }
+
+  const timeline = deriveTimeline(selected?.state)
+  const serviceUrl = SERVICE_URL_BASE && selected ? `${SERVICE_URL_BASE}/${selected.service}` : ''
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="brand">
+          <h1>DXCP Control Plane</h1>
+          <span>Deploy intent, see normalized status, and recover fast.</span>
+        </div>
+        <nav className="nav">
+          <button className={view === 'deploy' ? 'active' : ''} onClick={() => setView('deploy')}>
+            Deploy
+          </button>
+          <button
+            className={view === 'deployments' ? 'active' : ''}
+            onClick={() => {
+              setView('deployments')
+              refreshDeployments()
+            }}
+          >
+            Deployments
+          </button>
+          <button className={view === 'detail' ? 'active' : ''} onClick={() => setView('detail')}>
+            Detail
+          </button>
+        </nav>
+      </header>
+
+      {errorMessage && (
+        <div className="shell">
+          <div className="card">{errorMessage}</div>
+        </div>
+      )}
+
+      {view === 'deploy' && (
+        <div className="shell">
+          <div className="card">
+            <h2>Deploy intent</h2>
+            <div className="field">
+              <label>Service</label>
+              <select value={service} onChange={(e) => setService(e.target.value)}>
+                {ALLOWLIST.map((svc) => (
+                  <option key={svc} value={svc}>
+                    {svc}
+                  </option>
+                ))}
+              </select>
+              <div className="helper">Allowlisted services only.</div>
+            </div>
+            <div className="row">
+              <div className="field">
+                <label>Environment</label>
+                <input value="sandbox" disabled />
+                <div className="helper">Single environment for demo safety.</div>
+              </div>
+              <div className="field">
+                <label>Version</label>
+                <input value={version} onChange={(e) => setVersion(e.target.value)} />
+                <div className="helper">
+                  Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
+                </div>
+              </div>
+            </div>
+            <div className="field">
+              <label>Change summary</label>
+              <input value={changeSummary} onChange={(e) => setChangeSummary(e.target.value)} />
+            </div>
+            <button className="button" onClick={handleDeploy}>Deploy now</button>
+            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+          </div>
+          <div className="card">
+            <h2>Latest deployment</h2>
+            {deployResult ? (
+              <div>
+                <div className={statusClass(deployResult.state)}>{deployResult.state}</div>
+                <p>Service: {deployResult.service}</p>
+                <p>Version: {deployResult.version}</p>
+                <p>Deployment id: {deployResult.id}</p>
+                <button className="button secondary" onClick={() => openDeployment(deployResult)}>
+                  View detail
+                </button>
+              </div>
+            ) : (
+              <div className="helper">No deployment created yet.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {view === 'deployments' && (
+        <div className="shell">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Recent deployments</h2>
+              <button className="button secondary" onClick={refreshDeployments}>Refresh</button>
+            </div>
+            <div className="list">
+              {deployments.length === 0 && <div className="helper">No deployments yet.</div>}
+              {deployments.map((d) => (
+                <div className="list-item" key={d.id}>
+                  <div className={statusClass(d.state)}>{d.state}</div>
+                  <div>{d.service}</div>
+                  <div>{d.version}</div>
+                  <div>{formatTime(d.createdAt)}</div>
+                  <button className="button secondary" onClick={() => openDeployment(d)}>
+                    Details
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'detail' && (
+        <div className="shell">
+          <div className="card">
+            <h2>Deployment detail</h2>
+            {!selected && <div className="helper">Select a deployment from the list.</div>}
+            {selected && (
+              <div>
+                <div className={statusClass(selected.state)}>{selected.state}</div>
+                <p>Service: {selected.service}</p>
+                <p>Version: {selected.version}</p>
+                <p>Created: {formatTime(selected.createdAt)}</p>
+                <p>Updated: {formatTime(selected.updatedAt)}</p>
+                <div className="links">
+                  {selected.spinnakerExecutionUrl && (
+                    <a className="link" href={selected.spinnakerExecutionUrl} target="_blank" rel="noreferrer">
+                      Spinnaker execution
+                    </a>
+                  )}
+                  {serviceUrl && (
+                    <a className="link" href={serviceUrl} target="_blank" rel="noreferrer">
+                      Service URL
+                    </a>
+                  )}
+                </div>
+                <button className="button danger" onClick={handleRollback} style={{ marginTop: '12px' }}>
+                  Rollback
+                </button>
+                {rollbackResult && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Rollback created: {rollbackResult.id}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="card">
+            <h2>Timeline</h2>
+            <div className="timeline">
+              {timeline.map((step) => (
+                <div key={step.key} className={`timeline-step ${step.active ? 'active' : ''}`}>
+                  <strong>{step.title}</strong>
+                  <div className="helper">{step.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card">
+            <h2>Failures</h2>
+            {failures.length === 0 && <div className="helper">No failures reported.</div>}
+            {failures.map((f, idx) => (
+              <div key={idx} className="failure">
+                <div><strong>{f.category}</strong> - {f.summary}</div>
+                {f.actionHint && <div className="helper">Next action: {f.actionHint}</div>}
+                {f.detail && <div className="helper">Evidence: {f.detail}</div>}
+                {f.observedAt && <div className="helper">Observed: {formatTime(f.observedAt)}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <footer className="footer">
+        DXCP demo UI. Guardrails enforced by the API: allowlist, sandbox only, global lock, rate limits, idempotency.
+      </footer>
+    </div>
+  )
+}
