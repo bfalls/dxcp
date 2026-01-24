@@ -14,7 +14,7 @@ for engine interactions.
 Install dependencies:
 
 ```
-cd /Users/bfalls/github/dxcp/dxcp-api
+cd dxcp/dxcp-api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

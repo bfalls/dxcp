@@ -7,7 +7,7 @@ This is a minimal React UI for DXCP with deploy, deployments list, detail, failu
 Install dependencies:
 
 ```
-cd /Users/bfalls/github/dxcp/ui
+cd dxcp/ui
 npm install
 ```
 

@@ -50,7 +50,7 @@ not as the primary product goal.
 ## UI local run
 
 ```
-cd /Users/bfalls/github/dxcp/ui
+cd dxcp/ui
 npm install
 export VITE_API_BASE=http://127.0.0.1:8000/v1
 export VITE_API_TOKEN=demo-token
@@ -65,7 +65,7 @@ Open http://127.0.0.1:5173
 ## API local run
 
 ```
-cd /Users/bfalls/github/dxcp/dxcp-api
+cd dxcp/dxcp-api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
