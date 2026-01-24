@@ -59,3 +59,19 @@ npm run dev
 ```
 
 Open http://127.0.0.1:5173
+
+---
+
+## API local run
+
+```
+cd /Users/bfalls/github/dxcp/dxcp-api
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export DXCP_API_TOKEN=demo-token
+export DXCP_ALLOWLIST=demo-service
+uvicorn main:app --reload
+```
+
+Open http://127.0.0.1:8000/docs
