@@ -1,160 +1,114 @@
 # Delivery Experience Control Plane - Key Decisions
 
-This document records the major product and technical decisions behind DXCP.
-All decisions prioritize developer experience, clarity, and safety over infrastructure depth.
+This document records non-negotiable product and technical decisions for DXCP.
+These decisions prioritize developer experience, safety, and platform leverage.
 
 ---
 
-## Reviewer Experience Contract
+## Decision 1: Intent-first API
 
-A reviewer must be able to complete this flow in under 5 minutes:
-
-1. Open a public demo UI and trigger a deployment for a single allowlisted service
-2. Observe deployment status in a normalized, high-signal view
-3. View failures with clear cause and suggested next action
-4. Clone one repository, make a small code change, and publish a new build with one command
-5. Deploy that build via the UI and verify the public URL reflects the change
-
-If this flow requires platform credentials, multiple repositories, or complex setup,
-the demo has failed its primary goal.
-
----
-
-## Decision 1: Intent-first, contract-first API
+DXCP models deployment intent explicitly and hides engine mechanics.
 
 We do:
-- Model deployment intent explicitly (service, version, environment, recipe)
-- Keep the public API small, stable, and opinionated
+- Require explicit intent objects
+- Keep the API small and opinionated
 
 We do not:
-- Expose raw deployment engine concepts as the primary user interface
+- Expose engine pipelines or stages directly
 
 Tradeoff:
-- Reduced flexibility for edge cases
-- Significantly lower cognitive load and safer defaults
+- Reduced flexibility
+- Dramatically lower cognitive load
 
 ---
 
-## Decision 2: First-class deployment records
+## Decision 2: DXCP owns delivery records
+
+DXCP is the source of truth for delivery status and failures.
 
 We do:
-- Persist a normalized DeploymentRecord that captures intent, status, and references
-- Treat the deployment engine as the execution backend, not the UX source of truth
+- Persist normalized DeploymentRecords
+- Link to engine executions for deep debug
 
 We do not:
-- Force users to read raw execution graphs to understand outcomes
+- Force users to interpret raw engine output
 
 Tradeoff:
-- Potential drift between record and engine state
-- Mitigated by linking execution IDs and refreshing status on read
+- Possible state drift
+- Mitigated through execution references and refresh
 
 ---
 
-## Decision 3: Opinionated delivery recipes
+## Decision 3: Opinionated deployment recipes
+
+Only a small, approved set of deployment paths exists.
 
 We do:
-- Support a very small set of approved deployment recipes
-- Evolve recipes centrally over time
+- Evolve recipes centrally
+- Enforce recipes via policy
 
 We do not:
-- Allow arbitrary pipeline composition through the DX layer
+- Allow ad hoc pipeline composition
 
 Tradeoff:
 - Less customization
-- Much higher consistency, safety, and supportability
+- Higher consistency and safety
 
 ---
 
-## Decision 4: Minimal but professional UI
+## Decision 4: Guardrails are product features
+
+Safety constraints are part of the product surface.
 
 We do:
-- Provide a clean web UI for deploy, status, failures, and rollback
-- Treat the UI as the primary reviewer experience
+- Validate intent before execution
+- Enforce blast radius limits
+- Provide fast rollback
 
 We do not:
-- Require curl or raw API usage to understand the system
+- Rely on user discipline alone
 
 Tradeoff:
-- Slightly more implementation work
-- Stronger product signal and usability
+- Fewer degrees of freedom
+- Safer delivery at scale
 
 ---
 
-## Decision 5: Public demo abuse guardrails
+## Decision 5: Deployment engine remains external
 
-Public demos get abused. Guardrails are part of the product.
+DXCP never replaces the execution engine.
 
 We do:
-- Allowlisted service only
-- Single environment only (sandbox)
-- One active deployment at a time
-- Strict rate limits and daily quotas
-- No infrastructure creation per deploy
-- Idempotency keys for deploy and rollback
-- Kill switch to disable mutations
+- Integrate via a strict adapter boundary
 
 We do not:
-- Accept unbounded user input that can create cost or state explosion
+- Reimplement orchestration logic
 
 Tradeoff:
-- Reduced generality
-- Strong safety and predictable operating cost
+- Dependency on engine availability
+- Clear separation of concerns
 
 ---
 
-## Decision 6: AWS usage is optional and low cost
+## Decision 6: Infrastructure depth is minimized
+
+DXCP optimizes for experience, not infra sophistication.
 
 We do:
-- Use CDK for all AWS resources
-- Prefer serverless and event-driven services
-- Provide one-command deploy and destroy
+- Prefer simple, debuggable implementations
 
 We do not:
-- Use EKS
-- Run large always-on fleets
+- Optimize for maximum scale prematurely
 
 Tradeoff:
-- Some runtime targets are less Kubernetes-like
-- Demo remains inexpensive and reliable
-
----
-
-## Decision 7: Deployment engine is always Spinnaker
-
-We do:
-- Trigger deployments by creating Spinnaker pipeline executions
-- Read status and failures from Spinnaker and normalize them
-
-We do not:
-- Bypass the engine for demo convenience
-
-Tradeoff:
-- Spinnaker must be running
-- The demo is honest and domain-correct
-
----
-
-## Decision 8: No repo permissions or cloud credentials required
-
-Reviewers do not have write access to this repo and do not need cloud credentials.
-
-We do:
-- Provide a publish script that uploads artifacts using a demo-scoped token
-- Enforce strict validation and quotas on uploads
-
-We do not:
-- Require pushing to the maintainer repo
-- Require local cloud configuration
-
-Tradeoff:
-- Slightly more surface area in the control plane
-- Dramatically lower friction for reviewers
+- MVP scale limits
+- Faster iteration and clarity
 
 ---
 
 ## Reinforced non-goals
 
-- Not a replacement for the deployment engine
-- Not a full CI system
-- Not an infrastructure provisioning tool
-- Not a production hardened platform
+- CI system ownership
+- Infrastructure provisioning
+- Cluster management
+- Arbitrary pipeline authoring

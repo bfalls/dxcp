@@ -2,49 +2,62 @@
 
 ## Product Summary
 
-DXCP is an opinionated delivery experience platform that sits above a deployment engine.
-It standardizes how services are deployed, observed, and rolled back by providing
-clear intent driven interfaces and strong safety defaults.
+DXCP is an opinionated delivery experience platform built on top of an existing
+deployment engine. It standardizes how services are deployed, observed, and
+rolled back by providing intent driven interfaces, strong safety defaults,
+and high signal visibility into delivery outcomes.
 
-The goal is to keep the developer experience simple even as delivery systems grow more complex.
+DXCP exists to keep delivery simple for engineers even as deployment systems
+grow more complex.
 
 ---
 
 ## Problem
 
 As organizations scale, deployment engines accumulate complexity:
-- More pipelines
-- More flags
-- More stages
-- More failure modes
+- Pipelines multiply
+- Configuration surface expands
+- Failure modes become harder to reason about
+- Tribal knowledge becomes required to ship safely
 
-Engineers are forced to understand internal engine details to ship safely.
-This increases cognitive load and slows delivery.
+Engineers are forced to understand engine internals to perform routine actions.
+This increases cognitive load, slows delivery, and increases operational risk.
 
 ---
 
 ## Product Goals
 
-DXCP exists to:
+DXCP is designed to:
 - Let engineers express deployment intent, not mechanics
-- Apply safe defaults consistently
+- Enforce safe defaults consistently
 - Surface failures as actionable information
-- Make rollback fast and obvious
-- Enable platform teams to evolve delivery behavior centrally
+- Make rollback fast, obvious, and safe
+- Allow platform teams to evolve delivery behavior centrally
 
 ---
 
-## What DXCP Is
+## What DXCP Is (and Is Not)
 
+DXCP is:
 - A control plane, not an execution engine
 - A product owned by a platform team
-- A standard interface over a powerful but complex backend
+- A stable interface over a powerful backend
+
+DXCP is not:
+- A CI system
+- An infrastructure provisioning system
+- A replacement for the deployment engine
+- A general purpose pipeline builder
+
+---
+
+## Ownership Boundaries
 
 DXCP owns:
-- APIs
-- UI
-- Schemas
-- Guardrails
+- APIs and UI
+- Deployment intent and policy
+- Normalized delivery records
+- Guardrails and validation
 - Developer experience
 
 The deployment engine owns:
@@ -59,7 +72,7 @@ The deployment engine owns:
 
 Primary users:
 - Engineers shipping services frequently
-- Oncall engineers responding to failures
+- Oncall engineers responding to delivery failures
 
 Secondary users:
 - Platform engineers evolving delivery patterns
@@ -71,35 +84,32 @@ Secondary users:
 
 Initial scope:
 - Single tenant
-- Single environment
-- Allowlisted services
 - Opinionated deployment recipes
+- Centralized policy enforcement
+- High signal delivery observability
 
 Expanded scope:
 - Multi service support
 - Multi environment support
 - Team level policy and approvals
-- Observability feedback loops
+- Observability driven feedback loops
 
-Out of scope:
-- CI systems
-- Infrastructure provisioning
-- Cluster lifecycle management
+Explicitly out of scope:
+- CI pipelines
+- Infrastructure lifecycle management
 - Arbitrary pipeline composition
 
 ---
 
 ## Long Term Vision
 
-Over time DXCP becomes:
-- The default way engineers deploy services
+DXCP becomes:
+- The default interface for service delivery
 - The source of truth for delivery outcomes
-- A feedback loop that improves delivery safety automatically
+- A feedback loop that improves delivery safety over time
 
-Platform teams use DXCP to:
-- Roll out safer deployment patterns
-- Measure delivery health
-- Reduce incidents caused by configuration drift
+Platform teams use DXCP to roll out safer patterns,
+measure delivery health, and reduce incident rates.
 
 ---
 
@@ -111,7 +121,7 @@ Developer experience:
 - Rollback speed
 
 Platform outcomes:
-- Consistency of deployment behavior
+- Consistency of delivery behavior
 - Reduction in deployment related incidents
 - Adoption of standard recipes
 
