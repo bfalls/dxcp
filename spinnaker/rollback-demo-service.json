@@ -14,7 +14,11 @@
       "required": true
     },
     {
-      "name": "artifactRef",
+      "name": "engineUrl",
+      "required": true
+    },
+    {
+      "name": "engineToken",
       "required": true
     }
   ],
@@ -22,12 +26,15 @@
     {
       "type": "webhook",
       "name": "rollback-artifact",
-      "url": "https://demo-runtime.local/rollback",
+      "url": "${ parameters.engineUrl }/rollback",
       "method": "POST",
+      "customHeaders": {
+        "x-dxcp-engine-token": "${ parameters.engineToken }",
+        "x-dxcp-runtime-token": "${ parameters.engineToken }"
+      },
       "payload": {
         "service": "${ parameters.service }",
-        "version": "${ parameters.version }",
-        "artifactRef": "${ parameters.artifactRef }"
+        "version": "${ parameters.version }"
       }
     }
   ]

@@ -53,6 +53,13 @@ class Guardrails:
             raise PolicyError(400, "INVALID_ARTIFACT", "Artifact content type not allowlisted")
 
     def validate_artifact_source(self, artifact_ref: str, service_entry: dict) -> None:
+        if SETTINGS.runtime_artifact_bucket:
+            bucket = SETTINGS.runtime_artifact_bucket
+            prefixes = [f"s3://{bucket}", f"s3://{bucket}/"]
+            if any(artifact_ref.startswith(prefix) for prefix in prefixes):
+                return
+            raise PolicyError(400, "INVALID_ARTIFACT", "Artifact source not allowlisted")
+
         allowed = service_entry.get("allowed_artifact_sources", [])
         if not allowed:
             return

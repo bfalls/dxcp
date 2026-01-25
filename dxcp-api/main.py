@@ -42,7 +42,12 @@ storage = build_storage()
 print(f"DXCP:     service registry loaded: {len(storage.list_services())} services")
 rate_limiter = RateLimiter()
 idempotency = IdempotencyStore()
-spinnaker = SpinnakerAdapter(SETTINGS.spinnaker_base_url, SETTINGS.spinnaker_mode)
+spinnaker = SpinnakerAdapter(
+    SETTINGS.spinnaker_base_url,
+    SETTINGS.spinnaker_mode,
+    SETTINGS.engine_lambda_url,
+    SETTINGS.engine_lambda_token,
+)
 guardrails = Guardrails(storage)
 
 if os.getenv("DXCP_LAMBDA", "") == "1":
@@ -118,7 +123,18 @@ def create_deployment(
     guardrails.validate_version(intent.version)
     guardrails.enforce_global_lock()
 
-    execution = spinnaker.trigger_deploy(intent.dict(), idempotency_key)
+    payload = intent.dict()
+    if spinnaker.mode == "http":
+        build = storage.find_latest_build(intent.service, intent.version)
+        if not build:
+            return error_response(400, "MISSING_BUILD", "No build registered for this service and version")
+        payload["artifactRef"] = build["artifactRef"]
+
+    try:
+        execution = spinnaker.trigger_deploy(payload, idempotency_key)
+    except Exception as exc:
+        message = f"Spinnaker trigger failed: {exc}"
+        return error_response(502, "SPINNAKER_TRIGGER_FAILED", message[:240])
     record = {
         "id": str(uuid.uuid4()),
         "service": intent.service,
@@ -215,7 +231,11 @@ def rollback_deployment(
     guardrails.validate_environment(deployment["environment"], service_entry)
     guardrails.enforce_global_lock()
 
-    execution = spinnaker.trigger_rollback(deployment, idempotency_key)
+    try:
+        execution = spinnaker.trigger_rollback(deployment, idempotency_key)
+    except Exception as exc:
+        message = f"Spinnaker trigger failed: {exc}"
+        return error_response(502, "SPINNAKER_TRIGGER_FAILED", message[:240])
     record = {
         "id": str(uuid.uuid4()),
         "service": deployment["service"],

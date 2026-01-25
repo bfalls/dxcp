@@ -2,7 +2,7 @@
 import * as cdk from "aws-cdk-lib";
 import { ApiStack } from "../lib/api-stack";
 import { DataStack } from "../lib/data-stack";
-import { SpinnakerStack } from "../lib/spinnaker-stack";
+import { DemoRuntimeStack } from "../lib/demo-runtime-stack";
 import { UiStack } from "../lib/ui-stack";
 
 const app = new cdk.App();
@@ -22,15 +22,6 @@ const dailyQuotaBuildRegister = app.node.tryGetContext("dailyQuotaBuildRegister"
 const dailyQuotaUploadCapability = app.node.tryGetContext("dailyQuotaUploadCapability") || process.env.DXCP_DAILY_QUOTA_UPLOAD_CAPABILITY || "50";
 const corsOriginsRaw = app.node.tryGetContext("corsOrigins") || process.env.DXCP_CORS_ORIGINS || "*";
 const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXCP_SPINNAKER_MODE || "stub";
-const spinnakerIpMode = app.node.tryGetContext("spinnakerIpMode") || process.env.DXCP_SPINNAKER_IP_MODE || "eip";
-const spinnakerAdminCidr = app.node.tryGetContext("spinnakerAdminCidr") || process.env.DXCP_SPINNAKER_ADMIN_CIDR || "";
-const spinnakerInstanceType = app.node.tryGetContext("spinnakerInstanceType") || process.env.DXCP_SPINNAKER_INSTANCE_TYPE || "t3.small";
-const spinnakerKeyName = app.node.tryGetContext("spinnakerKeyName") || process.env.DXCP_SPINNAKER_KEY_NAME || "";
-const spinnakerGateImage =
-  app.node.tryGetContext("spinnakerGateImage") ||
-  process.env.DXCP_SPINNAKER_GATE_IMAGE ||
-  "wwbgo/spinnaker:gate-1.20.0";
-const dynuHostname = app.node.tryGetContext("dynuHostname") || process.env.DXCP_DYNU_HOSTNAME || "dxcp.ddnsfree.com";
 
 const env = { account, region };
 
@@ -56,15 +47,6 @@ new ApiStack(app, "DxcpApiStack", {
   spinnakerMode,
 });
 
-new SpinnakerStack(app, "DxcpSpinnakerStack", {
-  env,
-  configPrefix,
-  ipMode: spinnakerIpMode,
-  adminCidr: spinnakerAdminCidr,
-  instanceType: spinnakerInstanceType,
-  dynuHostname,
-  keyName: spinnakerKeyName || undefined,
-  gateImage: spinnakerGateImage,
-});
+new DemoRuntimeStack(app, "DxcpDemoRuntimeStack", { env, configPrefix });
 
 new UiStack(app, "DxcpUiStack", { env });

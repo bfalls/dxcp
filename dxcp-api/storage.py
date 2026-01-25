@@ -17,6 +17,32 @@ except Exception:  # pragma: no cover - optional dependency for local mode
     ClientError = None
 
 
+def _read_ssm_parameter(name: str, cache: dict) -> Optional[str]:
+    if name in cache:
+        return cache[name]
+    if not boto3:
+        cache[name] = None
+        return None
+    try:
+        client = boto3.client("ssm")
+        response = client.get_parameter(Name=name)
+        value = response.get("Parameter", {}).get("Value")
+    except Exception:
+        value = None
+    cache[name] = value
+    return value
+
+
+def _resolve_ssm_template(value: Optional[str], cache: dict) -> Optional[str]:
+    if not isinstance(value, str):
+        return value
+    if not value.startswith("ssm:"):
+        return value
+    name = value[len("ssm:") :]
+    resolved = _read_ssm_parameter(name, cache)
+    return resolved or value
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -143,6 +169,7 @@ class Storage:
 
     def list_services(self) -> List[dict]:
         data = self._read_registry()
+        ssm_cache: dict = {}
         return sorted(
             [
                 {
@@ -150,7 +177,10 @@ class Storage:
                     "allowed_environments": entry.get("allowed_environments", []),
                     "allowed_recipes": entry.get("allowed_recipes", []),
                     "allowed_artifact_sources": entry.get("allowed_artifact_sources", []),
-                    "stable_service_url_template": entry.get("stable_service_url_template"),
+                    "stable_service_url_template": _resolve_ssm_template(
+                        entry.get("stable_service_url_template"),
+                        ssm_cache,
+                    ),
                 }
                 for entry in data
                 if entry.get("service_name")
@@ -377,6 +407,33 @@ class Storage:
         record["id"] = build_id
         return record
 
+    def find_latest_build(self, service: str, version: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT * FROM builds
+            WHERE service = ? AND version = ?
+            ORDER BY registered_at DESC
+            LIMIT 1
+            """,
+            (service, version),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "service": row["service"],
+            "version": row["version"],
+            "artifactRef": row["artifact_ref"],
+            "sha256": row["sha256"],
+            "sizeBytes": row["size_bytes"],
+            "contentType": row["content_type"],
+            "registeredAt": row["registered_at"],
+        }
+
 
 class DynamoStorage:
     def __init__(self, table_name: str) -> None:
@@ -390,6 +447,7 @@ class DynamoStorage:
     def list_services(self) -> List[dict]:
         response = self.table.query(KeyConditionExpression=Key("pk").eq("SERVICE"))
         items = response.get("Items", [])
+        ssm_cache: dict = {}
         services = []
         for item in items:
             services.append(
@@ -398,7 +456,10 @@ class DynamoStorage:
                     "allowed_environments": item.get("allowed_environments", []),
                     "allowed_recipes": item.get("allowed_recipes", []),
                     "allowed_artifact_sources": item.get("allowed_artifact_sources", []),
-                    "stable_service_url_template": item.get("stable_service_url_template"),
+                    "stable_service_url_template": _resolve_ssm_template(
+                        item.get("stable_service_url_template"),
+                        ssm_cache,
+                    ),
                 }
             )
         return sorted([s for s in services if s.get("service_name")], key=lambda item: item["service_name"])
@@ -582,6 +643,30 @@ class DynamoStorage:
         self.table.put_item(Item=item)
         record["id"] = build_id
         return record
+
+    def find_latest_build(self, service: str, version: str) -> Optional[dict]:
+        # TODO: Full table scan (1MB page limit); at scale this can miss the true latest build without pagination.
+        # Replace before production with a GSI on (service, createdAt) or a monotonic sort key to enable Query.
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("BUILD")
+            & Attr("service").eq(service)
+            & Attr("version").eq(version)
+        )
+        items = response.get("Items", [])
+        if not items:
+            return None
+        items.sort(key=lambda item: item.get("registeredAt", ""), reverse=True)
+        item = items[0]
+        return {
+            "id": item.get("id"),
+            "service": item.get("service"),
+            "version": item.get("version"),
+            "artifactRef": item.get("artifactRef"),
+            "sha256": item.get("sha256"),
+            "sizeBytes": int(item.get("sizeBytes", 0)),
+            "contentType": item.get("contentType"),
+            "registeredAt": item.get("registeredAt"),
+        }
 
 
 def build_storage():

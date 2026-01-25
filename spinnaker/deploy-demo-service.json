@@ -16,14 +16,26 @@
     {
       "name": "artifactRef",
       "required": true
+    },
+    {
+      "name": "engineUrl",
+      "required": true
+    },
+    {
+      "name": "engineToken",
+      "required": true
     }
   ],
   "stages": [
     {
       "type": "webhook",
       "name": "deploy-artifact",
-      "url": "https://demo-runtime.local/deploy",
+      "url": "${ parameters.engineUrl }/deploy",
       "method": "POST",
+      "customHeaders": {
+        "x-dxcp-engine-token": "${ parameters.engineToken }",
+        "x-dxcp-runtime-token": "${ parameters.engineToken }"
+      },
       "payload": {
         "service": "${ parameters.service }",
         "version": "${ parameters.version }",

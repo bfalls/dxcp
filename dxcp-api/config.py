@@ -33,9 +33,16 @@ class Settings:
         self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
         if not self.spinnaker_base_url:
             self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
+        self.engine_lambda_url = self._get("engine/lambda/url", "DXCP_ENGINE_LAMBDA_URL", "", str)
+        self.engine_lambda_token = self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")
+        self.runtime_artifact_bucket = os.getenv("DXCP_RUNTIME_ARTIFACT_BUCKET", "")
+        if not self.runtime_artifact_bucket and self.ssm_prefix:
+            value = self._read_ssm(f"{self.ssm_prefix}/runtime/artifact_bucket")
+            if value:
+                self.runtime_artifact_bucket = value
 
     def _get(self, ssm_key: str, env_key: str, default, parser: Callable) -> Optional[object]:
         if env_key in os.environ:
