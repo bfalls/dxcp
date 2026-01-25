@@ -10,6 +10,8 @@ export interface SpinnakerStackProps extends StackProps {
   adminCidr: string;
   instanceType: string;
   dynuHostname: string;
+  keyName?: string;
+  gateImage?: string;
 }
 
 export class SpinnakerStack extends Stack {
@@ -27,6 +29,7 @@ export class SpinnakerStack extends Stack {
     securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8084), "Gate from Lambda egress");
     if (props.adminCidr.trim().length > 0) {
       securityGroup.addIngressRule(ec2.Peer.ipv4(props.adminCidr), ec2.Port.tcp(8084), "Gate from admin IP");
+      securityGroup.addIngressRule(ec2.Peer.ipv4(props.adminCidr), ec2.Port.tcp(22), "SSH from admin IP");
     }
     if (props.ipMode === "ddns") {
       securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), "Caddy HTTP");
@@ -58,14 +61,21 @@ export class SpinnakerStack extends Stack {
       machineImage: ec2.MachineImage.latestAmazonLinux2023(),
       securityGroup,
       role,
+      keyName: props.keyName,
     });
     Tags.of(instance).add("Name", "dxcp-spinnaker");
 
+    const gateImage = props.gateImage || "us-docker.pkg.dev/spinnaker-community/docker/gate:latest";
     const userData = instance.userData;
     userData.addCommands(
       "set -euo pipefail",
       "dnf update -y",
-      "dnf install -y docker docker-compose-plugin awscli",
+      "dnf install -y docker awscli ec2-instance-connect",
+      "mkdir -p /usr/libexec/docker/cli-plugins",
+      "if ! docker compose version >/dev/null 2>&1; then",
+      "  curl -fsSL https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 -o /usr/libexec/docker/cli-plugins/docker-compose",
+      "  chmod +x /usr/libexec/docker/cli-plugins/docker-compose",
+      "fi",
       "systemctl enable --now docker",
       "mkdir -p /opt/spinnaker/bin",
       "mkdir -p /opt/spinnaker/caddy",
@@ -76,7 +86,7 @@ export class SpinnakerStack extends Stack {
       "    image: redis:7",
       "    restart: unless-stopped",
       "  gate:",
-      "    image: spinnaker/gate:latest",
+      `    image: ${gateImage}`,
       "    restart: unless-stopped",
       "    ports:",
       "      - '8084:8084'",
@@ -217,7 +227,7 @@ export class SpinnakerStack extends Stack {
       stringValue: gateUrl,
     });
 
-    new CfnOutput(this, "SpinnakerGateUrl", { value: gateUrl });
+    new CfnOutput(this, "SpinnakerGateUrlOutput", { value: gateUrl });
     new CfnOutput(this, "SpinnakerInstanceId", { value: instance.instanceId });
   }
 }

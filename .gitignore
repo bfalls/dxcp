@@ -21,3 +21,7 @@ ui/dist/
 cdk/cdk.out/
 cdk/build/
 cdk/cdk-outputs.json
+.dxcp_aws_config
+
+*.pem
+*.pub

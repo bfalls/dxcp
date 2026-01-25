@@ -26,6 +26,21 @@ Set via environment variable or CDK context:
 
 Optional admin CIDR to allow direct Gate access for testing:
 - DXCP_SPINNAKER_ADMIN_CIDR=YOUR_IP/32
+This also enables SSH access (port 22) from that CIDR.
+
+Optional EC2 key pair name for SSH:
+- DXCP_SPINNAKER_KEY_NAME=your-keypair-name
+The deploy script will prompt to create or import a key pair if one is not set.
+
+Optional Gate image override:
+- DXCP_SPINNAKER_GATE_IMAGE=wwbgo/spinnaker:gate-1.20.0
+The default is a legacy public image to keep the demo working; override with an official
+Spinnaker Gate image tag if you have one.
+
+## Bootstrap behavior
+The deploy script runs a post-deploy bootstrap via SSM to install Docker Compose,
+write the Spinnaker docker-compose file, and start the systemd service. This makes
+the instance setup resilient even if cloud-init/user-data does not rerun on updates.
 
 DDNS mode uses Dynu and expects these SSM parameters (with decryption):
 - DYNU_USERNAME

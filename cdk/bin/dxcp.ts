@@ -25,6 +25,11 @@ const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXC
 const spinnakerIpMode = app.node.tryGetContext("spinnakerIpMode") || process.env.DXCP_SPINNAKER_IP_MODE || "eip";
 const spinnakerAdminCidr = app.node.tryGetContext("spinnakerAdminCidr") || process.env.DXCP_SPINNAKER_ADMIN_CIDR || "";
 const spinnakerInstanceType = app.node.tryGetContext("spinnakerInstanceType") || process.env.DXCP_SPINNAKER_INSTANCE_TYPE || "t3.small";
+const spinnakerKeyName = app.node.tryGetContext("spinnakerKeyName") || process.env.DXCP_SPINNAKER_KEY_NAME || "";
+const spinnakerGateImage =
+  app.node.tryGetContext("spinnakerGateImage") ||
+  process.env.DXCP_SPINNAKER_GATE_IMAGE ||
+  "wwbgo/spinnaker:gate-1.20.0";
 const dynuHostname = app.node.tryGetContext("dynuHostname") || process.env.DXCP_DYNU_HOSTNAME || "dxcp.ddnsfree.com";
 
 const env = { account, region };
@@ -58,6 +63,8 @@ new SpinnakerStack(app, "DxcpSpinnakerStack", {
   adminCidr: spinnakerAdminCidr,
   instanceType: spinnakerInstanceType,
   dynuHostname,
+  keyName: spinnakerKeyName || undefined,
+  gateImage: spinnakerGateImage,
 });
 
 new UiStack(app, "DxcpUiStack", { env });
