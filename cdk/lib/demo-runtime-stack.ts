@@ -44,6 +44,12 @@ export class DemoRuntimeStack extends Stack {
     const demoServiceUrl = demoServiceFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
+    new lambda.CfnPermission(this, "DemoServiceFunctionUrlLatestPermission", {
+      action: "lambda:InvokeFunctionUrl",
+      functionName: `${demoServiceFn.functionArn}:$LATEST`,
+      principal: "*",
+      functionUrlAuthType: lambda.FunctionUrlAuthType.NONE,
+    });
 
     const demoService2Fn = new lambda.Function(this, "DemoService2Function", {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -54,6 +60,12 @@ export class DemoRuntimeStack extends Stack {
     });
     const demoService2Url = demoService2Fn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
+    });
+    new lambda.CfnPermission(this, "DemoService2FunctionUrlLatestPermission", {
+      action: "lambda:InvokeFunctionUrl",
+      functionName: `${demoService2Fn.functionArn}:$LATEST`,
+      principal: "*",
+      functionUrlAuthType: lambda.FunctionUrlAuthType.NONE,
     });
 
     const controllerTokenParamName = `${props.configPrefix}/runtime/controller_token`;
