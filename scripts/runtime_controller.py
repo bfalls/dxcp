@@ -45,7 +45,7 @@ def call_endpoint(url: str, token: str, payload: dict) -> tuple[int, str]:
         data=data,
         headers={
             "Content-Type": "application/json",
-            "x-dxcp-runtime-token": token,
+            "X-DXCP-Controller-Token": token,
         },
         method="POST",
     )

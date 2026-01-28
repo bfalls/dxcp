@@ -52,6 +52,36 @@ $env:DXCP_SPINNAKER_MODE = 'http'
 $env:DXCP_SPINNAKER_GATE_URL = 'http://127.0.0.1:8084'
 ```
 
+### Optional ngrok header
+
+If Gate is exposed via ngrok and shows a browser protection/interstitial page, configure
+an extra header for all DXCP → Gate requests.
+
+SSM (recommended):
+
+```bash
+aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_name --type String --value "<header-name>" --overwrite
+aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_value --type String --value "<header-value>" --overwrite
+```
+
+Environment variables:
+
+```bash
+export DXCP_SPINNAKER_GATE_HEADER_NAME="<header-name>"
+export DXCP_SPINNAKER_GATE_HEADER_VALUE="<header-value>"
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DXCP_SPINNAKER_GATE_HEADER_NAME = '<header-name>'
+$env:DXCP_SPINNAKER_GATE_HEADER_VALUE = '<header-value>'
+```
+
+Notes:
+- The header is only sent if both name and value are configured.
+- DXCP logs whether a custom header is configured, but never logs the value.
+
 ## Configure the engine controller URL + token
 
 Spinnaker pipelines call the Lambda execution engine controller. DXCP supplies intent only (service + artifact/version).
@@ -106,6 +136,31 @@ $env:DXCP_ENGINE_LAMBDA_URL = '<controller-function-url>'
 $env:DXCP_ENGINE_LAMBDA_TOKEN = '<controller-token>'
 ```
 
+### Controller auth header (required)
+
+The runtime controller requires a secret header on every request:
+`X-DXCP-Controller-Token: <TOKEN>`.
+
+Fetch the token locally without printing it (bash):
+
+```bash
+tokenParam=$(aws ssm get-parameter --name /dxcp/config/runtime/controller_token --with-decryption --query Parameter.Value --output text)
+if [[ "$tokenParam" == arn:aws:secretsmanager:* ]]; then
+  controllerToken=$(aws secretsmanager get-secret-value --secret-id "$tokenParam" --query SecretString --output text)
+else
+  controllerToken="$tokenParam"
+fi
+```
+
+Example curl (deploy):
+
+```bash
+curl -sS -X POST "$controllerUrl/deploy" \
+  -H "Content-Type: application/json" \
+  -H "X-DXCP-Controller-Token: <TOKEN>" \
+  -d '{"service":"demo-service","artifactRef":"s3://bucket/key"}'
+```
+
 ## Pipeline import notes
 
 1) In Spinnaker, create or select the `dxcp` application.
@@ -115,6 +170,10 @@ $env:DXCP_ENGINE_LAMBDA_TOKEN = '<controller-token>'
    - `engineUrl` -> runtime controller Function URL
    - `engineToken` -> runtime controller token
 5) Save pipelines. DXCP will pass only `service`, `version`, and `artifactRef` (deploy) or `service` + `version` (rollback).
+
+Webhook stage headers (Spinnaker):
+- Header name: `X-DXCP-Controller-Token`
+- Header value: `<TOKEN>` (do not commit real tokens in pipeline JSON)
 
 DXCP supplies intent (service + artifact/version). Spinnaker owns engine configuration (URLs, tokens, credentials).
 

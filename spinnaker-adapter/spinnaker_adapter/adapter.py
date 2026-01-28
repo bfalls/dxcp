@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -15,13 +16,20 @@ class SpinnakerAdapter:
         engine_url: str = "",
         engine_token: str = "",
         application: str = "dxcp",
+        request_timeout_seconds: float = 20.0,
+        header_name: str = "",
+        header_value: str = "",
     ) -> None:
         self.base_url = base_url
         self.mode = mode
         self.engine_url = engine_url
         self.engine_token = engine_token
         self.application = application
+        self.request_timeout_seconds = request_timeout_seconds
+        self.header_name = header_name.strip() if header_name else ""
+        self.header_value = header_value
         self._executions: Dict[str, dict] = {}
+        self._logger = logging.getLogger("dxcp.spinnaker")
 
     def trigger_deploy(self, intent: dict, idempotency_key: str) -> dict:
         if self.mode == "stub":
@@ -37,6 +45,13 @@ class SpinnakerAdapter:
         if self.mode == "stub":
             return self._stub_get_execution(execution_id)
         return self._http_get_execution(execution_id)
+
+    def check_health(self) -> dict:
+        if not self.base_url:
+            raise RuntimeError("Spinnaker base URL is required for HTTP mode")
+        url = f"{self.base_url.rstrip('/')}/health"
+        response, status_code, _ = self._request_json("GET", url)
+        return {"status": "UP" if 200 <= status_code < 300 else "DOWN", "details": response}
 
     def _stub_create_execution(self, kind: str, payload: dict) -> dict:
         execution_id = str(uuid.uuid4())
@@ -138,15 +153,20 @@ class SpinnakerAdapter:
     def _request_json(self, method: str, url: str, body: Optional[dict] = None) -> tuple[dict, int, dict]:
         data = None
         headers = {"Content-Type": "application/json"}
+        header_configured = bool(self.header_name and self.header_value)
+        if header_configured:
+            headers[self.header_name] = self.header_value
         if body is not None:
             data = json.dumps(body).encode("utf-8")
         request = Request(url, data=data, headers=headers, method=method)
+        start = time.monotonic()
         try:
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=self.request_timeout_seconds) as response:
                 status_code = response.status
                 response_headers = dict(response.headers.items())
                 payload = response.read().decode("utf-8")
         except HTTPError as exc:
+            latency_ms = (time.monotonic() - start) * 1000
             detail = exc.read().decode("utf-8") if exc.fp else ""
             response_headers = dict(exc.headers.items()) if exc.headers else {}
             correlation_id = self._extract_correlation_id({}, response_headers)
@@ -154,9 +174,36 @@ class SpinnakerAdapter:
             message = f"Spinnaker HTTP {exc.code}: {snippet}" if snippet else f"Spinnaker HTTP {exc.code}"
             if correlation_id:
                 message = f"{message}; requestId={correlation_id}"
+            self._logger.warning(
+                "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s error=%s",
+                method,
+                url,
+                exc.code,
+                latency_ms,
+                "configured" if header_configured else "none",
+                message,
+            )
             raise RuntimeError(message) from exc
         except URLError as exc:
+            latency_ms = (time.monotonic() - start) * 1000
+            self._logger.warning(
+                "spinnaker.request method=%s url=%s status=error latency_ms=%.1f custom_header=%s error=%s",
+                method,
+                url,
+                latency_ms,
+                "configured" if header_configured else "none",
+                exc.reason,
+            )
             raise RuntimeError(f"Spinnaker connection failed: {exc.reason}") from exc
+        latency_ms = (time.monotonic() - start) * 1000
+        self._logger.info(
+            "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s",
+            method,
+            url,
+            status_code,
+            latency_ms,
+            "configured" if header_configured else "none",
+        )
         if not payload:
             return {}, status_code, response_headers
         try:

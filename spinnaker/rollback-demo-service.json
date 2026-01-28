@@ -30,7 +30,7 @@
       "method": "POST",
       "customHeaders": {
         "x-dxcp-engine-token": "${ parameters.engineToken }",
-        "x-dxcp-runtime-token": "${ parameters.engineToken }"
+        "X-DXCP-Controller-Token": "${ parameters.engineToken }"
       },
       "payload": {
         "service": "${ parameters.service }",

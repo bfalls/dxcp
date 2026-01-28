@@ -15,6 +15,7 @@ LAMBDA_CLIENT = boto3.client("lambda")
 DDB_RESOURCE = boto3.resource("dynamodb")
 
 _TOKEN_CACHE: Optional[str] = None
+_AUTH_HEADER = "X-DXCP-Controller-Token"
 
 
 def _now() -> str:
@@ -75,6 +76,18 @@ def _extract_header(event: Dict[str, Any], header: str) -> Optional[str]:
     return None
 
 
+def _extract_request_id(event: Dict[str, Any], context) -> str:
+    request_id = (
+        event.get("requestContext", {}).get("requestId")
+        or event.get("requestContext", {}).get("http", {}).get("requestId")
+    )
+    if request_id:
+        return str(request_id)
+    if context is not None and getattr(context, "aws_request_id", None):
+        return str(context.aws_request_id)
+    return "unknown"
+
+
 def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
     body = event.get("body") or ""
     if event.get("isBase64Encoded"):
@@ -121,13 +134,15 @@ def _respond(status_code: int, payload: Dict[str, Any]):
     }
 
 
-def _require_auth(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    provided = _extract_header(event, "x-dxcp-runtime-token")
+def _require_auth(event: Dict[str, Any], request_id: str, route: str) -> Optional[Dict[str, Any]]:
+    provided = _extract_header(event, _AUTH_HEADER)
     if not provided:
-        return _respond(401, {"error": "missing_token"})
+        print(f"unauthorized requestId={request_id} route={route}")
+        return _respond(401, {"error": "unauthorized"})
     expected = _get_expected_token()
     if provided != expected:
-        return _respond(403, {"error": "invalid_token"})
+        print(f"unauthorized requestId={request_id} route={route}")
+        return _respond(401, {"error": "unauthorized"})
     return None
 
 
@@ -225,12 +240,13 @@ def _rollback(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handler(event, context):
-    auth_error = _require_auth(event)
+    path = _extract_path(event)
+    request_id = _extract_request_id(event, context)
+    auth_error = _require_auth(event, request_id, path)
     if auth_error:
         return auth_error
 
     method = _extract_method(event)
-    path = _extract_path(event)
     if method != "POST":
         return _respond(405, {"error": "method_not_allowed"})
 

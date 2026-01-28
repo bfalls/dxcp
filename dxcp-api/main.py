@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import time
@@ -47,7 +48,10 @@ spinnaker = SpinnakerAdapter(
     SETTINGS.spinnaker_mode,
     SETTINGS.engine_lambda_url,
     SETTINGS.engine_lambda_token,
+    header_name=SETTINGS.spinnaker_header_name,
+    header_value=SETTINGS.spinnaker_header_value,
 )
+logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
 
 if os.getenv("DXCP_LAMBDA", "") == "1":
@@ -176,6 +180,19 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
 @app.get("/v1/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/spinnaker/status")
+def spinnaker_status():
+    if spinnaker.mode != "http":
+        return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
+    try:
+        spinnaker.check_health()
+        return {"status": "UP"}
+    except Exception as exc:
+        message = str(exc)
+        logger.warning("Spinnaker health check failed: %s", message)
+        return {"status": "DOWN", "error": message[:240]}
 
 
 @app.get("/v1/deployments/{deployment_id}")

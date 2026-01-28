@@ -33,6 +33,10 @@ class Settings:
         self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
         if not self.spinnaker_base_url:
             self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
+        self.spinnaker_header_name = self._get("spinnaker_gate_header_name", "DXCP_SPINNAKER_GATE_HEADER_NAME", "", str)
+        self.spinnaker_header_value = self._get(
+            "spinnaker_gate_header_value", "DXCP_SPINNAKER_GATE_HEADER_VALUE", "", str
+        )
         self.engine_lambda_url = self._get("engine/lambda/url", "DXCP_ENGINE_LAMBDA_URL", "", str)
         self.engine_lambda_token = self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
