@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 class DeploymentState(str, Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    IN_PROGRESS = "IN_PROGRESS"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    CANCELED = "CANCELED"
     ROLLED_BACK = "ROLLED_BACK"
 
 

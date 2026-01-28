@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BUILD_DIR="$ROOT_DIR/cdk/build/api"
 
+ROOT_DIR_WIN=""
+API_BUILD_DIR_WIN=""
+if command -v cygpath >/dev/null 2>&1; then
+  ROOT_DIR_WIN="$(cygpath -w "$ROOT_DIR")"
+  API_BUILD_DIR_WIN="$(cygpath -w "$API_BUILD_DIR")"
+fi
+
 copy_dir_contents() {
   local src="$1"
   local dest="$2"
@@ -18,7 +25,13 @@ copy_dir_contents() {
 rm -rf "$API_BUILD_DIR"
 mkdir -p "$API_BUILD_DIR"
 
-python3 -m pip install -r "$ROOT_DIR/dxcp-api/requirements.txt" -t "$API_BUILD_DIR"
+REQ_FILE="$ROOT_DIR/dxcp-api/requirements.txt"
+API_BUILD_DIR_PIP="$API_BUILD_DIR"
+if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
+  REQ_FILE="$ROOT_DIR_WIN\\dxcp-api\\requirements.txt"
+  API_BUILD_DIR_PIP="$API_BUILD_DIR_WIN"
+fi
+python3 -m pip install -r "$REQ_FILE" -t "$API_BUILD_DIR_PIP"
 if command -v rsync >/dev/null 2>&1; then
   # shellcheck disable=SC2086
   rsync -a "$ROOT_DIR/dxcp-api/"*.py "$API_BUILD_DIR/"
@@ -87,10 +100,20 @@ npm install
 VITE_API_BASE="$API_BASE" VITE_API_TOKEN="${DXCP_API_TOKEN:-}" npm run build
 popd >/dev/null
 
-aws s3 sync "$ROOT_DIR/ui/dist" "s3://$UI_BUCKET" --delete
+UI_DIST_DIR="$ROOT_DIR/ui/dist"
+if [[ -n "$ROOT_DIR_WIN" ]]; then
+  UI_DIST_DIR="$ROOT_DIR_WIN\\ui\\dist"
+fi
+aws s3 sync "$UI_DIST_DIR" "s3://$UI_BUCKET" --delete
 aws cloudfront create-invalidation --distribution-id "$UI_DIST_ID" --paths "/*"
 
-PYTHONPATH="$API_BUILD_DIR" python3 "$ROOT_DIR/scripts/seed_registry.py" --table "$DDB_TABLE"
+SEED_SCRIPT="$ROOT_DIR/scripts/seed_registry.py"
+PYTHONPATH_DIR="$API_BUILD_DIR"
+if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
+  SEED_SCRIPT="$ROOT_DIR_WIN\\scripts\\seed_registry.py"
+  PYTHONPATH_DIR="$API_BUILD_DIR_WIN"
+fi
+PYTHONPATH="$PYTHONPATH_DIR" python3 "$SEED_SCRIPT" --table "$DDB_TABLE"
 
 cat <<EOF
 

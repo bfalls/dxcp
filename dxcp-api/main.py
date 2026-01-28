@@ -100,7 +100,7 @@ def store_idempotency(request: Request, idempotency_key: str, response: dict, st
 def refresh_from_spinnaker(deployment: dict) -> dict:
     execution = spinnaker.get_execution(deployment["spinnakerExecutionId"])
     state = execution.get("state")
-    if state in ["PENDING", "ACTIVE", "SUCCEEDED", "FAILED", "ROLLED_BACK"]:
+    if state in ["PENDING", "ACTIVE", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]:
         failures = normalize_failures(execution.get("failures"))
         storage.update_deployment(deployment["id"], state, failures)
         deployment = storage.get_deployment(deployment["id"]) or deployment
@@ -121,6 +121,8 @@ def create_deployment(
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
+    if storage.has_active_deployment():
+        return error_response(409, "DEPLOYMENT_IN_PROGRESS", "Another deployment is already in progress")
 
     service_entry = guardrails.validate_service(intent.service)
     guardrails.validate_environment(intent.environment, service_entry)
@@ -144,7 +146,7 @@ def create_deployment(
         "service": intent.service,
         "environment": intent.environment,
         "version": intent.version,
-        "state": "ACTIVE",
+        "state": "IN_PROGRESS",
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
@@ -153,6 +155,14 @@ def create_deployment(
         "failures": [],
     }
     storage.insert_deployment(record, [])
+    logger.info(
+        "deployment.created deployment_id=%s spinnaker_execution_id=%s service=%s version=%s idempotency_key=%s",
+        record["id"],
+        record["spinnakerExecutionId"],
+        record["service"],
+        record["version"],
+        idempotency_key,
+    )
     store_idempotency(request, idempotency_key, record, 201)
     return record
 
@@ -182,7 +192,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/spinnaker/status")
+@app.get("/v1/spinnaker/status")
 def spinnaker_status():
     if spinnaker.mode != "http":
         return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}

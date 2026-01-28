@@ -81,6 +81,7 @@ $env:DXCP_SPINNAKER_GATE_HEADER_VALUE = '<header-value>'
 Notes:
 - The header is only sent if both name and value are configured.
 - DXCP logs whether a custom header is configured, but never logs the value.
+- DXCP always includes `ngrok-skip-browser-warning: 1` on Gate requests.
 
 ## Configure the engine controller URL + token
 
@@ -141,6 +142,9 @@ $env:DXCP_ENGINE_LAMBDA_TOKEN = '<controller-token>'
 The runtime controller requires a secret header on every request:
 `X-DXCP-Controller-Token: <TOKEN>`.
 
+Runtime controller IAM: the controller execution role must have `s3:GetObject` on the runtime artifact bucket
+(`/dxcp/config/runtime/artifact_bucket`) so `UpdateFunctionCode` can pull artifacts.
+
 Fetch the token locally without printing it (bash):
 
 ```bash
@@ -161,15 +165,21 @@ curl -sS -X POST "$controllerUrl/deploy" \
   -d '{"service":"demo-service","artifactRef":"s3://bucket/key"}'
 ```
 
+Note: the S3 key used with `artifactRef` (or `s3Key`) must point to a Lambda-compatible `.zip`.
+
 ## Pipeline import notes
 
-1) In Spinnaker, create or select the `dxcp` application.
+1) In Spinnaker, create or select the `dxcp-demo` application.
 2) Import `spinnaker/deploy-demo-service.json`.
 3) Import `spinnaker/rollback-demo-service.json`.
 4) Edit each pipeline and set parameter defaults:
    - `engineUrl` -> runtime controller Function URL
    - `engineToken` -> runtime controller token
 5) Save pipelines. DXCP will pass only `service`, `version`, and `artifactRef` (deploy) or `service` + `version` (rollback).
+
+DXCP triggers the Gate pipeline:
+- Application: `dxcp-demo`
+- Pipeline: `demo-deploy`
 
 Webhook stage headers (Spinnaker):
 - Header name: `X-DXCP-Controller-Token`

@@ -44,11 +44,14 @@ export class DemoRuntimeStack extends Stack {
     const demoServiceUrl = demoServiceFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
-    new lambda.CfnPermission(this, "DemoServiceFunctionUrlLatestPermission", {
+    demoServiceFn.addPermission("DemoServiceFunctionUrlPublicPermission", {
       action: "lambda:InvokeFunctionUrl",
-      functionName: `${demoServiceFn.functionArn}:$LATEST`,
-      principal: "*",
+      principal: new iam.AnyPrincipal(),
       functionUrlAuthType: lambda.FunctionUrlAuthType.NONE,
+    });
+    demoServiceFn.addPermission("DemoServicePublicInvokePermission", {
+      action: "lambda:InvokeFunction",
+      principal: new iam.AnyPrincipal(),
     });
 
     const demoService2Fn = new lambda.Function(this, "DemoService2Function", {
@@ -61,11 +64,14 @@ export class DemoRuntimeStack extends Stack {
     const demoService2Url = demoService2Fn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
     });
-    new lambda.CfnPermission(this, "DemoService2FunctionUrlLatestPermission", {
+    demoService2Fn.addPermission("DemoService2FunctionUrlPublicPermission", {
       action: "lambda:InvokeFunctionUrl",
-      functionName: `${demoService2Fn.functionArn}:$LATEST`,
-      principal: "*",
+      principal: new iam.AnyPrincipal(),
       functionUrlAuthType: lambda.FunctionUrlAuthType.NONE,
+    });
+    demoService2Fn.addPermission("DemoService2PublicInvokePermission", {
+      action: "lambda:InvokeFunction",
+      principal: new iam.AnyPrincipal(),
     });
 
     const controllerTokenParamName = `${props.configPrefix}/runtime/controller_token`;
@@ -91,6 +97,12 @@ export class DemoRuntimeStack extends Stack {
       new iam.PolicyStatement({
         actions: ["lambda:UpdateFunctionCode"],
         resources: [demoServiceFn.functionArn, demoService2Fn.functionArn],
+      })
+    );
+    controllerFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:GetObject"],
+        resources: [artifactBucket.arnForObjects("*")],
       })
     );
     runtimeTable.grantReadWriteData(controllerFn);

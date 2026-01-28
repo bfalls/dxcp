@@ -15,8 +15,8 @@ class SpinnakerAdapter:
         mode: str = "stub",
         engine_url: str = "",
         engine_token: str = "",
-        application: str = "dxcp",
-        request_timeout_seconds: float = 20.0,
+        application: str = "dxcp-demo",
+        request_timeout_seconds: Optional[float] = None,
         header_name: str = "",
         header_value: str = "",
     ) -> None:
@@ -33,20 +33,22 @@ class SpinnakerAdapter:
 
     def trigger_deploy(self, intent: dict, idempotency_key: str) -> dict:
         if self.mode == "stub":
-            return self._stub_create_execution("deploy", intent)
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         return self._http_trigger("deploy", intent, idempotency_key)
 
     def trigger_rollback(self, deployment: dict, idempotency_key: str) -> dict:
         if self.mode == "stub":
-            return self._stub_create_execution("rollback", deployment)
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         return self._http_trigger("rollback", deployment, idempotency_key)
 
     def get_execution(self, execution_id: str) -> dict:
         if self.mode == "stub":
-            return self._stub_get_execution(execution_id)
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         return self._http_get_execution(execution_id)
 
     def check_health(self) -> dict:
+        if self.mode == "stub":
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/health"
@@ -109,6 +111,14 @@ class SpinnakerAdapter:
                 detail = f"{detail}; requestId={correlation_id}"
             raise RuntimeError(detail)
         execution_url = self._execution_url(execution_id)
+        self._logger.info(
+            "spinnaker.trigger kind=%s execution_id=%s service=%s version=%s idempotency_key=%s",
+            kind,
+            execution_id,
+            payload.get("service"),
+            payload.get("version"),
+            idempotency_key,
+        )
         return {"executionId": execution_id, "executionUrl": execution_url}
 
     def _http_get_execution(self, execution_id: str) -> dict:
@@ -125,6 +135,12 @@ class SpinnakerAdapter:
         status = (execution.get("status") or execution.get("state") or "").upper()
         state = self._map_status(status, execution)
         failures = self._extract_failures(execution, state)
+        self._logger.info(
+            "spinnaker.execution execution_id=%s status=%s state=%s",
+            execution.get("id", execution_id),
+            status,
+            state,
+        )
         return {
             "state": state,
             "failures": failures,
@@ -133,7 +149,7 @@ class SpinnakerAdapter:
 
     def _pipeline_name(self, kind: str) -> str:
         if kind == "deploy":
-            return "deploy-demo-service"
+            return "demo-deploy"
         if kind == "rollback":
             return "rollback-demo-service"
         raise ValueError(f"Unsupported pipeline kind: {kind}")
@@ -152,7 +168,7 @@ class SpinnakerAdapter:
 
     def _request_json(self, method: str, url: str, body: Optional[dict] = None) -> tuple[dict, int, dict]:
         data = None
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
         header_configured = bool(self.header_name and self.header_value)
         if header_configured:
             headers[self.header_name] = self.header_value
@@ -161,7 +177,11 @@ class SpinnakerAdapter:
         request = Request(url, data=data, headers=headers, method=method)
         start = time.monotonic()
         try:
-            with urlopen(request, timeout=self.request_timeout_seconds) as response:
+            if self.request_timeout_seconds is None:
+                response_ctx = urlopen(request)
+            else:
+                response_ctx = urlopen(request, timeout=self.request_timeout_seconds)
+            with response_ctx as response:
                 status_code = response.status
                 response_headers = dict(response.headers.items())
                 payload = response.read().decode("utf-8")
@@ -251,9 +271,10 @@ class SpinnakerAdapter:
 
     def _map_status(self, status: str, execution: dict) -> str:
         running = {"RUNNING", "NOT_STARTED", "STARTED", "BUFFERED", "PAUSED", "SUSPENDED"}
-        failed = {"TERMINAL", "FAILED", "CANCELED", "STOPPED"}
+        failed = {"TERMINAL", "FAILED"}
+        canceled = {"CANCELED", "STOPPED"}
         if status in running:
-            return "ACTIVE"
+            return "IN_PROGRESS"
         if status == "SUCCEEDED":
             name = (execution.get("name") or "").lower()
             if "rollback" in name:
@@ -261,6 +282,8 @@ class SpinnakerAdapter:
             return "SUCCEEDED"
         if status in failed:
             return "FAILED"
+        if status in canceled:
+            return "CANCELED"
         return "PENDING"
 
     def _extract_failures(self, execution: dict, state: str) -> List[dict]:

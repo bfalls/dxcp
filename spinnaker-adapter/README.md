@@ -5,7 +5,7 @@ It provides a small interface for triggering deployments, triggering rollbacks,
 reading execution status, and normalizing failures.
 
 Modes:
-- stub: in-memory execution simulation (default)
-- http: placeholder for calling real Spinnaker APIs
+- http: calls real Spinnaker Gate APIs (default)
+- stub: disabled in DXCP production/demo configuration
 
 This adapter is intentionally thin and isolated from the DXCP API logic.

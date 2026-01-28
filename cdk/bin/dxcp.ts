@@ -21,7 +21,7 @@ const dailyQuotaRollback = app.node.tryGetContext("dailyQuotaRollback") || proce
 const dailyQuotaBuildRegister = app.node.tryGetContext("dailyQuotaBuildRegister") || process.env.DXCP_DAILY_QUOTA_BUILD_REGISTER || "50";
 const dailyQuotaUploadCapability = app.node.tryGetContext("dailyQuotaUploadCapability") || process.env.DXCP_DAILY_QUOTA_UPLOAD_CAPABILITY || "50";
 const corsOriginsRaw = app.node.tryGetContext("corsOrigins") || process.env.DXCP_CORS_ORIGINS || "*";
-const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXCP_SPINNAKER_MODE || "stub";
+const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXCP_SPINNAKER_MODE || "http";
 
 const env = { account, region };
 

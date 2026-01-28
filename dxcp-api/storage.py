@@ -197,7 +197,10 @@ class Storage:
     def has_active_deployment(self) -> bool:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute("SELECT id FROM deployments WHERE state = ? LIMIT 1", ("ACTIVE",))
+        cur.execute(
+            "SELECT id FROM deployments WHERE state IN (?, ?) LIMIT 1",
+            ("ACTIVE", "IN_PROGRESS"),
+        )
         row = cur.fetchone()
         conn.close()
         return row is not None
@@ -479,7 +482,7 @@ class DynamoStorage:
 
     def has_active_deployment(self) -> bool:
         response = self.table.scan(
-            FilterExpression=Attr("pk").eq("DEPLOYMENT") & Attr("state").eq("ACTIVE"),
+            FilterExpression=Attr("pk").eq("DEPLOYMENT") & Attr("state").is_in(["ACTIVE", "IN_PROGRESS"]),
             Limit=1,
         )
         return response.get("Count", 0) > 0

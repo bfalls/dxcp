@@ -55,7 +55,7 @@ function deriveTimeline(state) {
     { key: 'engine', title: 'Execution running', detail: 'Spinnaker pipeline executing.' },
     { key: 'result', title: 'Execution result', detail: 'Deployment completed.' }
   ]
-  if (state === 'ACTIVE') {
+  if (state === 'ACTIVE' || state === 'IN_PROGRESS') {
     steps[0].active = true
     steps[1].active = true
   } else if (state === 'SUCCEEDED') {
@@ -65,6 +65,11 @@ function deriveTimeline(state) {
     steps[1].active = true
     steps[2].active = true
     steps[2].detail = 'Deployment failed.'
+  } else if (state === 'CANCELED') {
+    steps[0].active = true
+    steps[1].active = true
+    steps[2].active = true
+    steps[2].detail = 'Deployment canceled.'
   } else if (state === 'ROLLED_BACK') {
     steps.forEach((s) => (s.active = true))
     steps[2].detail = 'Rollback completed.'
@@ -178,6 +183,27 @@ export default function App() {
     loadServices()
   }, [])
 
+  useEffect(() => {
+    if (view !== 'detail' || !selected?.id) return undefined
+    let cancelled = false
+    const interval = setInterval(async () => {
+      try {
+        const detail = await api.get(`/deployments/${selected.id}`)
+        if (!cancelled && detail && !detail.code) {
+          setSelected(detail)
+          const failureData = await api.get(`/deployments/${selected.id}/failures`)
+          setFailures(Array.isArray(failureData) ? failureData : [])
+        }
+      } catch (err) {
+        if (!cancelled) setErrorMessage('Failed to refresh deployment status')
+      }
+    }, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [view, selected?.id])
+
   const timeline = deriveTimeline(selected?.state)
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
@@ -278,6 +304,7 @@ export default function App() {
                 <p>Service: {deployResult.service}</p>
                 <p>Version: {deployResult.version}</p>
                 <p>Deployment id: {deployResult.id}</p>
+                {deployResult.spinnakerExecutionId && <p>Spinnaker execution: {deployResult.spinnakerExecutionId}</p>}
                 <button className="button secondary" onClick={() => openDeployment(deployResult)}>
                   View detail
                 </button>
@@ -326,6 +353,7 @@ export default function App() {
                 <p>Version: {selected.version}</p>
                 <p>Created: {formatTime(selected.createdAt)}</p>
                 <p>Updated: {formatTime(selected.updatedAt)}</p>
+                {selected.spinnakerExecutionId && <p>Spinnaker execution: {selected.spinnakerExecutionId}</p>}
                 <div className="links">
                   {selected.spinnakerExecutionUrl && (
                     <a className="link" href={selected.spinnakerExecutionUrl} target="_blank" rel="noreferrer">

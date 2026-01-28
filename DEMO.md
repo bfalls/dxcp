@@ -26,8 +26,14 @@ Optional: provide a specific version (must match the version format):
 ./scripts/publish_build.sh 1.0.1
 ```
 
+If you need to re-run the same version, add a randomized idempotency suffix:
+
+```
+DXCP_IDEMPOTENCY_RANDOMIZE=1 ./scripts/publish_build.sh 1.0.1
+```
+
 This script:
-- builds a tar.gz artifact
+- builds a Lambda-compatible .zip artifact
 - requests an upload capability
 - registers the build so it appears in the UI
 
@@ -43,7 +49,15 @@ The UI will show the DeploymentRecord id and execution link.
 
 ## 4) Verify output at the service URL
 
-Run the reference service locally:
+For the deployed demo, the public URL is stored in SSM:
+
+```
+aws ssm get-parameter --name /dxcp/config/runtime/service_url/demo-service --query Parameter.Value --output text
+```
+
+This Function URL is intended to be publicly reachable for the demo.
+
+Run the reference service locally (optional):
 
 ```
 cd dxcp/demo-service
