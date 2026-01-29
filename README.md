@@ -78,6 +78,35 @@ Open http://127.0.0.1:8000/docs
 
 ---
 
+## Artifact discovery + versions
+
+DXCP auto-discovers deployable versions by scanning the runtime artifact bucket for:
+
+```
+s3://<artifact_bucket>/<service>/<service>-<version>.zip
+```
+
+List versions for a service:
+
+```
+curl -sS https://YOUR_API_BASE/v1/services/demo-service/versions
+```
+
+Force a refresh (re-scan S3):
+
+```
+curl -sS "https://YOUR_API_BASE/v1/services/demo-service/versions?refresh=1"
+```
+
+Upload a new artifact and verify it appears:
+
+```
+aws s3 cp demo-service/build/demo-service-0.1.4.zip s3://<artifact_bucket>/demo-service/demo-service-0.1.4.zip
+curl -sS "https://YOUR_API_BASE/v1/services/demo-service/versions?refresh=1"
+```
+
+---
+
 ## AWS deploy (CDK)
 
 Prereqs (from scratch):

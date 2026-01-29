@@ -14,6 +14,7 @@ export interface DemoRuntimeStackProps extends StackProps {
 
 export class DemoRuntimeStack extends Stack {
   public readonly artifactBucket: s3.Bucket;
+  public readonly controllerTokenSecret: secretsmanager.Secret;
   constructor(scope: Construct, id: string, props: DemoRuntimeStackProps) {
     super(scope, id, props);
 
@@ -135,9 +136,20 @@ export class DemoRuntimeStack extends Stack {
         excludePunctuation: true,
       },
     });
+    this.controllerTokenSecret = controllerTokenSecret;
 
     new ssm.StringParameter(this, "DemoRuntimeControllerTokenParam", {
       parameterName: controllerTokenParamName,
+      stringValue: controllerTokenSecret.secretArn,
+    });
+
+    new ssm.StringParameter(this, "EngineLambdaUrlParam", {
+      parameterName: `${props.configPrefix}/engine/lambda/url`,
+      stringValue: controllerUrl.url,
+    });
+
+    new ssm.StringParameter(this, "EngineLambdaTokenParam", {
+      parameterName: `${props.configPrefix}/engine/lambda/token`,
       stringValue: controllerTokenSecret.secretArn,
     });
 

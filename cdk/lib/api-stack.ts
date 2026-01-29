@@ -6,6 +6,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as path from "path";
 
 export interface ApiStackProps extends StackProps {
@@ -14,6 +15,7 @@ export interface ApiStackProps extends StackProps {
   corsOrigins: string[];
   spinnakerMode: string;
   artifactBucket?: s3.IBucket;
+  engineTokenSecret?: secretsmanager.ISecret;
 }
 
 export class ApiStack extends Stack {
@@ -47,10 +49,19 @@ export class ApiStack extends Stack {
     if (props.artifactBucket) {
       handler.addToRolePolicy(
         new iam.PolicyStatement({
+          actions: ["s3:ListBucket"],
+          resources: [props.artifactBucket.bucketArn],
+        })
+      );
+      handler.addToRolePolicy(
+        new iam.PolicyStatement({
           actions: ["s3:GetObject"],
           resources: [props.artifactBucket.arnForObjects("*")],
         })
       );
+    }
+    if (props.engineTokenSecret) {
+      props.engineTokenSecret.grantRead(handler);
     }
 
     const httpApi = new apigwv2.HttpApi(this, "DxcpHttpApi", {

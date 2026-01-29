@@ -188,7 +188,25 @@ class SpinnakerAdapter:
         artifact_ref = payload.get("artifactRef")
         if artifact_ref:
             params["artifactRef"] = artifact_ref
+            bucket_key = self._parse_s3_artifact_ref(artifact_ref)
+            if bucket_key:
+                params["s3Bucket"] = bucket_key[0]
+                params["s3Key"] = bucket_key[1]
         return params
+
+    @staticmethod
+    def _parse_s3_artifact_ref(artifact_ref: str) -> Optional[tuple]:
+        if not isinstance(artifact_ref, str):
+            return None
+        if not artifact_ref.startswith("s3://"):
+            return None
+        without_scheme = artifact_ref[len("s3://") :]
+        if "/" not in without_scheme:
+            return None
+        bucket, key = without_scheme.split("/", 1)
+        if not bucket or not key:
+            return None
+        return bucket, key
 
     def _request_json(self, method: str, url: str, body: Optional[dict] = None) -> tuple[dict, int, dict]:
         data = None

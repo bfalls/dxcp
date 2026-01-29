@@ -437,6 +437,33 @@ class Storage:
             "registeredAt": row["registered_at"],
         }
 
+    def list_builds_for_service(self, service: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT * FROM builds
+            WHERE service = ?
+            ORDER BY registered_at DESC
+            """,
+            (service,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "id": row["id"],
+                "service": row["service"],
+                "version": row["version"],
+                "artifactRef": row["artifact_ref"],
+                "sha256": row["sha256"],
+                "sizeBytes": row["size_bytes"],
+                "contentType": row["content_type"],
+                "registeredAt": row["registered_at"],
+            }
+            for row in rows
+        ]
+
 
 class DynamoStorage:
     def __init__(self, table_name: str) -> None:
@@ -670,6 +697,27 @@ class DynamoStorage:
             "contentType": item.get("contentType"),
             "registeredAt": item.get("registeredAt"),
         }
+
+    def list_builds_for_service(self, service: str) -> List[dict]:
+        # TODO: Full table scan (1MB page limit); at scale this can miss results without pagination.
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("BUILD") & Attr("service").eq(service)
+        )
+        items = response.get("Items", [])
+        items.sort(key=lambda item: item.get("registeredAt", ""), reverse=True)
+        return [
+            {
+                "id": item.get("id"),
+                "service": item.get("service"),
+                "version": item.get("version"),
+                "artifactRef": item.get("artifactRef"),
+                "sha256": item.get("sha256"),
+                "sizeBytes": int(item.get("sizeBytes", 0)),
+                "contentType": item.get("contentType"),
+                "registeredAt": item.get("registeredAt"),
+            }
+            for item in items
+        ]
 
 
 def build_storage():

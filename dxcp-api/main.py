@@ -29,6 +29,7 @@ for candidate in SPINNAKER_CANDIDATES:
         sys.path.append(candidate)
         break
 
+from artifacts import build_artifact_source, semver_sort_key
 from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
 
 
@@ -54,6 +55,13 @@ spinnaker = SpinnakerAdapter(
 )
 logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
+artifact_source = None
+
+logger.info(
+    "config.engine loaded engine_url=%s engine_token=%s",
+    "set" if SETTINGS.engine_lambda_url else "missing",
+    "set" if SETTINGS.engine_lambda_token else "missing",
+)
 
 if os.getenv("DXCP_LAMBDA", "") == "1":
     try:
@@ -96,6 +104,30 @@ def enforce_idempotency(request: Request, idempotency_key: str):
 def store_idempotency(request: Request, idempotency_key: str, response: dict, status_code: int) -> None:
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
     idempotency.set(key, response, status_code)
+
+
+def _get_artifact_source():
+    global artifact_source
+    if artifact_source is None:
+        artifact_source = build_artifact_source(SETTINGS.runtime_artifact_bucket)
+    return artifact_source
+
+
+def _versions_from_cache(builds: list) -> list:
+    latest = {}
+    for build in builds:
+        version = build.get("version")
+        if not version or version in latest:
+            continue
+        latest[version] = {
+            "version": version,
+            "artifactRef": build.get("artifactRef"),
+            "sizeBytes": build.get("sizeBytes"),
+            "lastModified": build.get("registeredAt"),
+        }
+    versions = list(latest.values())
+    versions.sort(key=lambda item: semver_sort_key(item.get("version", "")), reverse=True)
+    return versions
 
 
 def refresh_from_spinnaker(deployment: dict) -> dict:
@@ -343,6 +375,31 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
     client_id = get_client_id(request, authorization)
     rate_limiter.check_read(client_id)
     return storage.list_services()
+
+
+@app.get("/v1/services/{service}/versions")
+def list_service_versions(
+    service: str,
+    request: Request,
+    refresh: Optional[bool] = Query(False),
+    authorization: Optional[str] = Header(None),
+):
+    client_id = get_client_id(request, authorization)
+    rate_limiter.check_read(client_id)
+    guardrails.validate_service(service)
+    versions = []
+    source = "cache"
+    if not refresh:
+        builds = storage.list_builds_for_service(service)
+        if builds:
+            versions = _versions_from_cache(builds)
+    if refresh or not versions:
+        source = "s3"
+        try:
+            versions = [item.to_dict() for item in _get_artifact_source().list_versions(service)]
+        except Exception as exc:
+            return error_response(502, "ARTIFACT_DISCOVERY_FAILED", str(exc)[:240])
+    return {"service": service, "source": source, "versions": versions, "refreshedAt": utc_now()}
 
 
 @app.get("/v1/health")

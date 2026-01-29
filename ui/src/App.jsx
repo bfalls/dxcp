@@ -83,6 +83,8 @@ export default function App() {
   const [services, setServices] = useState([])
   const [service, setService] = useState('')
   const [version, setVersion] = useState('1.0.0')
+  const [versionMode, setVersionMode] = useState('custom')
+  const [versionSelection, setVersionSelection] = useState('auto')
   const [changeSummary, setChangeSummary] = useState('Initial demo deploy')
   const [deployResult, setDeployResult] = useState(null)
   const [deployments, setDeployments] = useState([])
@@ -97,6 +99,13 @@ export default function App() {
   const [spinnakerPipeline, setSpinnakerPipeline] = useState('')
   const [spinnakerTagName, setSpinnakerTagName] = useState('dxcp')
   const [spinnakerTagValue, setSpinnakerTagValue] = useState('deployable')
+  const [spinnakerLoading, setSpinnakerLoading] = useState(false)
+  const [spinnakerPipelinesLoading, setSpinnakerPipelinesLoading] = useState(false)
+  const [versions, setVersions] = useState([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [versionsRefreshing, setVersionsRefreshing] = useState(false)
+  const [versionsError, setVersionsError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
 
@@ -127,6 +136,7 @@ export default function App() {
 
   async function loadSpinnakerApplications() {
     setErrorMessage('')
+    setSpinnakerLoading(true)
     try {
       const query = new URLSearchParams()
       if (spinnakerTagName) query.set('tagName', spinnakerTagName)
@@ -140,12 +150,15 @@ export default function App() {
       }
     } catch (err) {
       setErrorMessage('Failed to load Spinnaker applications')
+    } finally {
+      setSpinnakerLoading(false)
     }
   }
 
   async function loadSpinnakerPipelines(appName) {
     if (!appName) return
     setErrorMessage('')
+    setSpinnakerPipelinesLoading(true)
     try {
       const data = await api.get(`/spinnaker/applications/${appName}/pipelines`)
       const pipelines = Array.isArray(data?.pipelines) ? data.pipelines : []
@@ -155,7 +168,43 @@ export default function App() {
       }
     } catch (err) {
       setErrorMessage('Failed to load Spinnaker pipelines')
+    } finally {
+      setSpinnakerPipelinesLoading(false)
     }
+  }
+
+  async function loadVersions(refresh = false) {
+    if (!service) return
+    if (refresh) {
+      setVersionsRefreshing(true)
+    } else {
+      setVersionsLoading(true)
+    }
+    setVersionsError('')
+    try {
+      const suffix = refresh ? '?refresh=1' : ''
+      const data = await api.get(`/services/${encodeURIComponent(service)}/versions${suffix}`)
+      const list = Array.isArray(data?.versions) ? data.versions : []
+      setVersions(list)
+    } catch (err) {
+      setVersionsError('Failed to load versions')
+    } finally {
+      if (refresh) {
+        setVersionsRefreshing(false)
+      } else {
+        setVersionsLoading(false)
+      }
+    }
+  }
+
+  async function refreshData() {
+    setRefreshing(true)
+    const tasks = [loadSpinnakerApplications(), loadVersions(true)]
+    if (spinnakerApp) {
+      tasks.push(loadSpinnakerPipelines(spinnakerApp))
+    }
+    await Promise.allSettled(tasks)
+    setRefreshing(false)
   }
 
   async function handleDeploy() {
@@ -230,6 +279,22 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    setVersions([])
+    if (service) {
+      setVersionSelection('auto')
+      loadVersions()
+    }
+  }, [service])
+
+  useEffect(() => {
+    if (versions.length > 0 && versionMode === 'auto') {
+      if (versionSelection === 'auto') {
+        setVersion(versions[0].version)
+      }
+    }
+  }, [versions, versionMode, versionSelection])
+
+  useEffect(() => {
     setSpinnakerApps([])
     setSpinnakerApp('')
     setSpinnakerPipelines([])
@@ -243,6 +308,18 @@ export default function App() {
     setSpinnakerPipeline('')
     loadSpinnakerPipelines(spinnakerApp)
   }, [spinnakerApp])
+
+  useEffect(() => {
+    if (view !== 'deploy' || !service) return undefined
+    let cancelled = false
+    const interval = setInterval(() => {
+      if (!cancelled) loadVersions()
+    }, 60000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [view, service])
 
   useEffect(() => {
     if (view !== 'detail' || !selected?.id) return undefined
@@ -317,7 +394,12 @@ export default function App() {
       {view === 'deploy' && (
         <div className="shell">
           <div className="card">
-            <h2>Deploy intent</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Deploy intent</h2>
+              <button className="button secondary" onClick={refreshData} disabled={refreshing}>
+                {refreshing ? 'Refreshing…' : 'Refresh data'}
+              </button>
+            </div>
             <div className="field">
               <label>Service</label>
               <select
@@ -352,8 +434,9 @@ export default function App() {
             <div className="row">
               <div className="field">
                 <label>Spinnaker application</label>
-                <select value={spinnakerApp} onChange={(e) => setSpinnakerApp(e.target.value)}>
-                  {spinnakerApps.length === 0 && <option value="">No applications found</option>}
+                <select value={spinnakerApp} onChange={(e) => setSpinnakerApp(e.target.value)} disabled={spinnakerLoading}>
+                  {spinnakerLoading && <option value="">Loading applications…</option>}
+                  {!spinnakerLoading && spinnakerApps.length === 0 && <option value="">No applications found</option>}
                   {spinnakerApps.map((app) => (
                     <option key={app.name} value={app.name}>
                       {app.name}
@@ -364,8 +447,9 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Spinnaker pipeline</label>
-                <select value={spinnakerPipeline} onChange={(e) => setSpinnakerPipeline(e.target.value)}>
-                  {spinnakerPipelines.length === 0 && <option value="">No pipelines found</option>}
+                <select value={spinnakerPipeline} onChange={(e) => setSpinnakerPipeline(e.target.value)} disabled={spinnakerPipelinesLoading}>
+                  {spinnakerPipelinesLoading && <option value="">Loading pipelines…</option>}
+                  {!spinnakerPipelinesLoading && spinnakerPipelines.length === 0 && <option value="">No pipelines found</option>}
                   {spinnakerPipelines.map((pipeline) => (
                     <option key={pipeline.name} value={pipeline.name}>
                       {pipeline.name}
@@ -383,10 +467,45 @@ export default function App() {
               </div>
             <div className="field">
               <label>Version</label>
-              <input value={version} onChange={(e) => setVersion(e.target.value)} />
+              <select
+                value={versionMode === 'auto' ? version : '__custom__'}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') {
+                    setVersionMode('custom')
+                    setVersionSelection('user')
+                  } else {
+                    setVersionMode('auto')
+                    setVersion(e.target.value)
+                    setVersionSelection('user')
+                  }
+                }}
+                disabled={versions.length === 0}
+              >
+                {versions.length === 0 && <option value="__custom__">Custom…</option>}
+                {versions.map((item) => (
+                  <option key={item.version} value={item.version}>
+                    {item.version}
+                  </option>
+                ))}
+                <option value="__custom__">Custom…</option>
+              </select>
+              {versionMode === 'custom' && (
+                <input
+                  style={{ marginTop: '8px' }}
+                  value={version}
+                  onChange={(e) => setVersion(e.target.value)}
+                  placeholder="Enter a version"
+                />
+              )}
               <div className="helper">
                   Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
               </div>
+              {versionsLoading && <div className="helper">Loading versions…</div>}
+              {versionsRefreshing && <div className="helper">Refreshing versions…</div>}
+              {versionsError && <div className="helper">{versionsError}</div>}
+              {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
+                <div className="helper">Latest discovered: {versions[0].version}</div>
+              )}
               <div className="helper">
                 If no build is registered, DXCP auto-registers s3://&lt;runtime-bucket&gt;/{service}/{service}-{version}.zip.
               </div>

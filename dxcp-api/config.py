@@ -38,7 +38,9 @@ class Settings:
             "spinnaker_gate_header_value", "DXCP_SPINNAKER_GATE_HEADER_VALUE", "", str
         )
         self.engine_lambda_url = self._get("engine/lambda/url", "DXCP_ENGINE_LAMBDA_URL", "", str)
-        self.engine_lambda_token = self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
+        self.engine_lambda_token = self._resolve_secret(
+            self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
+        )
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")
@@ -75,6 +77,22 @@ class Settings:
             return response.get("Parameter", {}).get("Value")
         except ClientError:
             return None
+
+    def _resolve_secret(self, value: Optional[str]) -> Optional[str]:
+        if not isinstance(value, str):
+            return value
+        if not value.startswith("arn:aws:secretsmanager:"):
+            return value
+        try:
+            import boto3
+        except Exception:
+            return value
+        try:
+            client = boto3.client("secretsmanager")
+            response = client.get_secret_value(SecretId=value)
+            return response.get("SecretString", value)
+        except Exception:
+            return value
 
 
 SETTINGS = Settings()

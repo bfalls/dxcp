@@ -48,6 +48,7 @@ new ApiStack(app, "DxcpApiStack", {
   corsOrigins: corsOriginsRaw.split(",").map((origin: string) => origin.trim()).filter(Boolean),
   spinnakerMode,
   artifactBucket: demoRuntimeStack.artifactBucket,
+  engineTokenSecret: demoRuntimeStack.controllerTokenSecret,
 });
 
 new UiStack(app, "DxcpUiStack", { env });

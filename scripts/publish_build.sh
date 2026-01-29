@@ -6,6 +6,11 @@ API_TOKEN=${DXCP_API_TOKEN:-demo-token}
 SERVICE=${DXCP_SERVICE:-demo-service}
 CONTENT_TYPE=application/zip
 
+if [[ "$API_BASE" == *"127.0.0.1"* || "$API_BASE" == *"localhost"* ]]; then
+  echo "Warning: DXCP_API_BASE is set to localhost (${API_BASE})." >&2
+  echo "If you meant to publish to the deployed API, export DXCP_API_BASE first." >&2
+fi
+
 if [[ -n "${1-}" ]]; then
   VERSION="$1"
 else
