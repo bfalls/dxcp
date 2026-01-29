@@ -67,17 +67,6 @@ class SpinnakerAdapter:
             return payload
         return []
 
-    def get_application(self, application: str) -> dict:
-        if self.mode == "stub":
-            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
-        if not self.base_url:
-            raise RuntimeError("Spinnaker base URL is required for HTTP mode")
-        url = f"{self.base_url.rstrip('/')}/applications/{application}"
-        payload, _, _ = self._request_json("GET", url)
-        if isinstance(payload, dict):
-            return payload
-        return {}
-
     def list_pipeline_configs(self, application: str) -> List[dict]:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")

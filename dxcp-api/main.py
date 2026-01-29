@@ -402,19 +402,7 @@ def list_spinnaker_applications(tagName: Optional[str] = Query(None), tagValue: 
     except Exception as exc:
         return {"status": "DOWN", "error": str(exc)[:240]}
     if tagName:
-        filtered = []
-        for app in apps:
-            if not isinstance(app, dict) or not app.get("name"):
-                continue
-            detail = app
-            if not _matches_tag(detail, tagName, tagValue):
-                try:
-                    detail = spinnaker.get_application(app["name"])
-                except Exception:
-                    detail = app
-            if _matches_tag(detail, tagName, tagValue):
-                filtered.append(app)
-        apps = filtered
+        apps = [app for app in apps if isinstance(app, dict) and _matches_tag(app, tagName, tagValue)]
     return {
         "applications": [
             {"name": app.get("name")}
