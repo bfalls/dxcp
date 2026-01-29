@@ -39,14 +39,15 @@ const dataStack = new DataStack(app, "DxcpDataStack", {
   dailyQuotaUploadCapability,
 });
 
+const demoRuntimeStack = new DemoRuntimeStack(app, "DxcpDemoRuntimeStack", { env, configPrefix });
+
 new ApiStack(app, "DxcpApiStack", {
   env,
   table: dataStack.table,
   configPrefix,
   corsOrigins: corsOriginsRaw.split(",").map((origin: string) => origin.trim()).filter(Boolean),
   spinnakerMode,
+  artifactBucket: demoRuntimeStack.artifactBucket,
 });
-
-new DemoRuntimeStack(app, "DxcpDemoRuntimeStack", { env, configPrefix });
 
 new UiStack(app, "DxcpUiStack", { env });

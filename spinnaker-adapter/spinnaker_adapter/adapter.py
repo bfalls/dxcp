@@ -55,6 +55,40 @@ class SpinnakerAdapter:
         response, status_code, _ = self._request_json("GET", url)
         return {"status": "UP" if 200 <= status_code < 300 else "DOWN", "details": response}
 
+    def list_applications(self) -> List[dict]:
+        if self.mode == "stub":
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
+        if not self.base_url:
+            raise RuntimeError("Spinnaker base URL is required for HTTP mode")
+        # Expand application details so tag metadata is included for filtering.
+        url = f"{self.base_url.rstrip('/')}/applications?expand=true"
+        payload, _, _ = self._request_json("GET", url)
+        if isinstance(payload, list):
+            return payload
+        return []
+
+    def get_application(self, application: str) -> dict:
+        if self.mode == "stub":
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
+        if not self.base_url:
+            raise RuntimeError("Spinnaker base URL is required for HTTP mode")
+        url = f"{self.base_url.rstrip('/')}/applications/{application}"
+        payload, _, _ = self._request_json("GET", url)
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    def list_pipeline_configs(self, application: str) -> List[dict]:
+        if self.mode == "stub":
+            raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
+        if not self.base_url:
+            raise RuntimeError("Spinnaker base URL is required for HTTP mode")
+        url = f"{self.base_url.rstrip('/')}/applications/{application}/pipelineConfigs"
+        payload, _, _ = self._request_json("GET", url)
+        if isinstance(payload, list):
+            return payload
+        return []
+
     def _stub_create_execution(self, kind: str, payload: dict) -> dict:
         execution_id = str(uuid.uuid4())
         created_at = self._utc_now()
@@ -86,7 +120,8 @@ class SpinnakerAdapter:
     def _http_trigger(self, kind: str, payload: dict, idempotency_key: str) -> dict:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
-        pipeline = self._pipeline_name(kind)
+        application = payload.get("spinnakerApplication") or self.application
+        pipeline = payload.get("spinnakerPipeline") or self._pipeline_name(kind)
         params = self._build_parameters(payload)
         if self.engine_url:
             params["engineUrl"] = self.engine_url
@@ -101,7 +136,7 @@ class SpinnakerAdapter:
         if idempotency_key:
             trigger["idempotencyKey"] = idempotency_key
 
-        url = f"{self.base_url.rstrip('/')}/pipelines/{self.application}/{pipeline}"
+        url = f"{self.base_url.rstrip('/')}/pipelines/{application}/{pipeline}"
         response, status_code, headers = self._request_json("POST", url, trigger)
         execution_id = self._extract_execution_id(response)
         if not execution_id:

@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import sys
@@ -6,13 +7,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import SETTINGS
 from idempotency import IdempotencyStore
-from models import BuildRegistration, BuildUploadCapability, BuildUploadRequest, DeploymentIntent
+from models import BuildRegisterExistingRequest, BuildRegistration, BuildUploadCapability, BuildUploadRequest, DeploymentIntent
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from storage import build_storage, utc_now
@@ -107,6 +108,144 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
     return deployment
 
 
+def _parse_s3_ref(artifact_ref: str) -> tuple[str, str]:
+    if not artifact_ref.startswith("s3://"):
+        raise ValueError("artifactRef must start with s3://")
+    without_scheme = artifact_ref[len("s3://") :]
+    if "/" not in without_scheme:
+        raise ValueError("artifactRef must include bucket and key")
+    bucket, key = without_scheme.split("/", 1)
+    if not bucket or not key:
+        raise ValueError("artifactRef must include bucket and key")
+    return bucket, key
+
+
+def _compute_sha256(client, bucket: str, key: str) -> tuple[str, int, float]:
+    start = time.monotonic()
+    response = client.get_object(Bucket=bucket, Key=key)
+    body = response["Body"]
+    hasher = hashlib.sha256()
+    total = 0
+    for chunk in iter(lambda: body.read(1024 * 1024), b""):
+        hasher.update(chunk)
+        total += len(chunk)
+    duration = time.monotonic() - start
+    return hasher.hexdigest(), total, duration
+
+
+def _register_existing_build_internal(service_entry: dict, service: str, version: str, artifact_ref: Optional[str], s3_bucket: Optional[str], s3_key: Optional[str]) -> dict:
+    if not SETTINGS.runtime_artifact_bucket:
+        raise ValueError("Runtime artifact bucket is not configured")
+
+    if artifact_ref:
+        bucket, key = _parse_s3_ref(artifact_ref)
+    else:
+        if not s3_key:
+            raise ValueError("s3Key is required when artifactRef is omitted")
+        bucket = s3_bucket or SETTINGS.runtime_artifact_bucket
+        key = s3_key
+
+    if bucket != SETTINGS.runtime_artifact_bucket:
+        raise ValueError("Artifact source not allowlisted")
+
+    if not key.endswith(".zip"):
+        raise ValueError("Artifact must be a .zip for Lambda deployments")
+
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+    except Exception as exc:
+        raise RuntimeError("boto3 is required to validate artifacts") from exc
+
+    client = boto3.client("s3")
+    try:
+        head = client.head_object(Bucket=bucket, Key=key)
+    except ClientError as exc:
+        logger.warning("artifact.head failed bucket=%s key=%s error=%s", bucket, key, exc)
+        raise ValueError("Artifact does not exist") from exc
+
+    size_bytes = int(head.get("ContentLength", 0))
+    content_type = head.get("ContentType") or "application/zip"
+    logger.info(
+        "artifact.head bucket=%s key=%s size_bytes=%s etag=%s content_type=%s",
+        bucket,
+        key,
+        size_bytes,
+        head.get("ETag"),
+        content_type,
+    )
+
+    try:
+        sha256, bytes_hashed, duration = _compute_sha256(client, bucket, key)
+    except Exception as exc:
+        logger.warning("artifact.hash failed bucket=%s key=%s error=%s", bucket, key, exc)
+        raise RuntimeError("Failed to compute artifact checksum") from exc
+
+    logger.info(
+        "artifact.hash bucket=%s key=%s bytes=%s duration_ms=%.1f",
+        bucket,
+        key,
+        bytes_hashed,
+        duration * 1000,
+    )
+
+    guardrails.validate_artifact(size_bytes, sha256, content_type)
+    guardrails.validate_artifact_source(f"s3://{bucket}/{key}", service_entry)
+
+    record = {
+        "service": service,
+        "version": version,
+        "artifactRef": f"s3://{bucket}/{key}",
+        "sha256": sha256,
+        "sizeBytes": size_bytes,
+        "contentType": content_type,
+        "registeredAt": utc_now(),
+    }
+    record = storage.insert_build(record)
+    logger.info(
+        "artifact.registered build_id=%s service=%s version=%s",
+        record.get("id"),
+        service,
+        version,
+    )
+    return record
+
+
+def _extract_tags(app: dict) -> list:
+    tags = app.get("tags")
+    if tags is None:
+        tags = app.get("attributes", {}).get("tags")
+    if tags is None:
+        tags = app.get("attributes", {}).get("applicationAttributes", {}).get("tags")
+    if tags is None:
+        tags = app.get("defaultFilteredTags")
+    if tags is None:
+        tags = app.get("attributes", {}).get("defaultFilteredTags")
+    if tags is None:
+        return []
+    if isinstance(tags, dict):
+        return [{"name": key, "value": value} for key, value in tags.items()]
+    if isinstance(tags, list):
+        return tags
+    return []
+
+
+def _matches_tag(app: dict, tag_name: Optional[str], tag_value: Optional[str]) -> bool:
+    if not tag_name:
+        return True
+    for tag in _extract_tags(app):
+        if not isinstance(tag, dict):
+            continue
+        name = tag.get("name") or tag.get("key") or tag.get("label") or tag.get("tagName")
+        value = tag.get("value") or tag.get("val") or tag.get("tagValue")
+        if name == tag_name:
+            if tag_value is None or tag_value == "":
+                return True
+            if value == tag_value:
+                return True
+    return False
+
+
 @app.post("/v1/deployments", status_code=201)
 def create_deployment(
     intent: DeploymentIntent,
@@ -131,9 +270,28 @@ def create_deployment(
 
     payload = intent.dict()
     if spinnaker.mode == "http":
+        if not payload.get("spinnakerApplication") or not payload.get("spinnakerPipeline"):
+            return error_response(
+                400,
+                "INVALID_REQUEST",
+                "spinnakerApplication and spinnakerPipeline are required for deploy",
+            )
         build = storage.find_latest_build(intent.service, intent.version)
         if not build:
-            return error_response(400, "MISSING_BUILD", "No build registered for this service and version")
+            auto_key = f"{intent.service}/{intent.service}-{intent.version}.zip"
+            try:
+                build = _register_existing_build_internal(
+                    service_entry,
+                    intent.service,
+                    intent.version,
+                    None,
+                    None,
+                    auto_key,
+                )
+            except ValueError as exc:
+                return error_response(400, "MISSING_BUILD", f"No build registered; expected s3://{SETTINGS.runtime_artifact_bucket}/{auto_key} ({exc})")
+            except RuntimeError as exc:
+                return error_response(500, "INTERNAL_ERROR", str(exc))
         payload["artifactRef"] = build["artifactRef"]
 
     try:
@@ -233,6 +391,57 @@ def get_deployment_failures(
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
     return deployment.get("failures", [])
+
+
+@app.get("/v1/spinnaker/applications")
+def list_spinnaker_applications(tagName: Optional[str] = Query(None), tagValue: Optional[str] = Query(None)):
+    if spinnaker.mode != "http":
+        return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
+    try:
+        apps = spinnaker.list_applications()
+    except Exception as exc:
+        return {"status": "DOWN", "error": str(exc)[:240]}
+    if tagName:
+        filtered = []
+        for app in apps:
+            if not isinstance(app, dict) or not app.get("name"):
+                continue
+            detail = app
+            if not _matches_tag(detail, tagName, tagValue):
+                try:
+                    detail = spinnaker.get_application(app["name"])
+                except Exception:
+                    detail = app
+            if _matches_tag(detail, tagName, tagValue):
+                filtered.append(app)
+        apps = filtered
+    return {
+        "applications": [
+            {"name": app.get("name")}
+            for app in apps
+            if isinstance(app, dict) and app.get("name")
+        ]
+    }
+
+
+@app.get("/v1/spinnaker/applications/{application}/pipelines")
+def list_spinnaker_pipelines(application: str):
+    if spinnaker.mode != "http":
+        return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
+    try:
+        pipelines = spinnaker.list_pipeline_configs(application)
+    except Exception as exc:
+        return {"status": "DOWN", "error": str(exc)[:240]}
+    return {
+        "pipelines": [
+            {
+                "id": pipeline.get("id"),
+                "name": pipeline.get("name"),
+            }
+            for pipeline in pipelines
+            if isinstance(pipeline, dict) and pipeline.get("name")
+        ]
+    }
 
 
 @app.post("/v1/deployments/{deployment_id}/rollback", status_code=201)
@@ -361,5 +570,46 @@ def register_build(
     record["registeredAt"] = utc_now()
     record = storage.insert_build(record)
     storage.delete_upload_capability(cap["id"])
+    store_idempotency(request, idempotency_key, record, 201)
+    return record
+
+
+@app.post("/v1/builds/register", status_code=201)
+def register_existing_build(
+    req: BuildRegisterExistingRequest,
+    request: Request,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    authorization: Optional[str] = Header(None),
+):
+    guardrails.require_mutations_enabled()
+    guardrails.require_idempotency_key(idempotency_key)
+    client_id = get_client_id(request, authorization)
+    rate_limiter.check_mutate(client_id, "build_register")
+    cached = enforce_idempotency(request, idempotency_key)
+    if cached:
+        return cached
+
+    service_entry = guardrails.validate_service(req.service)
+    guardrails.validate_version(req.version)
+
+    existing = storage.find_latest_build(req.service, req.version)
+    if existing:
+        store_idempotency(request, idempotency_key, existing, 200)
+        return existing
+
+    try:
+        record = _register_existing_build_internal(
+            service_entry,
+            req.service,
+            req.version,
+            req.artifactRef,
+            req.s3Bucket,
+            req.s3Key,
+        )
+    except ValueError as exc:
+        return error_response(400, "INVALID_ARTIFACT", str(exc))
+    except RuntimeError as exc:
+        return error_response(500, "INTERNAL_ERROR", str(exc))
+
     store_idempotency(request, idempotency_key, record, 201)
     return record

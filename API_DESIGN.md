@@ -56,7 +56,7 @@ Kill switch:
   - any other value returns 400 INVALID_ENVIRONMENT
 
 - One active deployment at a time (global lock)
-  - when a deployment is in ACTIVE state, new deploy/rollback requests return 409 DEPLOYMENT_LOCKED
+  - when a deployment is in ACTIVE or IN_PROGRESS, new deploy/rollback requests return 409 DEPLOYMENT_LOCKED
 
 - Idempotency keys required
   - missing Idempotency-Key on mutating endpoints returns 400 IDMP_KEY_REQUIRED
@@ -83,6 +83,8 @@ Fields:
 - environment (string, must be "sandbox")
 - version (string, validated format)
 - changeSummary (string, required, max 240 chars)
+- spinnakerApplication (string, required in http mode)
+- spinnakerPipeline (string, required in http mode)
 
 ### DeploymentRecord
 
@@ -91,7 +93,7 @@ Fields:
 - service
 - environment
 - version
-- state (PENDING | ACTIVE | SUCCEEDED | FAILED | ROLLED_BACK)
+- state (PENDING | IN_PROGRESS | ACTIVE | SUCCEEDED | FAILED | CANCELED | ROLLED_BACK)
 - createdAt
 - updatedAt
 - spinnakerExecutionId (required)
@@ -128,6 +130,13 @@ Fields:
 - contentType
 - registeredAt
 
+### BuildRegisterExisting
+
+Fields:
+- service (allowlisted)
+- version (validated format)
+- artifactRef (s3://bucket/key) OR s3Bucket + s3Key
+
 ---
 
 ## Endpoints
@@ -157,6 +166,15 @@ Fields:
   - Requires Idempotency-Key header
   - Response: DeploymentRecord (new record with state ACTIVE)
 
+- GET /v1/spinnaker/applications
+  - List Spinnaker applications (Gate)
+  - Optional query: tagName, tagValue (filter applications by tag)
+  - Response: list of { name }
+
+- GET /v1/spinnaker/applications/{application}/pipelines
+  - List Spinnaker pipeline configs for an application
+  - Response: list of { id, name }
+
 ### Build Publish Flow
 
 - POST /v1/builds/upload-capability
@@ -173,6 +191,12 @@ Fields:
   - Register a build/version so it appears in the UI
   - Requires Idempotency-Key header
   - Request: BuildRegistration (service, version, artifactRef, sha256, sizeBytes, contentType)
+  - Response: BuildRegistration
+
+- POST /v1/builds/register
+  - Register an existing S3 artifact without upload capability (optional; DXCP also auto-registers on deploy)
+  - Requires Idempotency-Key header
+  - Request: BuildRegisterExisting (service, version, artifactRef OR s3Bucket+s3Key)
   - Response: BuildRegistration
 
 ---
@@ -203,4 +227,3 @@ Fields:
 - API contract is stable and documented
 - Guardrails are explicit and enforceable
 - Spinnaker linkage is captured in the DeploymentRecord
-

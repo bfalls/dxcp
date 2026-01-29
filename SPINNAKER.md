@@ -82,6 +82,7 @@ Notes:
 - The header is only sent if both name and value are configured.
 - DXCP logs whether a custom header is configured, but never logs the value.
 - DXCP always includes `ngrok-skip-browser-warning: 1` on Gate requests.
+- DXCP auto-discovers applications and pipelines from Gate; no manual pipeline wiring is required in the UI.
 
 ## Configure the engine controller URL + token
 
@@ -177,9 +178,12 @@ Note: the S3 key used with `artifactRef` (or `s3Key`) must point to a Lambda-com
    - `engineToken` -> runtime controller token
 5) Save pipelines. DXCP will pass only `service`, `version`, and `artifactRef` (deploy) or `service` + `version` (rollback).
 
-DXCP triggers the Gate pipeline:
-- Application: `dxcp-demo`
-- Pipeline: `demo-deploy`
+DXCP discovers applications and pipelines from Gate on UI load. The user selects
+the application + pipeline to execute for the deploy.
+
+To filter out system apps, tag your Spinnaker application and set the UI filter:
+- Tag name: `dxcp`
+- Tag value: `deployable`
 
 Webhook stage headers (Spinnaker):
 - Header name: `X-DXCP-Controller-Token`

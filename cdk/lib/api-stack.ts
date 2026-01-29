@@ -5,6 +5,7 @@ import * as integrations from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as path from "path";
 
 export interface ApiStackProps extends StackProps {
@@ -12,6 +13,7 @@ export interface ApiStackProps extends StackProps {
   configPrefix: string;
   corsOrigins: string[];
   spinnakerMode: string;
+  artifactBucket?: s3.IBucket;
 }
 
 export class ApiStack extends Stack {
@@ -42,6 +44,14 @@ export class ApiStack extends Stack {
         resources: [`arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${props.configPrefix}/*`],
       })
     );
+    if (props.artifactBucket) {
+      handler.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["s3:GetObject"],
+          resources: [props.artifactBucket.arnForObjects("*")],
+        })
+      );
+    }
 
     const httpApi = new apigwv2.HttpApi(this, "DxcpHttpApi", {
       corsPreflight: {

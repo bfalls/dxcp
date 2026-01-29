@@ -37,6 +37,15 @@ This script:
 - requests an upload capability
 - registers the build so it appears in the UI
 
+## Register existing artifact
+
+DXCP auto-registers existing artifacts during deploy when it finds:
+
+`s3://<runtime-artifact-bucket>/<service>/<service>-<version>.zip`
+
+The API validates the object (bucket allowlist, size, checksum, .zip) and stores it
+in the DXCP build registry so it can be deployed. No manual curl step is required.
+
 ## 3) Deploy via the UI
 
 Start the API and UI, then:

@@ -91,6 +91,12 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [rollbackResult, setRollbackResult] = useState(null)
+  const [spinnakerApps, setSpinnakerApps] = useState([])
+  const [spinnakerPipelines, setSpinnakerPipelines] = useState([])
+  const [spinnakerApp, setSpinnakerApp] = useState('')
+  const [spinnakerPipeline, setSpinnakerPipeline] = useState('')
+  const [spinnakerTagName, setSpinnakerTagName] = useState('dxcp')
+  const [spinnakerTagValue, setSpinnakerTagValue] = useState('deployable')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
 
@@ -119,6 +125,39 @@ export default function App() {
     }
   }
 
+  async function loadSpinnakerApplications() {
+    setErrorMessage('')
+    try {
+      const query = new URLSearchParams()
+      if (spinnakerTagName) query.set('tagName', spinnakerTagName)
+      if (spinnakerTagValue) query.set('tagValue', spinnakerTagValue)
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const data = await api.get(`/spinnaker/applications${suffix}`)
+      const apps = Array.isArray(data?.applications) ? data.applications : []
+      setSpinnakerApps(apps)
+      if (apps.length > 0 && !spinnakerApp) {
+        setSpinnakerApp(apps[0].name)
+      }
+    } catch (err) {
+      setErrorMessage('Failed to load Spinnaker applications')
+    }
+  }
+
+  async function loadSpinnakerPipelines(appName) {
+    if (!appName) return
+    setErrorMessage('')
+    try {
+      const data = await api.get(`/spinnaker/applications/${appName}/pipelines`)
+      const pipelines = Array.isArray(data?.pipelines) ? data.pipelines : []
+      setSpinnakerPipelines(pipelines)
+      if (pipelines.length > 0 && !spinnakerPipeline) {
+        setSpinnakerPipeline(pipelines[0].name)
+      }
+    } catch (err) {
+      setErrorMessage('Failed to load Spinnaker pipelines')
+    }
+  }
+
   async function handleDeploy() {
     setErrorMessage('')
     setStatusMessage('')
@@ -127,12 +166,18 @@ export default function App() {
       setErrorMessage('Version format is invalid')
       return
     }
+    if (!spinnakerApp || !spinnakerPipeline) {
+      setErrorMessage('Spinnaker application and pipeline are required')
+      return
+    }
     const key = `deploy-${Date.now()}`
     const payload = {
       service,
       environment: 'sandbox',
       version,
-      changeSummary
+      changeSummary,
+      spinnakerApplication: spinnakerApp,
+      spinnakerPipeline: spinnakerPipeline
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
@@ -181,7 +226,23 @@ export default function App() {
 
   useEffect(() => {
     loadServices()
+    loadSpinnakerApplications()
   }, [])
+
+  useEffect(() => {
+    setSpinnakerApps([])
+    setSpinnakerApp('')
+    setSpinnakerPipelines([])
+    setSpinnakerPipeline('')
+    loadSpinnakerApplications()
+  }, [spinnakerTagName, spinnakerTagValue])
+
+  useEffect(() => {
+    if (!spinnakerApp) return
+    setSpinnakerPipelines([])
+    setSpinnakerPipeline('')
+    loadSpinnakerPipelines(spinnakerApp)
+  }, [spinnakerApp])
 
   useEffect(() => {
     if (view !== 'detail' || !selected?.id) return undefined
@@ -277,17 +338,59 @@ export default function App() {
             </div>
             <div className="row">
               <div className="field">
+                <label>Spinnaker tag name</label>
+                <input value={spinnakerTagName} onChange={(e) => setSpinnakerTagName(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Spinnaker tag value</label>
+                <input value={spinnakerTagValue} onChange={(e) => setSpinnakerTagValue(e.target.value)} />
+              </div>
+            </div>
+            <div className="helper">
+              Only Spinnaker applications with this tag are shown. Suggested tag: dxcp=deployable.
+            </div>
+            <div className="row">
+              <div className="field">
+                <label>Spinnaker application</label>
+                <select value={spinnakerApp} onChange={(e) => setSpinnakerApp(e.target.value)}>
+                  {spinnakerApps.length === 0 && <option value="">No applications found</option>}
+                  {spinnakerApps.map((app) => (
+                    <option key={app.name} value={app.name}>
+                      {app.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="helper">Discovered via Gate.</div>
+              </div>
+              <div className="field">
+                <label>Spinnaker pipeline</label>
+                <select value={spinnakerPipeline} onChange={(e) => setSpinnakerPipeline(e.target.value)}>
+                  {spinnakerPipelines.length === 0 && <option value="">No pipelines found</option>}
+                  {spinnakerPipelines.map((pipeline) => (
+                    <option key={pipeline.name} value={pipeline.name}>
+                      {pipeline.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="helper">Pipeline configs for selected app.</div>
+              </div>
+            </div>
+            <div className="row">
+              <div className="field">
                 <label>Environment</label>
                 <input value="sandbox" disabled />
                 <div className="helper">Single environment for demo safety.</div>
               </div>
-              <div className="field">
-                <label>Version</label>
-                <input value={version} onChange={(e) => setVersion(e.target.value)} />
-                <div className="helper">
+            <div className="field">
+              <label>Version</label>
+              <input value={version} onChange={(e) => setVersion(e.target.value)} />
+              <div className="helper">
                   Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
-                </div>
               </div>
+              <div className="helper">
+                If no build is registered, DXCP auto-registers s3://&lt;runtime-bucket&gt;/{service}/{service}-{version}.zip.
+              </div>
+            </div>
             </div>
             <div className="field">
               <label>Change summary</label>

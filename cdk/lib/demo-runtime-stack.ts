@@ -13,6 +13,7 @@ export interface DemoRuntimeStackProps extends StackProps {
 }
 
 export class DemoRuntimeStack extends Stack {
+  public readonly artifactBucket: s3.Bucket;
   constructor(scope: Construct, id: string, props: DemoRuntimeStackProps) {
     super(scope, id, props);
 
@@ -26,6 +27,7 @@ export class DemoRuntimeStack extends Stack {
         },
       ],
     });
+    this.artifactBucket = artifactBucket;
 
     const runtimeTable = new dynamodb.Table(this, "DxcpDemoRuntimeState", {
       tableName: "DxcpDemoRuntimeState",

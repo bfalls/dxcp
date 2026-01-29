@@ -18,6 +18,8 @@ class DeploymentIntent(BaseModel):
     environment: str
     version: str
     changeSummary: str = Field(..., max_length=240)
+    spinnakerApplication: Optional[str] = None
+    spinnakerPipeline: Optional[str] = None
 
 
 class NormalizedFailure(BaseModel):
@@ -67,6 +69,14 @@ class BuildRegistration(BaseModel):
     sizeBytes: int
     contentType: str
     registeredAt: Optional[str] = None
+
+
+class BuildRegisterExistingRequest(BaseModel):
+    service: str
+    version: str
+    artifactRef: Optional[str] = None
+    s3Bucket: Optional[str] = None
+    s3Key: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
