@@ -1,5 +1,5 @@
 {
-  "application": "dxcp",
+  "application": "dxcp-demo",
   "name": "deploy-demo-service",
   "description": "Deploy demo-service artifact to existing sandbox target",
   "keepWaitingPipelines": false,

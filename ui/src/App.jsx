@@ -243,6 +243,7 @@ export default function App() {
     setFailures([])
     setRollbackResult(null)
     setErrorMessage('')
+    setStatusMessage('')
     try {
       const detail = await api.get(`/deployments/${deployment.id}`)
       if (detail && detail.code) {
@@ -261,6 +262,7 @@ export default function App() {
   async function handleRollback() {
     if (!selected) return
     setErrorMessage('')
+    setStatusMessage('')
     const ok = window.confirm('Confirm rollback?')
     if (!ok) return
     const key = `rollback-${Date.now()}`
@@ -270,6 +272,9 @@ export default function App() {
       return
     }
     setRollbackResult(result)
+    setSelected(result)
+    setFailures([])
+    setStatusMessage(`Rollback started with id ${result.id}`)
     await refreshDeployments()
   }
 
@@ -571,6 +576,7 @@ export default function App() {
             {selected && (
               <div>
                 <div className={statusClass(selected.state)}>{selected.state}</div>
+                {statusMessage && <div className="helper" style={{ marginTop: '8px' }}>{statusMessage}</div>}
                 <p>Service: {selected.service}</p>
                 <p>Version: {selected.version}</p>
                 <p>Created: {formatTime(selected.createdAt)}</p>
@@ -591,6 +597,11 @@ export default function App() {
                 <button className="button danger" onClick={handleRollback} style={{ marginTop: '12px' }}>
                   Rollback
                 </button>
+                {selected.rollbackOf && (
+                  <button className="button secondary" onClick={() => openDeployment({ id: selected.rollbackOf })} style={{ marginTop: '8px' }}>
+                    View original deployment
+                  </button>
+                )}
                 {rollbackResult && (
                   <div className="helper" style={{ marginTop: '8px' }}>
                     Rollback created: {rollbackResult.id}

@@ -90,7 +90,8 @@ def get_client_id(request: Request, authorization: Optional[str]) -> str:
     if SETTINGS.api_token:
         if token != SETTINGS.api_token:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Unauthorized"})
-    return token or request.client.host or "anonymous"
+    client_host = request.client.host if request.client else None
+    return token or client_host or "anonymous"
 
 
 def enforce_idempotency(request: Request, idempotency_key: str):
@@ -137,6 +138,10 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
         failures = normalize_failures(execution.get("failures"))
         storage.update_deployment(deployment["id"], state, failures)
         deployment = storage.get_deployment(deployment["id"]) or deployment
+        if deployment.get("rollbackOf") and state == "SUCCEEDED":
+            original = storage.get_deployment(deployment["rollbackOf"])
+            if original and original.get("state") != "ROLLED_BACK":
+                storage.update_deployment(original["id"], "ROLLED_BACK", original.get("failures", []))
     return deployment
 
 
@@ -512,8 +517,23 @@ def rollback_deployment(
     guardrails.validate_environment(deployment["environment"], service_entry)
     guardrails.enforce_global_lock()
 
+    prior = storage.find_prior_successful_deployment(deployment_id)
+    if not prior:
+        return error_response(400, "NO_PRIOR_SUCCESSFUL_VERSION", "No prior successful version to roll back to")
+
+    payload = {
+        "service": deployment["service"],
+        "environment": deployment["environment"],
+        "version": prior["version"],
+        "targetVersion": prior["version"],
+    }
+    if spinnaker.mode == "http":
+        build = storage.find_latest_build(deployment["service"], prior["version"])
+        if build:
+            payload["artifactRef"] = build["artifactRef"]
+
     try:
-        execution = spinnaker.trigger_rollback(deployment, idempotency_key)
+        execution = spinnaker.trigger_rollback(payload, idempotency_key)
     except Exception as exc:
         message = f"Spinnaker trigger failed: {exc}"
         return error_response(502, "SPINNAKER_TRIGGER_FAILED", message[:240])
@@ -521,9 +541,10 @@ def rollback_deployment(
         "id": str(uuid.uuid4()),
         "service": deployment["service"],
         "environment": deployment["environment"],
-        "version": deployment["version"],
-        "state": "ACTIVE",
-        "changeSummary": f"rollback of {deployment_id}",
+        "version": prior["version"],
+        "state": "IN_PROGRESS",
+        "changeSummary": f"rollback of {deployment_id} to {prior['version']}",
+        "rollbackOf": deployment_id,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
         "spinnakerExecutionId": execution["executionId"],

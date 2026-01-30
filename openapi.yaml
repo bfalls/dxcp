@@ -270,13 +270,16 @@ components:
         spinnakerExecutionUrl:
           type: string
           format: uri
+        rollbackOf:
+          type: string
+          description: Deployment id being rolled back, when applicable.
         failures:
           type: array
           items:
             $ref: '#/components/schemas/NormalizedFailure'
     DeploymentState:
       type: string
-      enum: [PENDING, ACTIVE, SUCCEEDED, FAILED, ROLLED_BACK]
+      enum: [PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK]
     NormalizedFailure:
       type: object
       required: [category, summary, observedAt]

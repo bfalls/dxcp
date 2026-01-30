@@ -74,6 +74,16 @@ Tradeoff:
 
 ---
 
+## Decision 4a: Guardrails are first-class product features
+
+DXCP is an intent-based control plane that triggers real deployments, not a dry-run API.
+Guardrails (rate limits, serialization, quotas) are part of the API contract and the product experience.
+They exist to control blast radius, protect shared execution engines, and ensure predictable behavior.
+Demo defaults are intentionally conservative, but limits are configurable per environment.
+The concept of guardrails is permanent even as values evolve.
+
+---
+
 ## Decision 5: Deployment engine remains external
 
 DXCP never replaces the execution engine.

@@ -98,6 +98,7 @@ Fields:
 - updatedAt
 - spinnakerExecutionId (required)
 - spinnakerExecutionUrl (required, deep-linkable)
+- rollbackOf (optional; deployment id being rolled back)
 - failures (list of NormalizedFailure)
 
 ### NormalizedFailure
@@ -207,6 +208,7 @@ Fields:
 - 400 INVALID_ENVIRONMENT
 - 400 IDMP_KEY_REQUIRED
 - 400 INVALID_ARTIFACT
+- 400 NO_PRIOR_SUCCESSFUL_VERSION
 - 401 UNAUTHORIZED
 - 403 SERVICE_NOT_ALLOWLISTED
 - 409 DEPLOYMENT_LOCKED

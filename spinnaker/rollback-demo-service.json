@@ -1,5 +1,5 @@
 {
-  "application": "dxcp",
+  "application": "dxcp-demo",
   "name": "rollback-demo-service",
   "description": "Rollback demo-service to previous artifact",
   "keepWaitingPipelines": false,

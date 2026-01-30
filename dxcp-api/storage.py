@@ -73,10 +73,12 @@ class Storage:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 spinnaker_execution_id TEXT NOT NULL,
-                spinnaker_execution_url TEXT NOT NULL
+                spinnaker_execution_url TEXT NOT NULL,
+                rollback_of TEXT
             )
             """
         )
+        self._ensure_column(cur, "deployments", "rollback_of", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -132,6 +134,12 @@ class Storage:
         )
         conn.commit()
         conn.close()
+
+    def _ensure_column(self, cur: sqlite3.Cursor, table: str, column: str, column_type: str) -> None:
+        cur.execute(f"PRAGMA table_info({table})")
+        columns = {row["name"] for row in cur.fetchall()}
+        if column not in columns:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
     def _read_registry(self) -> List[dict]:
         try:
@@ -212,8 +220,8 @@ class Storage:
             """
             INSERT INTO deployments (
                 id, service, environment, version, state, change_summary,
-                created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url, rollback_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -226,6 +234,7 @@ class Storage:
                 record["updatedAt"],
                 record["spinnakerExecutionId"],
                 record["spinnakerExecutionUrl"],
+                record.get("rollbackOf"),
             ),
         )
         self._replace_failures(cur, record["id"], failures)
@@ -326,8 +335,34 @@ class Storage:
             "updatedAt": row["updated_at"],
             "spinnakerExecutionId": row["spinnaker_execution_id"],
             "spinnakerExecutionUrl": row["spinnaker_execution_url"],
+            "rollbackOf": row["rollback_of"],
             "failures": failures,
         }
+
+    def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM deployments WHERE id = ?", (deployment_id,))
+        target = cur.fetchone()
+        if not target:
+            conn.close()
+            return None
+        cur.execute(
+            """
+            SELECT * FROM deployments
+            WHERE service = ? AND environment = ? AND state = ? AND created_at < ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (target["service"], target["environment"], "SUCCEEDED", target["created_at"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return None
+        failures = self._get_failures(cur, row["id"])
+        conn.close()
+        return self._row_to_deployment(row, failures)
 
     def insert_upload_capability(self, service: str, version: str, size_bytes: int, sha256: str, content_type: str, expires_at: str, token: str) -> dict:
         cap_id = str(uuid.uuid4())
@@ -528,6 +563,7 @@ class DynamoStorage:
             "updatedAt": record["updatedAt"],
             "spinnakerExecutionId": record["spinnakerExecutionId"],
             "spinnakerExecutionUrl": record["spinnakerExecutionUrl"],
+            "rollbackOf": record.get("rollbackOf"),
             "failures": failures,
         }
         self.table.put_item(Item=item)
@@ -560,6 +596,7 @@ class DynamoStorage:
             "updatedAt": item.get("updatedAt"),
             "spinnakerExecutionId": item.get("spinnakerExecutionId"),
             "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+            "rollbackOf": item.get("rollbackOf"),
             "failures": item.get("failures", []),
         }
 
@@ -584,11 +621,49 @@ class DynamoStorage:
                     "updatedAt": item.get("updatedAt"),
                     "spinnakerExecutionId": item.get("spinnakerExecutionId"),
                     "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+                    "rollbackOf": item.get("rollbackOf"),
                     "failures": item.get("failures", []),
                 }
             )
         deployments.sort(key=lambda d: d.get("createdAt", ""), reverse=True)
         return deployments
+
+    def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:
+        target = self.get_deployment(deployment_id)
+        if not target:
+            return None
+        response = self.table.query(KeyConditionExpression=Key("pk").eq("DEPLOYMENT"))
+        items = response.get("Items", [])
+        candidates = []
+        for item in items:
+            if item.get("service") != target.get("service"):
+                continue
+            if item.get("environment") != target.get("environment"):
+                continue
+            if item.get("state") != "SUCCEEDED":
+                continue
+            created_at = item.get("createdAt", "")
+            if created_at and target.get("createdAt") and created_at >= target.get("createdAt"):
+                continue
+            candidates.append(item)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
+        item = candidates[0]
+        return {
+            "id": item.get("id"),
+            "service": item.get("service"),
+            "environment": item.get("environment"),
+            "version": item.get("version"),
+            "state": item.get("state"),
+            "changeSummary": item.get("changeSummary"),
+            "createdAt": item.get("createdAt"),
+            "updatedAt": item.get("updatedAt"),
+            "spinnakerExecutionId": item.get("spinnakerExecutionId"),
+            "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+            "rollbackOf": item.get("rollbackOf"),
+            "failures": item.get("failures", []),
+        }
 
     def insert_upload_capability(
         self,

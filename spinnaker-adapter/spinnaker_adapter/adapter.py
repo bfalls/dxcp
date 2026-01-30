@@ -185,6 +185,9 @@ class SpinnakerAdapter:
         }
         if not params["service"] or not params["version"]:
             raise ValueError("service and version are required to trigger a pipeline")
+        target_version = payload.get("targetVersion")
+        if target_version:
+            params["targetVersion"] = target_version
         artifact_ref = payload.get("artifactRef")
         if artifact_ref:
             params["artifactRef"] = artifact_ref
@@ -318,10 +321,9 @@ class SpinnakerAdapter:
         if status in running:
             return "IN_PROGRESS"
         if status == "SUCCEEDED":
-            name = (execution.get("name") or "").lower()
-            if "rollback" in name:
-                return "ROLLED_BACK"
             return "SUCCEEDED"
+        if status == "ROLLED_BACK":
+            return "ROLLED_BACK"
         if status in failed:
             return "FAILED"
         if status in canceled:
@@ -336,7 +338,7 @@ class SpinnakerAdapter:
             detail = json.dumps(detail)
         return [
             {
-                "category": "ENGINE",
+                "category": "UNKNOWN",
                 "summary": "Spinnaker execution failed",
                 "detail": detail,
                 "actionHint": "Check the Spinnaker execution for stage errors.",

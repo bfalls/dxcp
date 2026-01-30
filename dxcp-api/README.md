@@ -68,3 +68,17 @@ Spinnaker adapter:
 - Rate limits and quotas are in-memory and reset on process restart.
 - Idempotency is in-memory with a 24h window.
 - Upload capability and build registration are enforced via SQLite.
+
+## Tests
+
+Install dev dependencies (from repo root):
+
+```
+pip install -r dxcp-api/requirements.txt -r requirements-dev.txt
+```
+
+Run tests (from repo root):
+
+```
+python -m pytest dxcp-api/tests spinnaker-adapter/tests
+```

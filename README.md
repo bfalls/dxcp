@@ -16,6 +16,10 @@ DXCP reduces cognitive load by:
 - Normalizing status and failures
 - Making rollback fast and obvious
 
+## Product philosophy
+
+Guardrails are first-class product features: DXCP is an intent-based control plane that triggers real deployments, so limits and serialization are part of the API contract, not optional add-ons. The defaults are conservative, but the guardrail concept is permanent even as values evolve. See Decision 4a in DECISIONS.md.
+
 ---
 
 ## What this repository contains

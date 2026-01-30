@@ -40,6 +40,7 @@ class DeploymentRecord(BaseModel):
     updatedAt: str
     spinnakerExecutionId: str
     spinnakerExecutionUrl: str
+    rollbackOf: Optional[str] = None
     failures: List[NormalizedFailure] = []
 
 
