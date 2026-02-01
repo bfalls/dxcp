@@ -50,6 +50,7 @@ spinnaker = SpinnakerAdapter(
     SETTINGS.spinnaker_mode,
     SETTINGS.engine_lambda_url,
     SETTINGS.engine_lambda_token,
+    application=SETTINGS.spinnaker_application,
     header_name=SETTINGS.spinnaker_header_name,
     header_value=SETTINGS.spinnaker_header_value,
 )
@@ -347,6 +348,8 @@ def create_deployment(
         "updatedAt": utc_now(),
         "spinnakerExecutionId": execution["executionId"],
         "spinnakerExecutionUrl": execution["executionUrl"],
+        "spinnakerApplication": payload.get("spinnakerApplication"),
+        "spinnakerPipeline": payload.get("spinnakerPipeline"),
         "failures": [],
     }
     storage.insert_deployment(record, [])
@@ -526,7 +529,15 @@ def rollback_deployment(
         "environment": deployment["environment"],
         "version": prior["version"],
         "targetVersion": prior["version"],
+        "spinnakerApplication": deployment.get("spinnakerApplication"),
+        "spinnakerPipeline": deployment.get("spinnakerPipeline"),
     }
+    if not payload.get("spinnakerApplication") or not payload.get("spinnakerPipeline"):
+        return error_response(
+            400,
+            "MISSING_SPINNAKER_TARGET",
+            "Deployment is missing spinnakerApplication/spinnakerPipeline; redeploy with those fields set",
+        )
     if spinnaker.mode == "http":
         build = storage.find_latest_build(deployment["service"], prior["version"])
         if build:

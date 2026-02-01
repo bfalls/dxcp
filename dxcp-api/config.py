@@ -33,6 +33,12 @@ class Settings:
         self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
         if not self.spinnaker_base_url:
             self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
+        self.spinnaker_application = self._get(
+            "spinnaker_application",
+            "DXCP_SPINNAKER_APPLICATION",
+            "",
+            str,
+        )
         self.spinnaker_header_name = self._get("spinnaker_gate_header_name", "DXCP_SPINNAKER_GATE_HEADER_NAME", "", str)
         self.spinnaker_header_value = self._get(
             "spinnaker_gate_header_value", "DXCP_SPINNAKER_GATE_HEADER_VALUE", "", str

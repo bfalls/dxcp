@@ -90,6 +90,9 @@ Spinnaker pipelines call the Lambda execution engine controller. DXCP supplies i
 Engine configuration (URL) lives in Spinnaker as a pipeline parameter. The controller token is resolved by Spinnaker from an external secret backend.
 DXCP only considers a deployment triggered when Gate returns a real execution id; otherwise it reports a trigger failure and no deployment record is created.
 
+Note: DXCP requires `spinnakerApplication` and `spinnakerPipeline` in deploy requests (and stores them on deployments).
+Rollback uses those stored values; if they are missing, rollback will fail with a clear error.
+
 After importing the pipelines (`spinnaker/deploy-demo-service.json` and `spinnaker/rollback-demo-service.json`), set:
 - `engineUrl` default to the controller Function URL.
 
@@ -161,6 +164,82 @@ encrypted:s3!r:<region>!b:<bucket>!f:<path to file>!k:<yaml key>
 The Spinnaker service role needs `s3:GetObject` on the referenced object.
 Ensure the Spinnaker services are configured to use the S3 secrets backend and have access to the bucket.
 The pipeline JSONs contain only secret references, not secret values.
+
+### Preferred approach: preconfigured webhook stages
+
+Spinnaker does not reliably resolve `encrypted:s3!` references inside pipeline JSON at
+execution time. To keep secrets out of pipeline parameters/logs, use Orca preconfigured
+webhook stages that store the S3 secret reference in Orca's service config instead.
+
+Orca config (example snippet):
+
+```
+webhook:
+  preconfigured:
+    - label: DXCP Deploy
+      type: dxcpDeploy
+      enabled: true
+      method: POST
+      url: ${parameters.engineUrl}deploy
+      customHeaders:
+        X-DXCP-Controller-Token:
+          - encrypted:s3!r:us-east-1!b:dxcp-secrets-<account>-us-east-1!f:dxcp/secrets.yml!k:controller_token
+      payload:
+        service: ${parameters.service}
+        version: ${parameters.version}
+        artifactRef: ${parameters.artifactRef}
+```
+
+Required for the S3 secrets engine:
+
+```
+secrets:
+  enabled: true
+  s3:
+    enabled: true
+    endpointUrl: https://s3.us-east-1.amazonaws.com
+```
+
+Update your pipeline JSON to use the preconfigured stage type:
+`dxcpDeploy` (deploy) and `dxcpRollback` (rollback). The pipeline stage should only
+specify `type`, `name`, `refId`, and `requisiteStageRefIds`.
+
+### Troubleshooting: 401 from controller with S3 secrets
+
+If the webhook stage returns 401 and the execution JSON still shows
+`encrypted:s3!r:...` in the headers, Spinnaker is sending the literal
+reference string instead of resolving it.
+
+Quick checks:
+
+1) Confirm the S3 secrets engine jar is present in Orca:
+
+```
+kubectl -n spinnaker exec deploy/spin-orca -- sh -c "ls /opt/orca/lib | grep -i s3"
+```
+
+You should see a `kork-secrets-s3-*.jar`. If it is missing, the S3
+secret engine is not available in the image, even if `secrets.s3.enabled`
+is set to true.
+
+2) Confirm Orca is configured for S3 secrets:
+
+```
+kubectl -n spinnaker exec deploy/spin-orca -- sh -c "tail -n 20 /opt/spinnaker/config/spinnaker.yml"
+```
+
+Expected:
+
+```
+secrets:
+  enabled: true
+  s3:
+    enabled: true
+```
+
+3) If the jar is missing, redeploy Spinnaker with an image or build that
+includes the S3 secrets engine. This is required for `encrypted:s3!` to
+resolve at runtime.
 
 ### Halyard setup (S3 secrets)
 

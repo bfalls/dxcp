@@ -15,7 +15,7 @@ class SpinnakerAdapter:
         mode: str = "stub",
         engine_url: str = "",
         engine_token: str = "",
-        application: str = "dxcp-demo",
+        application: str = "",
         request_timeout_seconds: Optional[float] = None,
         header_name: str = "",
         header_value: str = "",
@@ -110,6 +110,8 @@ class SpinnakerAdapter:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         application = payload.get("spinnakerApplication") or self.application
+        if not application:
+            raise RuntimeError("spinnakerApplication is required to trigger a pipeline")
         pipeline = payload.get("spinnakerPipeline") or self._pipeline_name(kind)
         params = self._build_parameters(payload)
         if self.engine_url:

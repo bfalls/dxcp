@@ -74,11 +74,15 @@ class Storage:
                 updated_at TEXT NOT NULL,
                 spinnaker_execution_id TEXT NOT NULL,
                 spinnaker_execution_url TEXT NOT NULL,
+                spinnaker_application TEXT,
+                spinnaker_pipeline TEXT,
                 rollback_of TEXT
             )
             """
         )
         self._ensure_column(cur, "deployments", "rollback_of", "TEXT")
+        self._ensure_column(cur, "deployments", "spinnaker_application", "TEXT")
+        self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -220,8 +224,9 @@ class Storage:
             """
             INSERT INTO deployments (
                 id, service, environment, version, state, change_summary,
-                created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url, rollback_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url,
+                spinnaker_application, spinnaker_pipeline, rollback_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -234,6 +239,8 @@ class Storage:
                 record["updatedAt"],
                 record["spinnakerExecutionId"],
                 record["spinnakerExecutionUrl"],
+                record.get("spinnakerApplication"),
+                record.get("spinnakerPipeline"),
                 record.get("rollbackOf"),
             ),
         )
@@ -335,6 +342,8 @@ class Storage:
             "updatedAt": row["updated_at"],
             "spinnakerExecutionId": row["spinnaker_execution_id"],
             "spinnakerExecutionUrl": row["spinnaker_execution_url"],
+            "spinnakerApplication": row["spinnaker_application"],
+            "spinnakerPipeline": row["spinnaker_pipeline"],
             "rollbackOf": row["rollback_of"],
             "failures": failures,
         }
@@ -563,6 +572,8 @@ class DynamoStorage:
             "updatedAt": record["updatedAt"],
             "spinnakerExecutionId": record["spinnakerExecutionId"],
             "spinnakerExecutionUrl": record["spinnakerExecutionUrl"],
+            "spinnakerApplication": record.get("spinnakerApplication"),
+            "spinnakerPipeline": record.get("spinnakerPipeline"),
             "rollbackOf": record.get("rollbackOf"),
             "failures": failures,
         }
@@ -596,6 +607,8 @@ class DynamoStorage:
             "updatedAt": item.get("updatedAt"),
             "spinnakerExecutionId": item.get("spinnakerExecutionId"),
             "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+            "spinnakerApplication": item.get("spinnakerApplication"),
+            "spinnakerPipeline": item.get("spinnakerPipeline"),
             "rollbackOf": item.get("rollbackOf"),
             "failures": item.get("failures", []),
         }
@@ -621,6 +634,8 @@ class DynamoStorage:
                     "updatedAt": item.get("updatedAt"),
                     "spinnakerExecutionId": item.get("spinnakerExecutionId"),
                     "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+                    "spinnakerApplication": item.get("spinnakerApplication"),
+                    "spinnakerPipeline": item.get("spinnakerPipeline"),
                     "rollbackOf": item.get("rollbackOf"),
                     "failures": item.get("failures", []),
                 }
@@ -661,6 +676,8 @@ class DynamoStorage:
             "updatedAt": item.get("updatedAt"),
             "spinnakerExecutionId": item.get("spinnakerExecutionId"),
             "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
+            "spinnakerApplication": item.get("spinnakerApplication"),
+            "spinnakerPipeline": item.get("spinnakerPipeline"),
             "rollbackOf": item.get("rollbackOf"),
             "failures": item.get("failures", []),
         }
