@@ -44,6 +44,12 @@ not as the primary product goal.
 
 ---
 
+## Secrets handling
+
+Secrets are never passed as pipeline parameters; Spinnaker resolves controller tokens from an external secret backend at execution time. This keeps execution payloads free of raw credentials. See `SPINNAKER.md`.
+
+---
+
 ## Non-goals
 
 - CI system

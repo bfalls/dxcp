@@ -14,9 +14,17 @@ export interface DemoRuntimeStackProps extends StackProps {
 
 export class DemoRuntimeStack extends Stack {
   public readonly artifactBucket: s3.Bucket;
+  public readonly secretsBucket: s3.Bucket;
   public readonly controllerTokenSecret: secretsmanager.Secret;
   constructor(scope: Construct, id: string, props: DemoRuntimeStackProps) {
     super(scope, id, props);
+
+    const secretsBucket = new s3.Bucket(this, "DxcpSecretsBucket", {
+      bucketName: `dxcp-secrets-${Stack.of(this).account}-${Stack.of(this).region}`,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.secretsBucket = secretsBucket;
 
     const artifactBucket = new s3.Bucket(this, "DemoArtifactBucket", {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -162,5 +170,10 @@ export class DemoRuntimeStack extends Stack {
       })
     );
     controllerTokenSecret.grantRead(controllerFn);
+
+    new ssm.StringParameter(this, "SpinnakerSecretsBucketParam", {
+      parameterName: `${props.configPrefix}/spinnaker/secrets_bucket`,
+      stringValue: secretsBucket.bucketName,
+    });
   }
 }

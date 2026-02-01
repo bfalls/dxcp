@@ -114,8 +114,6 @@ class SpinnakerAdapter:
         params = self._build_parameters(payload)
         if self.engine_url:
             params["engineUrl"] = self.engine_url
-        if self.engine_token:
-            params["engineToken"] = self.engine_token
 
         trigger = {
             "type": "manual",

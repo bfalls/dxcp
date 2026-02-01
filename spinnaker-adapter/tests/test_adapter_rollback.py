@@ -12,6 +12,7 @@ def _adapter():
 
 def test_trigger_rollback_parameters():
     adapter = _adapter()
+    adapter.engine_token = "should-not-be-sent"
     captured = {}
 
     def fake_request_json(method: str, url: str, body=None):
@@ -33,3 +34,4 @@ def test_trigger_rollback_parameters():
     assert params["version"] == "1.2.3"
     assert params["targetVersion"] == "1.2.3"
     assert captured["body"]["idempotencyKey"] == "idem-rollback-1"
+    assert "engineToken" not in params

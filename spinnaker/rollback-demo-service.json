@@ -16,10 +16,6 @@
     {
       "name": "engineUrl",
       "required": true
-    },
-    {
-      "name": "engineToken",
-      "required": true
     }
   ],
   "stages": [
@@ -29,8 +25,8 @@
       "url": "${ parameters.engineUrl }/rollback",
       "method": "POST",
       "customHeaders": {
-        "x-dxcp-engine-token": "${ parameters.engineToken }",
-        "X-DXCP-Controller-Token": "${ parameters.engineToken }"
+        "x-dxcp-engine-token": "encrypted:s3!r:us-east-1!b:dxcp-secrets-406222517046-us-east-1!f:dxcp/secrets.yml!k:controller_token",
+        "X-DXCP-Controller-Token": "encrypted:s3!r:us-east-1!b:dxcp-secrets-406222517046-us-east-1!f:dxcp/secrets.yml!k:controller_token"
       },
       "payload": {
         "service": "${ parameters.service }",

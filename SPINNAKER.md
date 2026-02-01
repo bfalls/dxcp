@@ -84,17 +84,16 @@ Notes:
 - DXCP always includes `ngrok-skip-browser-warning: 1` on Gate requests.
 - DXCP auto-discovers applications and pipelines from Gate; no manual pipeline wiring is required in the UI.
 
-## Configure the engine controller URL + token
+## Configure the engine controller URL + secret reference
 
 Spinnaker pipelines call the Lambda execution engine controller. DXCP supplies intent only (service + artifact/version).
-Engine configuration (URL + token) lives in Spinnaker as pipeline parameter defaults. DXCP does not require these values.
+Engine configuration (URL) lives in Spinnaker as a pipeline parameter. The controller token is resolved by Spinnaker from an external secret backend.
 DXCP only considers a deployment triggered when Gate returns a real execution id; otherwise it reports a trigger failure and no deployment record is created.
 
 After importing the pipelines (`spinnaker/deploy-demo-service.json` and `spinnaker/rollback-demo-service.json`), set:
 - `engineUrl` default to the controller Function URL.
-- `engineToken` default to the controller token.
 
-If you prefer to keep these values in SSM or environment variables, copy them into the Spinnaker UI defaults.
+Do not pass the controller token as a pipeline parameter.
 
 Option A: SSM (recommended)
 
@@ -102,13 +101,6 @@ Option A: SSM (recommended)
 # Controller URL (value comes from /dxcp/config/runtime/controller_url)
 controllerUrl=$(aws ssm get-parameter --name /dxcp/config/runtime/controller_url --query Parameter.Value --output text)
 aws ssm put-parameter --name /dxcp/config/engine/lambda/url --type String --value "$controllerUrl" --overwrite
-
-# Controller token (value stored as a SecureString in /dxcp/config/runtime/controller_token)
-tokenParam=$(aws ssm get-parameter --name /dxcp/config/runtime/controller_token --with-decryption --query Parameter.Value --output text)
-if [[ "$tokenParam" == arn:aws:secretsmanager:* ]]; then
-  tokenParam=$(aws secretsmanager get-secret-value --secret-id "$tokenParam" --query SecretString --output text)
-fi
-aws ssm put-parameter --name /dxcp/config/engine/lambda/token --type SecureString --value "$tokenParam" --overwrite
 ```
 
 Windows PowerShell:
@@ -116,32 +108,92 @@ Windows PowerShell:
 ```powershell
 $controllerUrl = aws ssm get-parameter --name /dxcp/config/runtime/controller_url --query Parameter.Value --output text
 aws ssm put-parameter --name /dxcp/config/engine/lambda/url --type String --value $controllerUrl --overwrite
-
-$tokenParam = aws ssm get-parameter --name /dxcp/config/runtime/controller_token --with-decryption --query Parameter.Value --output text
-if ($tokenParam -like 'arn:aws:secretsmanager:*') {
-  $tokenParam = aws secretsmanager get-secret-value --secret-id $tokenParam --query SecretString --output text
-}
-aws ssm put-parameter --name /dxcp/config/engine/lambda/token --type SecureString --value $tokenParam --overwrite
 ```
 
 Option B: Environment variables
 
 ```bash
 export DXCP_ENGINE_LAMBDA_URL=<controller-function-url>
-export DXCP_ENGINE_LAMBDA_TOKEN=<controller-token>
 ```
 
 Windows PowerShell:
 
 ```powershell
 $env:DXCP_ENGINE_LAMBDA_URL = '<controller-function-url>'
-$env:DXCP_ENGINE_LAMBDA_TOKEN = '<controller-token>'
 ```
 
 ### Controller auth header (required)
 
 The runtime controller requires a secret header on every request:
 `X-DXCP-Controller-Token: <TOKEN>`.
+
+### Spinnaker secrets (S3 backend)
+
+Spinnaker resolves the controller token from an S3-backed secret reference at execution time. The pipeline JSON
+uses an `encrypted:s3!` reference (see the pipeline files) that points to an object such as:
+
+```
+s3://dxcp-secrets-<account>-<region>/dxcp/secrets.yml
+```
+
+The secrets bucket name is stored in SSM at:
+`<configPrefix>/spinnaker/secrets_bucket`
+
+Fetch it (bash):
+
+```bash
+aws ssm get-parameter --name <configPrefix>/spinnaker/secrets_bucket --query Parameter.Value --output text
+```
+
+Expected key inside the YAML:
+
+```
+controller_token: <TOKEN>
+```
+
+Update the secret reference in the pipeline JSONs to match your region, bucket, and key.
+Secret reference format for literal values:
+
+```
+encrypted:s3!r:<region>!b:<bucket>!f:<path to file>!k:<yaml key>
+```
+
+The Spinnaker service role needs `s3:GetObject` on the referenced object.
+Ensure the Spinnaker services are configured to use the S3 secrets backend and have access to the bucket.
+The pipeline JSONs contain only secret references, not secret values.
+
+### Halyard setup (S3 secrets)
+
+Enable the S3 secrets backend (Halyard):
+
+```bash
+hal config secret s3 enable
+hal config deploy edit --type distributed --account-name <aws-account-name>
+```
+
+Provide Spinnaker with AWS credentials that can read the secrets bucket (for local dev, standard AWS env vars work):
+
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+Upload the secret file (example):
+
+```bash
+cat > secrets.yml <<'EOF'
+controller_token: <TOKEN>
+EOF
+
+aws s3 cp secrets.yml s3://dxcp-secrets-<account>-<region>/dxcp/secrets.yml
+```
+
+Then re-deploy Spinnaker:
+
+```bash
+hal deploy apply
+```
 
 Runtime controller IAM: the controller execution role must have `s3:GetObject` on the runtime artifact bucket
 (`/dxcp/config/runtime/artifact_bucket`) so `UpdateFunctionCode` can pull artifacts.
@@ -175,7 +227,6 @@ Note: the S3 key used with `artifactRef` (or `s3Key`) must point to a Lambda-com
 3) Import `spinnaker/rollback-demo-service.json`.
 4) Edit each pipeline and set parameter defaults:
    - `engineUrl` -> runtime controller Function URL
-   - `engineToken` -> runtime controller token
 5) Save pipelines. DXCP will pass only `service`, `version`, and `artifactRef` (deploy) or `service` + `version` (rollback).
 
 DXCP discovers applications and pipelines from Gate on UI load. The user selects
@@ -187,15 +238,21 @@ To filter out system apps, tag your Spinnaker application and set the UI filter:
 
 Webhook stage headers (Spinnaker):
 - Header name: `X-DXCP-Controller-Token`
-- Header value: `<TOKEN>` (do not commit real tokens in pipeline JSON)
+- Header value: S3 secret reference (do not commit real tokens in pipeline JSON)
 
 DXCP supplies intent (service + artifact/version). Spinnaker owns engine configuration (URLs, tokens, credentials).
 
 Contract enforced in code:
-- `spinnaker-adapter/spinnaker_adapter/adapter.py` (`SpinnakerAdapter._http_trigger`) only forwards `engineUrl`/`engineToken` when configured.
+- `spinnaker-adapter/spinnaker_adapter/adapter.py` (`SpinnakerAdapter._http_trigger`) only forwards `engineUrl` when configured.
 - `dxcp-api/main.py` (`create_deployment`) passes intent and does not require engine plumbing.
 - `spinnaker-adapter/spinnaker_adapter/adapter.py` (`SpinnakerAdapter._http_trigger`) requires a real execution id from Gate; if missing, it fails the trigger.
 - `dxcp-api/main.py` (`create_deployment`, `rollback_deployment`) returns `SPINNAKER_TRIGGER_FAILED` and does not create a deployment record.
+
+## Verification checklist
+
+1) Trigger a deploy or rollback through DXCP.
+2) Fetch the execution JSON from Gate (`/pipelines/{executionId}`) and confirm the token value is not present.
+3) Confirm the webhook stage succeeds (token resolved at runtime).
 
 ## Security warnings
 
