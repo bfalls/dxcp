@@ -30,7 +30,6 @@ Minimal API test (adjust token and service as needed):
 
 ```
 export DXCP_API_TOKEN=demo-token
-export DXCP_ALLOWLIST=demo-service
 uvicorn main:app --reload
 ```
 
@@ -54,14 +53,13 @@ curl -s http://127.0.0.1:8000/v1/deployments \\
 ## Environment variables
 
 - DXCP_API_TOKEN: if set, requests require Authorization: Bearer <token>
-- DXCP_ALLOWLIST: deprecated, use the service registry instead
 - DXCP_KILL_SWITCH: set to 1 to disable mutating operations
 - DXCP_DB_PATH: SQLite path (default: ./data/dxcp.db)
 - DXCP_SERVICE_REGISTRY_PATH: registry file path (default: ./data/services.json)
 
 Spinnaker adapter:
 - DXCP_SPINNAKER_MODE: stub (default) or http
-- DXCP_SPINNAKER_BASE_URL: base URL for Spinnaker API in http mode
+- DXCP_SPINNAKER_GATE_URL: base URL for Spinnaker Gate in http mode
 
 ## Notes
 

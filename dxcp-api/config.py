@@ -6,8 +6,6 @@ class Settings:
     def __init__(self) -> None:
         self.ssm_prefix = os.getenv("DXCP_SSM_PREFIX", "")
         self.api_token = self._get("api_token", "DXCP_API_TOKEN", "", str)
-        allowlist = os.getenv("DXCP_ALLOWLIST", "demo-service")
-        self.allowlisted_services = [s.strip() for s in allowlist.split(",") if s.strip()]
         self.kill_switch = self._get("kill_switch", "DXCP_KILL_SWITCH", "0", str) in ["1", "true", "TRUE", "True"]
         self.demo_mode = self._get("demo_mode", "DXCP_DEMO_MODE", "true", str) in ["1", "true", "TRUE", "True"]
         self.db_path = os.getenv("DXCP_DB_PATH", "./data/dxcp.db")
@@ -31,8 +29,6 @@ class Settings:
 
         self.spinnaker_mode = os.getenv("DXCP_SPINNAKER_MODE", "http")
         self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
-        if not self.spinnaker_base_url:
-            self.spinnaker_base_url = self._get("spinnaker_base_url", "DXCP_SPINNAKER_BASE_URL", "", str)
         self.spinnaker_application = self._get(
             "spinnaker_application",
             "DXCP_SPINNAKER_APPLICATION",
