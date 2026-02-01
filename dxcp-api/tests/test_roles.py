@@ -1,9 +1,11 @@
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+import httpx
+import pytest
 
 
 class FakeSpinnaker:
@@ -63,7 +65,11 @@ def _load_main(tmp_path: Path, role: str):
     return main
 
 
-def _client_and_state(tmp_path: Path, role: str):
+pytestmark = pytest.mark.anyio
+
+
+@asynccontextmanager
+async def _client_and_state(tmp_path: Path, role: str):
     main = _load_main(tmp_path, role)
     fake = FakeSpinnaker()
     main.spinnaker = fake
@@ -71,8 +77,11 @@ def _client_and_state(tmp_path: Path, role: str):
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
-    client = TestClient(main.app)
-    return client, main, fake
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        yield client, main, fake
 
 
 def _deployment_payload() -> dict:
@@ -98,6 +107,7 @@ def _insert_deployment(storage, deployment_id: str, version: str, created_at: st
         "spinnakerExecutionUrl": f"http://spinnaker.local/pipelines/exec-{deployment_id}",
         "spinnakerApplication": "demo-app",
         "spinnakerPipeline": "demo-pipeline",
+        "deliveryGroupId": "default",
         "failures": [],
     }
     storage.insert_deployment(record, [])
@@ -114,81 +124,81 @@ def _build_payload() -> dict:
     }
 
 
-def test_observer_denied_deploy(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path, "OBSERVER")
-    response = client.post(
-        "/v1/deployments",
-        headers={"Idempotency-Key": "deploy-1"},
-        json=_deployment_payload(),
-    )
+async def test_observer_denied_deploy(tmp_path: Path):
+    async with _client_and_state(tmp_path, "OBSERVER") as (client, _, _):
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-1"},
+            json=_deployment_payload(),
+        )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-def test_observer_denied_rollback(tmp_path: Path):
-    client, main, _ = _client_and_state(tmp_path, "OBSERVER")
-    _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
-    _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
-    response = client.post(
-        "/v1/deployments/dep-b/rollback",
-        headers={"Idempotency-Key": "rollback-1"},
-        json={},
-    )
+async def test_observer_denied_rollback(tmp_path: Path):
+    async with _client_and_state(tmp_path, "OBSERVER") as (client, main, _):
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+        _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
+        response = await client.post(
+            "/v1/deployments/dep-b/rollback",
+            headers={"Idempotency-Key": "rollback-1"},
+            json={},
+        )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-def test_observer_denied_build_register(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path, "OBSERVER")
-    response = client.post(
-        "/v1/builds",
-        headers={"Idempotency-Key": "build-1"},
-        json=_build_payload(),
-    )
+async def test_observer_denied_build_register(tmp_path: Path):
+    async with _client_and_state(tmp_path, "OBSERVER") as (client, _, _):
+        response = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-1"},
+            json=_build_payload(),
+        )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-def test_delivery_owner_allowed_deploy(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path, "DELIVERY_OWNER")
-    response = client.post(
-        "/v1/deployments",
-        headers={"Idempotency-Key": "deploy-2"},
-        json=_deployment_payload(),
-    )
+async def test_delivery_owner_allowed_deploy(tmp_path: Path):
+    async with _client_and_state(tmp_path, "DELIVERY_OWNER") as (client, _, _):
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-2"},
+            json=_deployment_payload(),
+        )
     assert response.status_code == 201
 
 
-def test_delivery_owner_allowed_rollback(tmp_path: Path):
-    client, main, _ = _client_and_state(tmp_path, "DELIVERY_OWNER")
-    _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
-    _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
-    response = client.post(
-        "/v1/deployments/dep-b/rollback",
-        headers={"Idempotency-Key": "rollback-2"},
-        json={},
-    )
+async def test_delivery_owner_allowed_rollback(tmp_path: Path):
+    async with _client_and_state(tmp_path, "DELIVERY_OWNER") as (client, main, _):
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+        _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
+        response = await client.post(
+            "/v1/deployments/dep-b/rollback",
+            headers={"Idempotency-Key": "rollback-2"},
+            json={},
+        )
     assert response.status_code == 201
 
 
-def test_platform_admin_allowed_build_register(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path, "PLATFORM_ADMIN")
-    cap_request = {
-        "service": "demo-service",
-        "version": "1.0.0",
-        "expectedSizeBytes": 1024,
-        "expectedSha256": "a" * 64,
-        "contentType": "application/zip",
-    }
-    cap_response = client.post(
-        "/v1/builds/upload-capability",
-        headers={"Idempotency-Key": "cap-1"},
-        json=cap_request,
-    )
+async def test_platform_admin_allowed_build_register(tmp_path: Path):
+    async with _client_and_state(tmp_path, "PLATFORM_ADMIN") as (client, _, _):
+        cap_request = {
+            "service": "demo-service",
+            "version": "1.0.0",
+            "expectedSizeBytes": 1024,
+            "expectedSha256": "a" * 64,
+            "contentType": "application/zip",
+        }
+        cap_response = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-1"},
+            json=cap_request,
+        )
+        response = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-2"},
+            json=_build_payload(),
+        )
     assert cap_response.status_code == 201
-    response = client.post(
-        "/v1/builds",
-        headers={"Idempotency-Key": "build-2"},
-        json=_build_payload(),
-    )
     assert response.status_code == 201

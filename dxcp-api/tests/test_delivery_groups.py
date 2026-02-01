@@ -3,7 +3,10 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from contextlib import asynccontextmanager
+
+import httpx
+import pytest
 
 
 def _write_service_registry(path: Path) -> None:
@@ -35,18 +38,25 @@ def _load_main(tmp_path: Path):
     return main
 
 
-def _client(tmp_path: Path):
+pytestmark = pytest.mark.anyio
+
+
+@asynccontextmanager
+async def _client(tmp_path: Path):
     main = _load_main(tmp_path)
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
-    client = TestClient(main.app)
-    return client
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        yield client
 
 
-def test_delivery_groups_list_returns_default(tmp_path: Path):
-    client = _client(tmp_path)
-    response = client.get("/v1/delivery-groups")
+async def test_delivery_groups_list_returns_default(tmp_path: Path):
+    async with _client(tmp_path) as client:
+        response = await client.get("/v1/delivery-groups")
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body, list)
@@ -56,18 +66,18 @@ def test_delivery_groups_list_returns_default(tmp_path: Path):
     assert "demo-service" in default["services"]
 
 
-def test_delivery_groups_get_by_id(tmp_path: Path):
-    client = _client(tmp_path)
-    response = client.get("/v1/delivery-groups/default")
+async def test_delivery_groups_get_by_id(tmp_path: Path):
+    async with _client(tmp_path) as client:
+        response = await client.get("/v1/delivery-groups/default")
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == "default"
     assert "demo-service" in body["services"]
 
 
-def test_delivery_groups_unknown_returns_404(tmp_path: Path):
-    client = _client(tmp_path)
-    response = client.get("/v1/delivery-groups/unknown")
+async def test_delivery_groups_unknown_returns_404(tmp_path: Path):
+    async with _client(tmp_path) as client:
+        response = await client.get("/v1/delivery-groups/unknown")
     assert response.status_code == 404
     body = response.json()
     assert body["code"] == "NOT_FOUND"

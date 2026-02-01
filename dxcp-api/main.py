@@ -124,6 +124,25 @@ def require_role(actor: Actor, allowed: set[Role], action: str):
     return error_response(403, "ROLE_FORBIDDEN", f"Role {actor.role.value} cannot {action}")
 
 
+def resolve_delivery_group(service: str):
+    group = storage.get_delivery_group_for_service(service)
+    if not group:
+        return None, error_response(
+            403,
+            "SERVICE_NOT_IN_DELIVERY_GROUP",
+            f"Service {service} is not assigned to a delivery group",
+        )
+    return group, None
+
+
+def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
+    guardrails = group.get("guardrails") or {}
+    value = guardrails.get(key)
+    if isinstance(value, int) and value > 0:
+        return value
+    return default_value
+
+
 def enforce_idempotency(request: Request, idempotency_key: str):
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
     cached = idempotency.get(key)
@@ -326,17 +345,19 @@ def create_deployment(
         return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    rate_limiter.check_mutate(actor.actor_id, "deploy")
-    cached = enforce_idempotency(request, idempotency_key)
-    if cached:
-        return cached
-    if storage.has_active_deployment():
-        return error_response(409, "DEPLOYMENT_IN_PROGRESS", "Another deployment is already in progress")
-
     service_entry = guardrails.validate_service(intent.service)
     guardrails.validate_environment(intent.environment, service_entry)
     guardrails.validate_version(intent.version)
-    guardrails.enforce_global_lock()
+    group, group_error = resolve_delivery_group(intent.service)
+    if group_error:
+        return group_error
+    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    rate_limiter.check_mutate(actor.actor_id, "deploy", quota_scope=group["id"], quota_limit=daily_deploy_quota)
+    cached = enforce_idempotency(request, idempotency_key)
+    if cached:
+        return cached
+    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
 
     payload = intent.dict()
     if spinnaker.mode == "http":
@@ -382,6 +403,7 @@ def create_deployment(
         "spinnakerExecutionUrl": execution["executionUrl"],
         "spinnakerApplication": payload.get("spinnakerApplication"),
         "spinnakerPipeline": payload.get("spinnakerPipeline"),
+        "deliveryGroupId": group["id"],
         "failures": [],
     }
     storage.insert_deployment(record, [])
@@ -564,18 +586,22 @@ def rollback_deployment(
         return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    rate_limiter.check_mutate(actor.actor_id, "rollback")
-    cached = enforce_idempotency(request, idempotency_key)
-    if cached:
-        return cached
-
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
 
     service_entry = guardrails.validate_service(deployment["service"])
     guardrails.validate_environment(deployment["environment"], service_entry)
-    guardrails.enforce_global_lock()
+    group, group_error = resolve_delivery_group(deployment["service"])
+    if group_error:
+        return group_error
+    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
+    daily_rollback_quota = _group_guardrail_value(group, "daily_rollback_quota", SETTINGS.daily_quota_rollback)
+    rate_limiter.check_mutate(actor.actor_id, "rollback", quota_scope=group["id"], quota_limit=daily_rollback_quota)
+    cached = enforce_idempotency(request, idempotency_key)
+    if cached:
+        return cached
+    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
 
     prior = storage.find_prior_successful_deployment(deployment_id)
     if not prior:
@@ -617,6 +643,7 @@ def rollback_deployment(
         "updatedAt": utc_now(),
         "spinnakerExecutionId": execution["executionId"],
         "spinnakerExecutionUrl": execution["executionUrl"],
+        "deliveryGroupId": group["id"],
         "failures": [],
     }
     storage.insert_deployment(record, [])

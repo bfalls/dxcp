@@ -42,6 +42,16 @@ DXCP can be run in a constrained demo mode that:
 Demo mode exists to validate product behavior,
 not as the primary product goal.
 
+## Delivery group seeding (local)
+
+Use the seed script to insert DeliveryGroups into the local sqlite DB:
+```
+python scripts/seed_delivery_groups.py scripts/seed_delivery_groups.example.json
+```
+
+The seed file is a JSON list of DeliveryGroups. Entries are inserted if the id
+does not already exist.
+
 ## Roles (demo)
 
 DXCP uses a simple demo role override applied to all requests:

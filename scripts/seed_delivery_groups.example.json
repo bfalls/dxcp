@@ -1,0 +1,28 @@
+[
+  {
+    "id": "group-a",
+    "name": "Group A",
+    "description": "Example group A",
+    "owner": "platform-team",
+    "services": ["service-a"],
+    "allowed_recipes": [],
+    "guardrails": {
+      "max_concurrent_deployments": 1,
+      "daily_deploy_quota": 5,
+      "daily_rollback_quota": 5
+    }
+  },
+  {
+    "id": "group-b",
+    "name": "Group B",
+    "description": "Example group B",
+    "owner": "platform-team",
+    "services": ["service-b"],
+    "allowed_recipes": [],
+    "guardrails": {
+      "max_concurrent_deployments": 1,
+      "daily_deploy_quota": 5,
+      "daily_rollback_quota": 5
+    }
+  }
+]

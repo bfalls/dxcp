@@ -1,10 +1,11 @@
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 
 class FakeSpinnaker:
@@ -78,12 +79,17 @@ def _insert_deployment(storage, deployment_id: str, service: str, env: str, vers
         "spinnakerExecutionUrl": f"http://spinnaker.local/pipelines/exec-{deployment_id}",
         "spinnakerApplication": "demo-app",
         "spinnakerPipeline": "demo-pipeline",
+        "deliveryGroupId": "default",
         "failures": [],
     }
     storage.insert_deployment(record, [])
 
 
-def _client_and_state(tmp_path: Path):
+pytestmark = pytest.mark.anyio
+
+
+@asynccontextmanager
+async def _client_and_state(tmp_path: Path):
     main = _load_main(tmp_path)
     fake = FakeSpinnaker()
     main.spinnaker = fake
@@ -91,150 +97,153 @@ def _client_and_state(tmp_path: Path):
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
-    client = TestClient(main.app)
-    return client, main, fake
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        yield client, main, fake
 
 
-def test_rollback_requires_idempotency_key(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path)
-    response = client.post("/v1/deployments/unknown/rollback", json={})
+async def test_rollback_requires_idempotency_key(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, _, _):
+        response = await client.post("/v1/deployments/unknown/rollback", json={})
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == "IDMP_KEY_REQUIRED"
 
 
-def test_rollback_invalid_environment(tmp_path: Path):
-    client, main, _ = _client_and_state(tmp_path)
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-prod",
-        service="demo-service",
-        env="prod",
-        version="1.0.0",
-        state="SUCCEEDED",
-        created_at="2024-01-01T00:00:00Z",
-    )
-    response = client.post(
-        "/v1/deployments/dep-prod/rollback",
-        headers={"Idempotency-Key": "rollback-1"},
-        json={},
-    )
+async def test_rollback_invalid_environment(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, main, _):
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-prod",
+            service="demo-service",
+            env="prod",
+            version="1.0.0",
+            state="SUCCEEDED",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        response = await client.post(
+            "/v1/deployments/dep-prod/rollback",
+            headers={"Idempotency-Key": "rollback-1"},
+            json={},
+        )
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == "INVALID_ENVIRONMENT"
 
 
-def test_rollback_active_lock(tmp_path: Path):
-    client, main, _ = _client_and_state(tmp_path)
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-success",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.1",
-        state="SUCCEEDED",
-        created_at="2024-01-02T00:00:00Z",
-    )
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-active",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.2",
-        state="ACTIVE",
-        created_at="2024-01-03T00:00:00Z",
-    )
-    response = client.post(
-        "/v1/deployments/dep-success/rollback",
-        headers={"Idempotency-Key": "rollback-2"},
-        json={},
-    )
+async def test_rollback_active_lock(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, main, _):
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-success",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.1",
+            state="SUCCEEDED",
+            created_at="2024-01-02T00:00:00Z",
+        )
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-active",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.2",
+            state="ACTIVE",
+            created_at="2024-01-03T00:00:00Z",
+        )
+        response = await client.post(
+            "/v1/deployments/dep-success/rollback",
+            headers={"Idempotency-Key": "rollback-2"},
+            json={},
+        )
     assert response.status_code == 409
     body = response.json()
     assert body["code"] == "DEPLOYMENT_LOCKED"
 
 
-def test_rollback_unknown_deployment(tmp_path: Path):
-    client, _, _ = _client_and_state(tmp_path)
-    response = client.post(
-        "/v1/deployments/missing/rollback",
-        headers={"Idempotency-Key": "rollback-3"},
-        json={},
-    )
+async def test_rollback_unknown_deployment(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments/missing/rollback",
+            headers={"Idempotency-Key": "rollback-3"},
+            json={},
+        )
     assert response.status_code == 404
     body = response.json()
     assert body["code"] == "NOT_FOUND"
 
 
-def test_rollback_requires_prior_success(tmp_path: Path):
-    client, main, _ = _client_and_state(tmp_path)
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-failed",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.0",
-        state="FAILED",
-        created_at="2024-01-01T00:00:00Z",
-    )
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-target",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.1",
-        state="SUCCEEDED",
-        created_at="2024-01-02T00:00:00Z",
-    )
-    response = client.post(
-        "/v1/deployments/dep-target/rollback",
-        headers={"Idempotency-Key": "rollback-4"},
-        json={},
-    )
+async def test_rollback_requires_prior_success(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, main, _):
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-failed",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.0",
+            state="FAILED",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-target",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.1",
+            state="SUCCEEDED",
+            created_at="2024-01-02T00:00:00Z",
+        )
+        response = await client.post(
+            "/v1/deployments/dep-target/rollback",
+            headers={"Idempotency-Key": "rollback-4"},
+            json={},
+        )
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == "NO_PRIOR_SUCCESSFUL_VERSION"
 
 
-def test_rollback_creates_record_and_updates_status(tmp_path: Path):
-    client, main, fake = _client_and_state(tmp_path)
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-a",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.0",
-        state="SUCCEEDED",
-        created_at="2024-01-01T00:00:00Z",
-    )
-    _insert_deployment(
-        main.storage,
-        deployment_id="dep-b",
-        service="demo-service",
-        env="sandbox",
-        version="1.0.1",
-        state="SUCCEEDED",
-        created_at="2024-01-02T00:00:00Z",
-    )
-    response = client.post(
-        "/v1/deployments/dep-b/rollback",
-        headers={"Idempotency-Key": "rollback-5"},
-        json={},
-    )
-    assert response.status_code == 201
-    body = response.json()
-    assert body["version"] == "1.0.0"
-    assert body["rollbackOf"] == "dep-b"
-    assert body["spinnakerExecutionId"]
-    assert fake.triggered[0]["kind"] == "rollback"
-    assert fake.triggered[0]["payload"]["version"] == "1.0.0"
-    assert fake.triggered[0]["payload"]["targetVersion"] == "1.0.0"
+async def test_rollback_creates_record_and_updates_status(tmp_path: Path):
+    async with _client_and_state(tmp_path) as (client, main, fake):
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-a",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.0",
+            state="SUCCEEDED",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-b",
+            service="demo-service",
+            env="sandbox",
+            version="1.0.1",
+            state="SUCCEEDED",
+            created_at="2024-01-02T00:00:00Z",
+        )
+        response = await client.post(
+            "/v1/deployments/dep-b/rollback",
+            headers={"Idempotency-Key": "rollback-5"},
+            json={},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["version"] == "1.0.0"
+        assert body["rollbackOf"] == "dep-b"
+        assert body["spinnakerExecutionId"]
+        assert fake.triggered[0]["kind"] == "rollback"
+        assert fake.triggered[0]["payload"]["version"] == "1.0.0"
+        assert fake.triggered[0]["payload"]["targetVersion"] == "1.0.0"
 
-    fake.executions[body["spinnakerExecutionId"]]["state"] = "SUCCEEDED"
-    detail = client.get(f"/v1/deployments/{body['id']}")
-    assert detail.status_code == 200
-    detail_body = detail.json()
-    assert detail_body["state"] == "SUCCEEDED"
+        fake.executions[body["spinnakerExecutionId"]]["state"] = "SUCCEEDED"
+        detail = await client.get(f"/v1/deployments/{body['id']}")
+        assert detail.status_code == 200
+        detail_body = detail.json()
+        assert detail_body["state"] == "SUCCEEDED"
 
-    original = main.storage.get_deployment("dep-b")
-    assert original["state"] == "ROLLED_BACK"
+        original = main.storage.get_deployment("dep-b")
+        assert original["state"] == "ROLLED_BACK"

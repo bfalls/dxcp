@@ -38,9 +38,10 @@ Idempotency:
 Rate limits and quotas (defaults):
 - Read requests: 60 requests per minute per client
 - Mutating requests: 10 requests per minute per client
-- Daily quotas per client:
+- Daily quotas per delivery group:
   - Deployments: 25 per day
   - Rollbacks: 10 per day
+- Daily quotas per client:
   - Build registrations: 50 per day
   - Upload capability requests: 50 per day
 
@@ -60,8 +61,8 @@ Kill switch:
   - environment must be "sandbox"
   - any other value returns 400 INVALID_ENVIRONMENT
 
-- One active deployment at a time (global lock)
-  - when a deployment is in ACTIVE or IN_PROGRESS, new deploy/rollback requests return 409 DEPLOYMENT_LOCKED
+- One active deployment at a time per delivery group (default)
+  - when a deployment is in ACTIVE or IN_PROGRESS in a group, new deploy/rollback requests return 409 DEPLOYMENT_LOCKED
 
 - Idempotency keys required
   - missing Idempotency-Key on mutating endpoints returns 400 IDMP_KEY_REQUIRED
@@ -244,6 +245,7 @@ Fields:
 - 400 NO_PRIOR_SUCCESSFUL_VERSION
 - 401 UNAUTHORIZED
 - 403 SERVICE_NOT_ALLOWLISTED
+- 403 SERVICE_NOT_IN_DELIVERY_GROUP
 - 403 ROLE_FORBIDDEN
 - 409 DEPLOYMENT_LOCKED
 - 429 RATE_LIMITED

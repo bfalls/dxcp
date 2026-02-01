@@ -76,13 +76,15 @@ class Storage:
                 spinnaker_execution_url TEXT NOT NULL,
                 spinnaker_application TEXT,
                 spinnaker_pipeline TEXT,
-                rollback_of TEXT
+                rollback_of TEXT,
+                delivery_group_id TEXT
             )
             """
         )
         self._ensure_column(cur, "deployments", "rollback_of", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_application", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
+        self._ensure_column(cur, "deployments", "delivery_group_id", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -292,6 +294,13 @@ class Storage:
             return None
         return self._row_to_delivery_group(row)
 
+    def get_delivery_group_for_service(self, service_name: str) -> Optional[dict]:
+        for group in self.list_delivery_groups():
+            services = group.get("services", [])
+            if service_name in services:
+                return group
+        return None
+
     def ensure_default_delivery_group(self) -> Optional[dict]:
         if self._has_delivery_groups():
             return None
@@ -318,6 +327,21 @@ class Storage:
         conn.close()
         return row is not None
 
+    def count_active_deployments_for_group(self, group_id: str) -> int:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(1) AS total
+            FROM deployments
+            WHERE state IN (?, ?) AND delivery_group_id = ?
+            """,
+            ("ACTIVE", "IN_PROGRESS", group_id),
+        )
+        row = cur.fetchone()
+        conn.close()
+        return int(row["total"]) if row else 0
+
     def insert_deployment(self, record: dict, failures: List[dict]) -> None:
         conn = self._connect()
         cur = conn.cursor()
@@ -326,8 +350,8 @@ class Storage:
             INSERT INTO deployments (
                 id, service, environment, version, state, change_summary,
                 created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url,
-                spinnaker_application, spinnaker_pipeline, rollback_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                spinnaker_application, spinnaker_pipeline, rollback_of, delivery_group_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -343,6 +367,7 @@ class Storage:
                 record.get("spinnakerApplication"),
                 record.get("spinnakerPipeline"),
                 record.get("rollbackOf"),
+                record.get("deliveryGroupId"),
             ),
         )
         self._replace_failures(cur, record["id"], failures)
@@ -694,6 +719,13 @@ class DynamoStorage:
             "guardrails": item.get("guardrails"),
         }
 
+    def get_delivery_group_for_service(self, service_name: str) -> Optional[dict]:
+        for group in self.list_delivery_groups():
+            services = group.get("services", [])
+            if service_name in services:
+                return group
+        return None
+
     def insert_delivery_group(self, group: dict) -> dict:
         item = {
             "pk": "DELIVERY_GROUP",
@@ -732,6 +764,14 @@ class DynamoStorage:
         )
         return response.get("Count", 0) > 0
 
+    def count_active_deployments_for_group(self, group_id: str) -> int:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("DEPLOYMENT")
+            & Attr("state").is_in(["ACTIVE", "IN_PROGRESS"])
+            & Attr("delivery_group_id").eq(group_id)
+        )
+        return int(response.get("Count", 0))
+
     def insert_deployment(self, record: dict, failures: List[dict]) -> None:
         item = {
             "pk": "DEPLOYMENT",
@@ -749,6 +789,7 @@ class DynamoStorage:
             "spinnakerApplication": record.get("spinnakerApplication"),
             "spinnakerPipeline": record.get("spinnakerPipeline"),
             "rollbackOf": record.get("rollbackOf"),
+            "delivery_group_id": record.get("deliveryGroupId"),
             "failures": failures,
         }
         self.table.put_item(Item=item)

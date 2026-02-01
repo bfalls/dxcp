@@ -71,3 +71,14 @@ class Guardrails:
     def enforce_global_lock(self) -> None:
         if self.storage.has_active_deployment():
             raise PolicyError(409, "DEPLOYMENT_LOCKED", "Another deployment is active")
+
+    def enforce_delivery_group_lock(self, group_id: str, max_concurrent: int) -> None:
+        if max_concurrent < 1:
+            max_concurrent = 1
+        active = self.storage.count_active_deployments_for_group(group_id)
+        if active >= max_concurrent:
+            raise PolicyError(
+                409,
+                "DEPLOYMENT_LOCKED",
+                f"Delivery group {group_id} has active deployments",
+            )

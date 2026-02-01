@@ -80,13 +80,20 @@ class RateLimiter:
     def check_read(self, client_id: str) -> None:
         self._check_minute(client_id, SETTINGS.read_rpm)
 
-    def check_mutate(self, client_id: str, quota_key: str) -> None:
+    def check_mutate(
+        self,
+        client_id: str,
+        quota_key: str,
+        quota_scope: str | None = None,
+        quota_limit: int | None = None,
+    ) -> None:
         self._check_minute(client_id, SETTINGS.mutate_rpm)
+        scope_id = quota_scope or client_id
         if quota_key == "deploy":
-            self._check_daily(client_id, "deploy", SETTINGS.daily_quota_deploy)
+            self._check_daily(scope_id, "deploy", quota_limit or SETTINGS.daily_quota_deploy)
         elif quota_key == "rollback":
-            self._check_daily(client_id, "rollback", SETTINGS.daily_quota_rollback)
+            self._check_daily(scope_id, "rollback", quota_limit or SETTINGS.daily_quota_rollback)
         elif quota_key == "build_register":
-            self._check_daily(client_id, "build_register", SETTINGS.daily_quota_build_register)
+            self._check_daily(scope_id, "build_register", SETTINGS.daily_quota_build_register)
         elif quota_key == "upload_capability":
-            self._check_daily(client_id, "upload_capability", SETTINGS.daily_quota_upload_capability)
+            self._check_daily(scope_id, "upload_capability", SETTINGS.daily_quota_upload_capability)
