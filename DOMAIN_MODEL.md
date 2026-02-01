@@ -77,3 +77,23 @@ Fields:
 Notes:
 - Only a small, approved set of recipes exist.
 - Recipes evolve centrally to preserve safety and consistency.
+
+## DeliveryGroup
+
+Named grouping of allowlisted services for discovery and policy attachment.
+
+Fields:
+- id: unique identifier for the delivery group
+- name: human readable name
+- description (optional): short summary of the group
+- owner (optional): team or user identifier
+- services: list of allowlisted service names
+- allowed_recipes: list of recipe ids or names (can be empty)
+- guardrails (optional): policy limits scoped to the group
+  - max_concurrent_deployments
+  - daily_deploy_quota
+  - daily_rollback_quota
+
+Notes:
+- DeliveryGroups do not change deploy semantics in Phase A.
+- Service membership must align with the service allowlist.

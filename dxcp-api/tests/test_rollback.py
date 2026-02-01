@@ -76,6 +76,8 @@ def _insert_deployment(storage, deployment_id: str, service: str, env: str, vers
         "updatedAt": created_at,
         "spinnakerExecutionId": f"exec-{deployment_id}",
         "spinnakerExecutionUrl": f"http://spinnaker.local/pipelines/exec-{deployment_id}",
+        "spinnakerApplication": "demo-app",
+        "spinnakerPipeline": "demo-pipeline",
         "failures": [],
     }
     storage.insert_deployment(record, [])

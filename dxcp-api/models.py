@@ -44,6 +44,22 @@ class DeploymentRecord(BaseModel):
     failures: List[NormalizedFailure] = []
 
 
+class DeliveryGroupGuardrails(BaseModel):
+    max_concurrent_deployments: Optional[int] = None
+    daily_deploy_quota: Optional[int] = None
+    daily_rollback_quota: Optional[int] = None
+
+
+class DeliveryGroup(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    owner: Optional[str] = None
+    services: List[str]
+    allowed_recipes: List[str]
+    guardrails: Optional[DeliveryGroupGuardrails] = None
+
+
 class BuildUploadRequest(BaseModel):
     service: str
     version: str

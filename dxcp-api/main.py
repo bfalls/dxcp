@@ -13,7 +13,14 @@ from fastapi.responses import JSONResponse
 
 from config import SETTINGS
 from idempotency import IdempotencyStore
-from models import BuildRegisterExistingRequest, BuildRegistration, BuildUploadCapability, BuildUploadRequest, DeploymentIntent
+from models import (
+    BuildRegisterExistingRequest,
+    BuildRegistration,
+    BuildUploadCapability,
+    BuildUploadRequest,
+    DeliveryGroup,
+    DeploymentIntent,
+)
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from storage import build_storage, utc_now
@@ -383,6 +390,28 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
     client_id = get_client_id(request, authorization)
     rate_limiter.check_read(client_id)
     return storage.list_services()
+
+
+@app.get("/v1/delivery-groups")
+def list_delivery_groups(request: Request, authorization: Optional[str] = Header(None)):
+    client_id = get_client_id(request, authorization)
+    rate_limiter.check_read(client_id)
+    groups = storage.list_delivery_groups()
+    return [DeliveryGroup(**group).dict() for group in groups]
+
+
+@app.get("/v1/delivery-groups/{group_id}")
+def get_delivery_group(
+    group_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    client_id = get_client_id(request, authorization)
+    rate_limiter.check_read(client_id)
+    group = storage.get_delivery_group(group_id)
+    if not group:
+        return error_response(404, "NOT_FOUND", "Delivery group not found")
+    return DeliveryGroup(**group).dict()
 
 
 @app.get("/v1/services/{service}/versions")

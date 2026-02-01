@@ -138,6 +138,24 @@ Fields:
 - version (validated format)
 - artifactRef (s3://bucket/key) OR s3Bucket + s3Key
 
+### DeliveryGroup
+
+Fields:
+- id
+- name
+- description (optional)
+- owner (optional)
+- services (list of allowlisted service names)
+- allowed_recipes (list of recipe ids or names)
+- guardrails (optional, DeliveryGroupGuardrails)
+
+### DeliveryGroupGuardrails
+
+Fields:
+- max_concurrent_deployments
+- daily_deploy_quota
+- daily_rollback_quota
+
 ---
 
 ## Endpoints
@@ -161,6 +179,16 @@ Fields:
 - GET /v1/deployments/{deploymentId}/failures
   - View normalized failures
   - Response: list of NormalizedFailure
+
+### Delivery Groups (read-only)
+
+- GET /v1/delivery-groups
+  - List delivery groups
+  - Response: list of DeliveryGroup
+
+- GET /v1/delivery-groups/{id}
+  - Get delivery group by id
+  - Response: DeliveryGroup
 
 - POST /v1/deployments/{deploymentId}/rollback
   - Trigger rollback for a prior deployment

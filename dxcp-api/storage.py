@@ -136,6 +136,19 @@ class Storage:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS delivery_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                owner TEXT,
+                services TEXT NOT NULL,
+                allowed_recipes TEXT NOT NULL,
+                guardrails TEXT
+            )
+            """
+        )
         conn.commit()
         conn.close()
 
@@ -205,6 +218,94 @@ class Storage:
             if entry["service_name"] == service_name:
                 return entry
         return None
+
+    def _has_delivery_groups(self) -> bool:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM delivery_groups LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        return row is not None
+
+    def _serialize_json(self, value) -> Optional[str]:
+        if value is None:
+            return None
+        return json.dumps(value)
+
+    def _deserialize_json(self, value: Optional[str], default):
+        if value is None:
+            return default
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+
+    def insert_delivery_group(self, group: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO delivery_groups (
+                id, name, description, owner, services, allowed_recipes, guardrails
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                group["id"],
+                group["name"],
+                group.get("description"),
+                group.get("owner"),
+                self._serialize_json(group.get("services", [])),
+                self._serialize_json(group.get("allowed_recipes", [])),
+                self._serialize_json(group.get("guardrails")),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return group
+
+    def _row_to_delivery_group(self, row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row["description"],
+            "owner": row["owner"],
+            "services": self._deserialize_json(row["services"], []),
+            "allowed_recipes": self._deserialize_json(row["allowed_recipes"], []),
+            "guardrails": self._deserialize_json(row["guardrails"], None),
+        }
+
+    def list_delivery_groups(self) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM delivery_groups ORDER BY name ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [self._row_to_delivery_group(row) for row in rows]
+
+    def get_delivery_group(self, group_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM delivery_groups WHERE id = ?", (group_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_delivery_group(row)
+
+    def ensure_default_delivery_group(self) -> Optional[dict]:
+        if self._has_delivery_groups():
+            return None
+        services = [entry["service_name"] for entry in self.list_services() if entry.get("service_name")]
+        group = {
+            "id": "default",
+            "name": "Default Delivery Group",
+            "description": "Default group for allowlisted services",
+            "owner": None,
+            "services": services,
+            "allowed_recipes": [],
+            "guardrails": None,
+        }
+        return self.insert_delivery_group(group)
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()
@@ -551,6 +652,79 @@ class DynamoStorage:
             "stable_service_url_template": item.get("stable_service_url_template"),
         }
 
+    def _scan_delivery_groups(self, limit: Optional[int] = None) -> List[dict]:
+        params = {
+            "FilterExpression": Attr("pk").eq("DELIVERY_GROUP"),
+        }
+        if limit:
+            params["Limit"] = limit
+        response = self.table.scan(**params)
+        return response.get("Items", [])
+
+    def list_delivery_groups(self) -> List[dict]:
+        items = self._scan_delivery_groups()
+        groups = []
+        for item in items:
+            groups.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "description": item.get("description"),
+                    "owner": item.get("owner"),
+                    "services": item.get("services", []),
+                    "allowed_recipes": item.get("allowed_recipes", []),
+                    "guardrails": item.get("guardrails"),
+                }
+            )
+        groups.sort(key=lambda g: g.get("name", ""))
+        return groups
+
+    def get_delivery_group(self, group_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "DELIVERY_GROUP", "sk": group_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "description": item.get("description"),
+            "owner": item.get("owner"),
+            "services": item.get("services", []),
+            "allowed_recipes": item.get("allowed_recipes", []),
+            "guardrails": item.get("guardrails"),
+        }
+
+    def insert_delivery_group(self, group: dict) -> dict:
+        item = {
+            "pk": "DELIVERY_GROUP",
+            "sk": group["id"],
+            "id": group["id"],
+            "name": group["name"],
+            "description": group.get("description"),
+            "owner": group.get("owner"),
+            "services": group.get("services", []),
+            "allowed_recipes": group.get("allowed_recipes", []),
+            "guardrails": group.get("guardrails"),
+        }
+        self.table.put_item(Item=item)
+        return group
+
+    def ensure_default_delivery_group(self) -> Optional[dict]:
+        existing = self._scan_delivery_groups(limit=1)
+        if existing:
+            return None
+        services = [entry["service_name"] for entry in self.list_services() if entry.get("service_name")]
+        group = {
+            "id": "default",
+            "name": "Default Delivery Group",
+            "description": "Default group for allowlisted services",
+            "owner": None,
+            "services": services,
+            "allowed_recipes": [],
+            "guardrails": None,
+        }
+        return self.insert_delivery_group(group)
+
     def has_active_deployment(self) -> bool:
         response = self.table.scan(
             FilterExpression=Attr("pk").eq("DEPLOYMENT") & Attr("state").is_in(["ACTIVE", "IN_PROGRESS"]),
@@ -815,8 +989,11 @@ class DynamoStorage:
 def build_storage():
     table_name = os.getenv("DXCP_DDB_TABLE", "")
     if table_name:
-        return DynamoStorage(table_name)
-    return Storage(
-        os.getenv("DXCP_DB_PATH", "./data/dxcp.db"),
-        os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
-    )
+        storage = DynamoStorage(table_name)
+    else:
+        storage = Storage(
+            os.getenv("DXCP_DB_PATH", "./data/dxcp.db"),
+            os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
+        )
+    storage.ensure_default_delivery_group()
+    return storage
