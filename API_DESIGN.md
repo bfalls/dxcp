@@ -25,6 +25,11 @@ Base URL:
 Authentication:
 - Bearer token (Authorization: Bearer <token>)
 
+Roles (demo):
+- PLATFORM_ADMIN: full access
+- DELIVERY_OWNER: deploy and rollback only
+- OBSERVER: read-only
+
 Idempotency:
 - Mutating endpoints require Idempotency-Key header
 - Idempotency-Key must be a unique, client-generated string
@@ -239,6 +244,7 @@ Fields:
 - 400 NO_PRIOR_SUCCESSFUL_VERSION
 - 401 UNAUTHORIZED
 - 403 SERVICE_NOT_ALLOWLISTED
+- 403 ROLE_FORBIDDEN
 - 409 DEPLOYMENT_LOCKED
 - 429 RATE_LIMITED
 - 503 MUTATIONS_DISABLED

@@ -1,0 +1,194 @@
+import json
+import os
+import sys
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+class FakeSpinnaker:
+    def __init__(self) -> None:
+        self.mode = "lambda"
+        self.executions = {}
+        self.triggered = []
+
+    def trigger_deploy(self, payload: dict, idempotency_key: str) -> dict:
+        execution_id = f"exec-{len(self.executions) + 1}"
+        self.executions[execution_id] = {"state": "IN_PROGRESS", "failures": []}
+        self.triggered.append({"kind": "deploy", "payload": payload, "idempotency_key": idempotency_key})
+        return {"executionId": execution_id, "executionUrl": f"http://spinnaker.local/pipelines/{execution_id}"}
+
+    def trigger_rollback(self, payload: dict, idempotency_key: str) -> dict:
+        execution_id = f"exec-{len(self.executions) + 1}"
+        self.executions[execution_id] = {"state": "IN_PROGRESS", "failures": []}
+        self.triggered.append({"kind": "rollback", "payload": payload, "idempotency_key": idempotency_key})
+        return {"executionId": execution_id, "executionUrl": f"http://spinnaker.local/pipelines/{execution_id}"}
+
+    def get_execution(self, execution_id: str) -> dict:
+        execution = self.executions.get(execution_id, {"state": "UNKNOWN", "failures": []})
+        return {
+            "state": execution["state"],
+            "failures": execution["failures"],
+            "executionUrl": f"http://spinnaker.local/pipelines/{execution_id}",
+        }
+
+
+def _write_service_registry(path: Path) -> None:
+    data = [
+        {
+            "service_name": "demo-service",
+            "allowed_environments": ["sandbox"],
+            "allowed_recipes": ["default"],
+            "allowed_artifact_sources": ["local:"],
+        }
+    ]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _load_main(tmp_path: Path, role: str):
+    dxcp_api_dir = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(dxcp_api_dir))
+    os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
+    os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
+    os.environ["DXCP_ROLE"] = role
+    _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
+
+    for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
+        if module in sys.modules:
+            del sys.modules[module]
+
+    import importlib
+
+    main = importlib.import_module("main")
+    return main
+
+
+def _client_and_state(tmp_path: Path, role: str):
+    main = _load_main(tmp_path, role)
+    fake = FakeSpinnaker()
+    main.spinnaker = fake
+    main.idempotency = main.IdempotencyStore()
+    main.rate_limiter = main.RateLimiter()
+    main.storage = main.build_storage()
+    main.guardrails = main.Guardrails(main.storage)
+    client = TestClient(main.app)
+    return client, main, fake
+
+
+def _deployment_payload() -> dict:
+    return {
+        "service": "demo-service",
+        "environment": "sandbox",
+        "version": "1.0.0",
+        "changeSummary": "test deploy",
+    }
+
+
+def _insert_deployment(storage, deployment_id: str, version: str, created_at: str):
+    record = {
+        "id": deployment_id,
+        "service": "demo-service",
+        "environment": "sandbox",
+        "version": version,
+        "state": "SUCCEEDED",
+        "changeSummary": f"deploy {version}",
+        "createdAt": created_at,
+        "updatedAt": created_at,
+        "spinnakerExecutionId": f"exec-{deployment_id}",
+        "spinnakerExecutionUrl": f"http://spinnaker.local/pipelines/exec-{deployment_id}",
+        "spinnakerApplication": "demo-app",
+        "spinnakerPipeline": "demo-pipeline",
+        "failures": [],
+    }
+    storage.insert_deployment(record, [])
+
+
+def _build_payload() -> dict:
+    return {
+        "service": "demo-service",
+        "version": "1.0.0",
+        "artifactRef": "local:demo-service-1.0.0.zip",
+        "sha256": "a" * 64,
+        "sizeBytes": 1024,
+        "contentType": "application/zip",
+    }
+
+
+def test_observer_denied_deploy(tmp_path: Path):
+    client, _, _ = _client_and_state(tmp_path, "OBSERVER")
+    response = client.post(
+        "/v1/deployments",
+        headers={"Idempotency-Key": "deploy-1"},
+        json=_deployment_payload(),
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+def test_observer_denied_rollback(tmp_path: Path):
+    client, main, _ = _client_and_state(tmp_path, "OBSERVER")
+    _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+    _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
+    response = client.post(
+        "/v1/deployments/dep-b/rollback",
+        headers={"Idempotency-Key": "rollback-1"},
+        json={},
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+def test_observer_denied_build_register(tmp_path: Path):
+    client, _, _ = _client_and_state(tmp_path, "OBSERVER")
+    response = client.post(
+        "/v1/builds",
+        headers={"Idempotency-Key": "build-1"},
+        json=_build_payload(),
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+def test_delivery_owner_allowed_deploy(tmp_path: Path):
+    client, _, _ = _client_and_state(tmp_path, "DELIVERY_OWNER")
+    response = client.post(
+        "/v1/deployments",
+        headers={"Idempotency-Key": "deploy-2"},
+        json=_deployment_payload(),
+    )
+    assert response.status_code == 201
+
+
+def test_delivery_owner_allowed_rollback(tmp_path: Path):
+    client, main, _ = _client_and_state(tmp_path, "DELIVERY_OWNER")
+    _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+    _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
+    response = client.post(
+        "/v1/deployments/dep-b/rollback",
+        headers={"Idempotency-Key": "rollback-2"},
+        json={},
+    )
+    assert response.status_code == 201
+
+
+def test_platform_admin_allowed_build_register(tmp_path: Path):
+    client, _, _ = _client_and_state(tmp_path, "PLATFORM_ADMIN")
+    cap_request = {
+        "service": "demo-service",
+        "version": "1.0.0",
+        "expectedSizeBytes": 1024,
+        "expectedSha256": "a" * 64,
+        "contentType": "application/zip",
+    }
+    cap_response = client.post(
+        "/v1/builds/upload-capability",
+        headers={"Idempotency-Key": "cap-1"},
+        json=cap_request,
+    )
+    assert cap_response.status_code == 201
+    response = client.post(
+        "/v1/builds",
+        headers={"Idempotency-Key": "build-2"},
+        json=_build_payload(),
+    )
+    assert response.status_code == 201

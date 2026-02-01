@@ -42,6 +42,18 @@ DXCP can be run in a constrained demo mode that:
 Demo mode exists to validate product behavior,
 not as the primary product goal.
 
+## Roles (demo)
+
+DXCP uses a simple demo role override applied to all requests:
+- PLATFORM_ADMIN: full access (default)
+- DELIVERY_OWNER: deploy and rollback only
+- OBSERVER: read-only
+
+Set the role with:
+```
+export DXCP_ROLE=DELIVERY_OWNER
+```
+
 ---
 
 ## Secrets handling

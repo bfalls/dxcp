@@ -14,12 +14,14 @@ from fastapi.responses import JSONResponse
 from config import SETTINGS
 from idempotency import IdempotencyStore
 from models import (
+    Actor,
     BuildRegisterExistingRequest,
     BuildRegistration,
     BuildUploadCapability,
     BuildUploadRequest,
     DeliveryGroup,
     DeploymentIntent,
+    Role,
 )
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
@@ -100,6 +102,26 @@ def get_client_id(request: Request, authorization: Optional[str]) -> str:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Unauthorized"})
     client_host = request.client.host if request.client else None
     return token or client_host or "anonymous"
+
+
+def _resolve_role() -> Role:
+    value = (SETTINGS.role or "").strip().upper()
+    try:
+        return Role(value)
+    except ValueError:
+        logger.warning("unknown role %s, defaulting to OBSERVER", value)
+        return Role.OBSERVER
+
+
+def get_actor(request: Request, authorization: Optional[str]) -> Actor:
+    client_id = get_client_id(request, authorization)
+    return Actor(actor_id=client_id, role=_resolve_role())
+
+
+def require_role(actor: Actor, allowed: set[Role], action: str):
+    if actor.role in allowed:
+        return None
+    return error_response(403, "ROLE_FORBIDDEN", f"Role {actor.role.value} cannot {action}")
 
 
 def enforce_idempotency(request: Request, idempotency_key: str):
@@ -298,10 +320,13 @@ def create_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
+    actor = get_actor(request, authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
+    if role_error:
+        return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_mutate(client_id, "deploy")
+    rate_limiter.check_mutate(actor.actor_id, "deploy")
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
@@ -379,23 +404,23 @@ def list_deployments(
     state: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     deployments = storage.list_deployments(service, state)
     return deployments
 
 
 @app.get("/v1/services")
 def list_services(request: Request, authorization: Optional[str] = Header(None)):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     return storage.list_services()
 
 
 @app.get("/v1/delivery-groups")
 def list_delivery_groups(request: Request, authorization: Optional[str] = Header(None)):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     groups = storage.list_delivery_groups()
     return [DeliveryGroup(**group).dict() for group in groups]
 
@@ -406,8 +431,8 @@ def get_delivery_group(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     group = storage.get_delivery_group(group_id)
     if not group:
         return error_response(404, "NOT_FOUND", "Delivery group not found")
@@ -421,8 +446,8 @@ def list_service_versions(
     refresh: Optional[bool] = Query(False),
     authorization: Optional[str] = Header(None),
 ):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     guardrails.validate_service(service)
     versions = []
     source = "cache"
@@ -463,8 +488,8 @@ def get_deployment(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
@@ -478,8 +503,8 @@ def get_deployment_failures(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_read(client_id)
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
@@ -533,10 +558,13 @@ def rollback_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
+    actor = get_actor(request, authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "rollback")
+    if role_error:
+        return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_mutate(client_id, "rollback")
+    rate_limiter.check_mutate(actor.actor_id, "rollback")
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
@@ -603,10 +631,13 @@ def create_upload_capability(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
+    actor = get_actor(request, authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
+    if role_error:
+        return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_mutate(client_id, "upload_capability")
+    rate_limiter.check_mutate(actor.actor_id, "upload_capability")
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
@@ -645,10 +676,13 @@ def register_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
+    actor = get_actor(request, authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
+    if role_error:
+        return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_mutate(client_id, "build_register")
+    rate_limiter.check_mutate(actor.actor_id, "build_register")
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
@@ -687,10 +721,13 @@ def register_existing_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
+    actor = get_actor(request, authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
+    if role_error:
+        return role_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
-    client_id = get_client_id(request, authorization)
-    rate_limiter.check_mutate(client_id, "build_register")
+    rate_limiter.check_mutate(actor.actor_id, "build_register")
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached

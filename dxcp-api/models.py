@@ -3,6 +3,12 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class Role(str, Enum):
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"
+    DELIVERY_OWNER = "DELIVERY_OWNER"
+    OBSERVER = "OBSERVER"
+
+
 class DeploymentState(str, Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
@@ -58,6 +64,11 @@ class DeliveryGroup(BaseModel):
     services: List[str]
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
+
+
+class Actor(BaseModel):
+    actor_id: str
+    role: Role
 
 
 class BuildUploadRequest(BaseModel):
