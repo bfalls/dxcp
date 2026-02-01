@@ -237,6 +237,12 @@ Spinnaker needs `s3:GetObject` on the referenced object.
 Spinnaker does not reliably resolve `encrypted:s3!` references inside pipeline JSON at execution time.
 Use Orca preconfigured webhook stages so the S3 secret reference lives in Orca config.
 
+Helper script:
+
+```
+./scripts/generate_spinnaker_preconfigured.sh --region <region> --bucket <bucket> --file <path> --key <yaml_key> --out orca-preconfigured.yml
+```
+
 Orca config (example snippet):
 
 ```
