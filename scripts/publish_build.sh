@@ -1,24 +1,68 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_BASE=${DXCP_API_BASE:-http://127.0.0.1:8000/v1}
+API_BASE=""
 API_TOKEN=${DXCP_API_TOKEN:-demo-token}
-SERVICE=${DXCP_SERVICE:-demo-service}
-CONTENT_TYPE=application/zip
 
-if [[ "$API_BASE" == *"127.0.0.1"* || "$API_BASE" == *"localhost"* ]]; then
-  echo "Warning: DXCP_API_BASE is set to localhost (${API_BASE})." >&2
-  echo "If you meant to publish to the deployed API, export DXCP_API_BASE first." >&2
+if [[ "${1-}" == "-h" || "${1-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage:
+  publish_build.sh <service-name> [version] <api-base>
+
+Examples:
+  ./scripts/publish_build.sh demo-service 0.1.6
+  ./scripts/publish_build.sh demo-service-2 0.2.0 "https://<api-id>.execute-api.<region>.amazonaws.com/v1"
+
+Notes:
+  - API base is required and should include /v1 (example: "https://.../v1")
+  - If version is omitted, a timestamped version is generated.
+EOF
+  exit 0
 fi
 
-if [[ -n "${1-}" ]]; then
-  VERSION="$1"
+SERVICE=${1-}
+CONTENT_TYPE=application/zip
+
+if [[ -z "${SERVICE}" ]]; then
+  if [[ -t 0 ]]; then
+    echo "Available services:"
+    ls -1d demo-service* 2>/dev/null || true
+    read -r -p "Service name: " SERVICE
+  fi
+  if [[ -z "${SERVICE}" ]]; then
+    echo "Usage: $0 <service-name> [version] <api-base>" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "${2-}" ]]; then
+  VERSION="$2"
 else
   VERSION="1.0.0-$(date +%Y%m%d%H%M%S)"
 fi
 
+if [[ -n "${3-}" ]]; then
+  API_BASE="$3"
+else
+  echo "Usage: $0 <service-name> [version] <api-base>" >&2
+  exit 1
+fi
+
 WORKDIR=$(cd "$(dirname "$0")/.." && pwd)
 SERVICE_DIR="$WORKDIR/$SERVICE"
+if [[ ! -d "$SERVICE_DIR" ]]; then
+  if [[ -t 0 ]]; then
+    echo "Service directory not found: $SERVICE_DIR" >&2
+    echo "Available services:"
+    ls -1d "$WORKDIR"/demo-service* 2>/dev/null | xargs -n1 basename || true
+    read -r -p "Service name: " SERVICE
+    SERVICE_DIR="$WORKDIR/$SERVICE"
+  fi
+  if [[ ! -d "$SERVICE_DIR" ]]; then
+    echo "Service directory not found: $SERVICE_DIR" >&2
+    exit 1
+  fi
+fi
 BUILD_DIR="$SERVICE_DIR/build"
 ARTIFACT="$BUILD_DIR/${SERVICE}-${VERSION}.zip"
 ARTIFACT_S3_KEY="${SERVICE}/${SERVICE}-${VERSION}.zip"
