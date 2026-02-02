@@ -84,7 +84,7 @@ async def _client_and_state(tmp_path: Path, group_a_guardrails: dict | None = No
             "description": "Group A",
             "owner": None,
             "services": ["service-a"],
-            "allowed_recipes": [],
+            "allowed_recipes": ["default"],
             "guardrails": group_a_guardrails
             or {
                 "max_concurrent_deployments": 1,
@@ -100,7 +100,7 @@ async def _client_and_state(tmp_path: Path, group_a_guardrails: dict | None = No
             "description": "Group B",
             "owner": None,
             "services": ["service-b"],
-            "allowed_recipes": [],
+            "allowed_recipes": ["default"],
             "guardrails": {
                 "max_concurrent_deployments": 1,
                 "daily_deploy_quota": 5,
@@ -121,6 +121,7 @@ def _deploy_payload(service: str) -> dict:
         "environment": "sandbox",
         "version": "1.0.0",
         "changeSummary": f"deploy {service}",
+        "recipeId": "default",
     }
 
 

@@ -90,6 +90,7 @@ def _deployment_payload() -> dict:
         "environment": "sandbox",
         "version": "1.0.0",
         "changeSummary": "test deploy",
+        "recipeId": "default",
     }
 
 

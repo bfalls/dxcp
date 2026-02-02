@@ -13,6 +13,7 @@ Fields (required unless noted):
 - version: artifact version or build ID
 - environment: single allowed environment (sandbox)
 - recipe: Recipe reference (see Recipe)
+- recipeId: selects a Recipe by id
 - requested_by: user identifier or actor
 - requested_at: timestamp
 - idempotency_key: stable key for retries and duplicate submits
@@ -70,9 +71,10 @@ Fields:
 - recipe_id: unique identifier
 - name: human readable name
 - description: short purpose statement
-- policy: validation and guardrails applied for this recipe
-- spinnaker_pipeline_id: engine pipeline template identifier
-- parameters: allowed parameters that DXCP will pass to the adapter
+- allowed_parameters: explicit allowlist of parameters DXCP will pass to the adapter
+- spinnaker_application: engine application identifier
+- deploy_pipeline: engine pipeline identifier for deploy
+- rollback_pipeline: engine pipeline identifier for rollback
 
 Notes:
 - Only a small, approved set of recipes exist.

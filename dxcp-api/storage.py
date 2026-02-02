@@ -68,6 +68,7 @@ class Storage:
                 service TEXT NOT NULL,
                 environment TEXT NOT NULL,
                 version TEXT NOT NULL,
+                recipe_id TEXT,
                 state TEXT NOT NULL,
                 change_summary TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -85,6 +86,7 @@ class Storage:
         self._ensure_column(cur, "deployments", "spinnaker_application", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
         self._ensure_column(cur, "deployments", "delivery_group_id", "TEXT")
+        self._ensure_column(cur, "deployments", "recipe_id", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -148,6 +150,19 @@ class Storage:
                 services TEXT NOT NULL,
                 allowed_recipes TEXT NOT NULL,
                 guardrails TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recipes (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                allowed_parameters TEXT NOT NULL,
+                spinnaker_application TEXT,
+                deploy_pipeline TEXT,
+                rollback_pipeline TEXT
             )
             """
         )
@@ -265,6 +280,67 @@ class Storage:
         conn.close()
         return group
 
+    def _has_recipes(self) -> bool:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM recipes LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        return row is not None
+
+    def insert_recipe(self, recipe: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO recipes (
+                id, name, description, allowed_parameters,
+                spinnaker_application, deploy_pipeline, rollback_pipeline
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                recipe["id"],
+                recipe["name"],
+                recipe.get("description"),
+                self._serialize_json(recipe.get("allowed_parameters", [])),
+                recipe.get("spinnaker_application"),
+                recipe.get("deploy_pipeline"),
+                recipe.get("rollback_pipeline"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return recipe
+
+    def _row_to_recipe(self, row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row["description"],
+            "allowed_parameters": self._deserialize_json(row["allowed_parameters"], []),
+            "spinnaker_application": row["spinnaker_application"],
+            "deploy_pipeline": row["deploy_pipeline"],
+            "rollback_pipeline": row["rollback_pipeline"],
+        }
+
+    def list_recipes(self) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recipes ORDER BY name ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [self._row_to_recipe(row) for row in rows]
+
+    def get_recipe(self, recipe_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_recipe(row)
+
     def _row_to_delivery_group(self, row: sqlite3.Row) -> dict:
         return {
             "id": row["id"],
@@ -311,10 +387,24 @@ class Storage:
             "description": "Default group for allowlisted services",
             "owner": None,
             "services": services,
-            "allowed_recipes": [],
+            "allowed_recipes": ["default"],
             "guardrails": None,
         }
         return self.insert_delivery_group(group)
+
+    def ensure_default_recipe(self) -> Optional[dict]:
+        if self._has_recipes():
+            return None
+        recipe = {
+            "id": "default",
+            "name": "Default Deploy",
+            "description": "Default recipe for demo deployments",
+            "allowed_parameters": [],
+            "spinnaker_application": None,
+            "deploy_pipeline": "demo-deploy",
+            "rollback_pipeline": "rollback-demo-service",
+        }
+        return self.insert_recipe(recipe)
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()
@@ -348,16 +438,17 @@ class Storage:
         cur.execute(
             """
             INSERT INTO deployments (
-                id, service, environment, version, state, change_summary,
+                id, service, environment, version, recipe_id, state, change_summary,
                 created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url,
                 spinnaker_application, spinnaker_pipeline, rollback_of, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
                 record["service"],
                 record["environment"],
                 record["version"],
+                record.get("recipeId"),
                 record["state"],
                 record["changeSummary"],
                 record["createdAt"],
@@ -462,6 +553,7 @@ class Storage:
             "service": row["service"],
             "environment": row["environment"],
             "version": row["version"],
+            "recipeId": row["recipe_id"],
             "state": row["state"],
             "changeSummary": row["change_summary"],
             "createdAt": row["created_at"],
@@ -741,6 +833,63 @@ class DynamoStorage:
         self.table.put_item(Item=item)
         return group
 
+    def _scan_recipes(self, limit: Optional[int] = None) -> List[dict]:
+        params = {
+            "FilterExpression": Attr("pk").eq("RECIPE"),
+        }
+        if limit:
+            params["Limit"] = limit
+        response = self.table.scan(**params)
+        return response.get("Items", [])
+
+    def list_recipes(self) -> List[dict]:
+        items = self._scan_recipes()
+        recipes = []
+        for item in items:
+            recipes.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "description": item.get("description"),
+                    "allowed_parameters": item.get("allowed_parameters", []),
+                    "spinnaker_application": item.get("spinnaker_application"),
+                    "deploy_pipeline": item.get("deploy_pipeline"),
+                    "rollback_pipeline": item.get("rollback_pipeline"),
+                }
+            )
+        recipes.sort(key=lambda r: r.get("name", ""))
+        return recipes
+
+    def get_recipe(self, recipe_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "RECIPE", "sk": recipe_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "description": item.get("description"),
+            "allowed_parameters": item.get("allowed_parameters", []),
+            "spinnaker_application": item.get("spinnaker_application"),
+            "deploy_pipeline": item.get("deploy_pipeline"),
+            "rollback_pipeline": item.get("rollback_pipeline"),
+        }
+
+    def insert_recipe(self, recipe: dict) -> dict:
+        item = {
+            "pk": "RECIPE",
+            "sk": recipe["id"],
+            "id": recipe["id"],
+            "name": recipe["name"],
+            "description": recipe.get("description"),
+            "allowed_parameters": recipe.get("allowed_parameters", []),
+            "spinnaker_application": recipe.get("spinnaker_application"),
+            "deploy_pipeline": recipe.get("deploy_pipeline"),
+            "rollback_pipeline": recipe.get("rollback_pipeline"),
+        }
+        self.table.put_item(Item=item)
+        return recipe
+
     def ensure_default_delivery_group(self) -> Optional[dict]:
         existing = self._scan_delivery_groups(limit=1)
         if existing:
@@ -752,10 +901,25 @@ class DynamoStorage:
             "description": "Default group for allowlisted services",
             "owner": None,
             "services": services,
-            "allowed_recipes": [],
+            "allowed_recipes": ["default"],
             "guardrails": None,
         }
         return self.insert_delivery_group(group)
+
+    def ensure_default_recipe(self) -> Optional[dict]:
+        existing = self._scan_recipes(limit=1)
+        if existing:
+            return None
+        recipe = {
+            "id": "default",
+            "name": "Default Deploy",
+            "description": "Default recipe for demo deployments",
+            "allowed_parameters": [],
+            "spinnaker_application": None,
+            "deploy_pipeline": "demo-deploy",
+            "rollback_pipeline": "rollback-demo-service",
+        }
+        return self.insert_recipe(recipe)
 
     def has_active_deployment(self) -> bool:
         response = self.table.scan(
@@ -780,6 +944,7 @@ class DynamoStorage:
             "service": record["service"],
             "environment": record["environment"],
             "version": record["version"],
+            "recipeId": record.get("recipeId"),
             "state": record["state"],
             "changeSummary": record["changeSummary"],
             "createdAt": record["createdAt"],
@@ -816,6 +981,7 @@ class DynamoStorage:
             "service": item.get("service"),
             "environment": item.get("environment"),
             "version": item.get("version"),
+            "recipeId": item.get("recipeId"),
             "state": item.get("state"),
             "changeSummary": item.get("changeSummary"),
             "createdAt": item.get("createdAt"),
@@ -843,6 +1009,7 @@ class DynamoStorage:
                     "service": item.get("service"),
                     "environment": item.get("environment"),
                     "version": item.get("version"),
+                    "recipeId": item.get("recipeId"),
                     "state": item.get("state"),
                     "changeSummary": item.get("changeSummary"),
                     "createdAt": item.get("createdAt"),
@@ -885,6 +1052,7 @@ class DynamoStorage:
             "service": item.get("service"),
             "environment": item.get("environment"),
             "version": item.get("version"),
+            "recipeId": item.get("recipeId"),
             "state": item.get("state"),
             "changeSummary": item.get("changeSummary"),
             "createdAt": item.get("createdAt"),
@@ -1037,4 +1205,5 @@ def build_storage():
             os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
         )
     storage.ensure_default_delivery_group()
+    storage.ensure_default_recipe()
     return storage

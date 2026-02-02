@@ -92,6 +92,8 @@ npm run dev
 
 Open http://127.0.0.1:5173
 
+Deployment detail view includes a normalized timeline (no engine stages).
+
 ---
 
 ## API local run
@@ -107,6 +109,20 @@ uvicorn main:app --reload
 ```
 
 Open http://127.0.0.1:8000/docs
+
+List recipes:
+```
+curl -sS http://127.0.0.1:8000/v1/recipes
+```
+
+Deploy using a recipe:
+```
+curl -sS -X POST http://127.0.0.1:8000/v1/deployments \
+  -H "Authorization: Bearer demo-token" \
+  -H "Idempotency-Key: demo-deploy-1" \
+  -H "Content-Type: application/json" \
+  -d '{"service":"demo-service","environment":"sandbox","version":"1.0.0","changeSummary":"demo","recipeId":"default"}'
+```
 
 ---
 

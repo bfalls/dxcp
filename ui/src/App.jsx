@@ -49,34 +49,6 @@ function statusClass(state) {
   return `status ${state || ''}`
 }
 
-function deriveTimeline(state) {
-  const steps = [
-    { key: 'intent', title: 'Intent accepted', detail: 'Deployment intent validated and accepted.' },
-    { key: 'engine', title: 'Execution running', detail: 'Spinnaker pipeline executing.' },
-    { key: 'result', title: 'Execution result', detail: 'Deployment completed.' }
-  ]
-  if (state === 'ACTIVE' || state === 'IN_PROGRESS') {
-    steps[0].active = true
-    steps[1].active = true
-  } else if (state === 'SUCCEEDED') {
-    steps.forEach((s) => (s.active = true))
-  } else if (state === 'FAILED') {
-    steps[0].active = true
-    steps[1].active = true
-    steps[2].active = true
-    steps[2].detail = 'Deployment failed.'
-  } else if (state === 'CANCELED') {
-    steps[0].active = true
-    steps[1].active = true
-    steps[2].active = true
-    steps[2].detail = 'Deployment canceled.'
-  } else if (state === 'ROLLED_BACK') {
-    steps.forEach((s) => (s.active = true))
-    steps[2].detail = 'Rollback completed.'
-  }
-  return steps
-}
-
 export default function App() {
   const api = useApi()
   const [view, setView] = useState('deploy')
@@ -93,19 +65,14 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [rollbackResult, setRollbackResult] = useState(null)
-  const [spinnakerApps, setSpinnakerApps] = useState([])
-  const [spinnakerPipelines, setSpinnakerPipelines] = useState([])
-  const [spinnakerApp, setSpinnakerApp] = useState('')
-  const [spinnakerPipeline, setSpinnakerPipeline] = useState('')
-  const [spinnakerTagName, setSpinnakerTagName] = useState('dxcp')
-  const [spinnakerTagValue, setSpinnakerTagValue] = useState('deployable')
-  const [spinnakerLoading, setSpinnakerLoading] = useState(false)
-  const [spinnakerPipelinesLoading, setSpinnakerPipelinesLoading] = useState(false)
+  const [recipes, setRecipes] = useState([])
+  const [recipeId, setRecipeId] = useState('')
   const [versions, setVersions] = useState([])
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [versionsRefreshing, setVersionsRefreshing] = useState(false)
   const [versionsError, setVersionsError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [timeline, setTimeline] = useState([])
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
 
@@ -134,42 +101,17 @@ export default function App() {
     }
   }
 
-  async function loadSpinnakerApplications() {
+  async function loadRecipes() {
     setErrorMessage('')
-    setSpinnakerLoading(true)
     try {
-      const query = new URLSearchParams()
-      if (spinnakerTagName) query.set('tagName', spinnakerTagName)
-      if (spinnakerTagValue) query.set('tagValue', spinnakerTagValue)
-      const suffix = query.toString() ? `?${query.toString()}` : ''
-      const data = await api.get(`/spinnaker/applications${suffix}`)
-      const apps = Array.isArray(data?.applications) ? data.applications : []
-      setSpinnakerApps(apps)
-      if (apps.length > 0 && !spinnakerApp) {
-        setSpinnakerApp(apps[0].name)
+      const data = await api.get('/recipes')
+      const list = Array.isArray(data) ? data : []
+      setRecipes(list)
+      if (!recipeId && list.length > 0) {
+        setRecipeId(list[0].id)
       }
     } catch (err) {
-      setErrorMessage('Failed to load Spinnaker applications')
-    } finally {
-      setSpinnakerLoading(false)
-    }
-  }
-
-  async function loadSpinnakerPipelines(appName) {
-    if (!appName) return
-    setErrorMessage('')
-    setSpinnakerPipelinesLoading(true)
-    try {
-      const data = await api.get(`/spinnaker/applications/${appName}/pipelines`)
-      const pipelines = Array.isArray(data?.pipelines) ? data.pipelines : []
-      setSpinnakerPipelines(pipelines)
-      if (pipelines.length > 0 && !spinnakerPipeline) {
-        setSpinnakerPipeline(pipelines[0].name)
-      }
-    } catch (err) {
-      setErrorMessage('Failed to load Spinnaker pipelines')
-    } finally {
-      setSpinnakerPipelinesLoading(false)
+      setErrorMessage('Failed to load recipes')
     }
   }
 
@@ -199,10 +141,7 @@ export default function App() {
 
   async function refreshData() {
     setRefreshing(true)
-    const tasks = [loadSpinnakerApplications(), loadVersions(true)]
-    if (spinnakerApp) {
-      tasks.push(loadSpinnakerPipelines(spinnakerApp))
-    }
+    const tasks = [loadRecipes(), loadVersions(true)]
     await Promise.allSettled(tasks)
     setRefreshing(false)
   }
@@ -215,8 +154,8 @@ export default function App() {
       setErrorMessage('Version format is invalid')
       return
     }
-    if (!spinnakerApp || !spinnakerPipeline) {
-      setErrorMessage('Spinnaker application and pipeline are required')
+    if (!recipeId) {
+      setErrorMessage('Recipe is required')
       return
     }
     const key = `deploy-${Date.now()}`
@@ -225,8 +164,7 @@ export default function App() {
       environment: 'sandbox',
       version,
       changeSummary,
-      spinnakerApplication: spinnakerApp,
-      spinnakerPipeline: spinnakerPipeline
+      recipeId
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
@@ -242,6 +180,7 @@ export default function App() {
     setSelected(null)
     setFailures([])
     setRollbackResult(null)
+    setTimeline([])
     setErrorMessage('')
     setStatusMessage('')
     try {
@@ -253,6 +192,8 @@ export default function App() {
       setSelected(detail)
       const failureData = await api.get(`/deployments/${deployment.id}/failures`)
       setFailures(Array.isArray(failureData) ? failureData : [])
+      const timelineData = await api.get(`/deployments/${deployment.id}/timeline`)
+      setTimeline(Array.isArray(timelineData) ? timelineData : [])
       setView('detail')
     } catch (err) {
       setErrorMessage('Failed to load deployment detail')
@@ -280,7 +221,7 @@ export default function App() {
 
   useEffect(() => {
     loadServices()
-    loadSpinnakerApplications()
+    loadRecipes()
   }, [])
 
   useEffect(() => {
@@ -298,21 +239,6 @@ export default function App() {
       }
     }
   }, [versions, versionMode, versionSelection])
-
-  useEffect(() => {
-    setSpinnakerApps([])
-    setSpinnakerApp('')
-    setSpinnakerPipelines([])
-    setSpinnakerPipeline('')
-    loadSpinnakerApplications()
-  }, [spinnakerTagName, spinnakerTagValue])
-
-  useEffect(() => {
-    if (!spinnakerApp) return
-    setSpinnakerPipelines([])
-    setSpinnakerPipeline('')
-    loadSpinnakerPipelines(spinnakerApp)
-  }, [spinnakerApp])
 
   useEffect(() => {
     if (view !== 'deploy' || !service) return undefined
@@ -336,6 +262,8 @@ export default function App() {
           setSelected(detail)
           const failureData = await api.get(`/deployments/${selected.id}/failures`)
           setFailures(Array.isArray(failureData) ? failureData : [])
+          const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
+          setTimeline(Array.isArray(timelineData) ? timelineData : [])
         }
       } catch (err) {
         if (!cancelled) setErrorMessage('Failed to refresh deployment status')
@@ -347,7 +275,6 @@ export default function App() {
     }
   }, [view, selected?.id])
 
-  const timeline = deriveTimeline(selected?.state)
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
   if (selectedService?.stable_service_url_template) {
@@ -423,46 +350,17 @@ export default function App() {
               </select>
               <div className="helper">Allowlisted services only.</div>
             </div>
-            <div className="row">
-              <div className="field">
-                <label>Spinnaker tag name</label>
-                <input value={spinnakerTagName} onChange={(e) => setSpinnakerTagName(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Spinnaker tag value</label>
-                <input value={spinnakerTagValue} onChange={(e) => setSpinnakerTagValue(e.target.value)} />
-              </div>
-            </div>
-            <div className="helper">
-              Only Spinnaker applications with this tag are shown. Suggested tag: dxcp=deployable.
-            </div>
-            <div className="row">
-              <div className="field">
-                <label>Spinnaker application</label>
-                <select value={spinnakerApp} onChange={(e) => setSpinnakerApp(e.target.value)} disabled={spinnakerLoading}>
-                  {spinnakerLoading && <option value="">Loading applications…</option>}
-                  {!spinnakerLoading && spinnakerApps.length === 0 && <option value="">No applications found</option>}
-                  {spinnakerApps.map((app) => (
-                    <option key={app.name} value={app.name}>
-                      {app.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="helper">Discovered via Gate.</div>
-              </div>
-              <div className="field">
-                <label>Spinnaker pipeline</label>
-                <select value={spinnakerPipeline} onChange={(e) => setSpinnakerPipeline(e.target.value)} disabled={spinnakerPipelinesLoading}>
-                  {spinnakerPipelinesLoading && <option value="">Loading pipelines…</option>}
-                  {!spinnakerPipelinesLoading && spinnakerPipelines.length === 0 && <option value="">No pipelines found</option>}
-                  {spinnakerPipelines.map((pipeline) => (
-                    <option key={pipeline.name} value={pipeline.name}>
-                      {pipeline.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="helper">Pipeline configs for selected app.</div>
-              </div>
+            <div className="field">
+              <label>Recipe</label>
+              <select value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
+                {recipes.length === 0 && <option value="">No recipes registered</option>}
+                {recipes.map((recipe) => (
+                  <option key={recipe.id} value={recipe.id}>
+                    {recipe.name}
+                  </option>
+                ))}
+              </select>
+              <div className="helper">Recipe controls the delivery path.</div>
             </div>
             <div className="row">
               <div className="field">
@@ -585,7 +483,7 @@ export default function App() {
                 <div className="links">
                   {selected.spinnakerExecutionUrl && (
                     <a className="link" href={selected.spinnakerExecutionUrl} target="_blank" rel="noreferrer">
-                      Spinnaker execution
+                      Debug in Spinnaker
                     </a>
                   )}
                   {serviceUrl && (
@@ -613,10 +511,12 @@ export default function App() {
           <div className="card">
             <h2>Timeline</h2>
             <div className="timeline">
+              {timeline.length === 0 && <div className="helper">No timeline events available.</div>}
               {timeline.map((step) => (
-                <div key={step.key} className={`timeline-step ${step.active ? 'active' : ''}`}>
-                  <strong>{step.title}</strong>
-                  <div className="helper">{step.detail}</div>
+                <div key={step.key} className="timeline-step active">
+                  <strong>{step.label}</strong>
+                  <div className="helper">{formatTime(step.occurredAt)}</div>
+                  {step.detail && <div className="helper">{step.detail}</div>}
                 </div>
               ))}
             </div>
@@ -637,7 +537,7 @@ export default function App() {
       )}
 
       <footer className="footer">
-        DXCP demo UI. Guardrails enforced by the API: allowlist, sandbox only, global lock, rate limits, idempotency.
+        DXCP UI. Guardrails enforced by the API: allowlist, sandbox only, per-group lock, rate limits, idempotency.
       </footer>
     </div>
   )

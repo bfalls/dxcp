@@ -5,7 +5,7 @@
     "description": "Example group A",
     "owner": "platform-team",
     "services": ["service-a"],
-    "allowed_recipes": [],
+    "allowed_recipes": ["default"],
     "guardrails": {
       "max_concurrent_deployments": 1,
       "daily_deploy_quota": 5,
@@ -18,7 +18,7 @@
     "description": "Example group B",
     "owner": "platform-team",
     "services": ["service-b"],
-    "allowed_recipes": [],
+    "allowed_recipes": ["default"],
     "guardrails": {
       "max_concurrent_deployments": 1,
       "daily_deploy_quota": 5,

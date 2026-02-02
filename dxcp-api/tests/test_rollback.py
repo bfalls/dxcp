@@ -40,7 +40,7 @@ def _write_service_registry(path: Path) -> None:
         {
             "service_name": "demo-service",
             "allowed_environments": ["sandbox"],
-            "allowed_recipes": [],
+            "allowed_recipes": ["default"],
             "allowed_artifact_sources": [],
         }
     ]

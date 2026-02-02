@@ -21,7 +21,9 @@ from models import (
     BuildUploadRequest,
     DeliveryGroup,
     DeploymentIntent,
+    Recipe,
     Role,
+    TimelineEvent,
 )
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
@@ -135,12 +137,36 @@ def resolve_delivery_group(service: str):
     return group, None
 
 
+def resolve_recipe(recipe_id: Optional[str], group: dict):
+    if not recipe_id:
+        return None, error_response(400, "RECIPE_ID_REQUIRED", "recipeId is required")
+    resolved_id = recipe_id
+    recipe = storage.get_recipe(resolved_id)
+    if not recipe:
+        return None, error_response(404, "RECIPE_NOT_FOUND", f"Recipe {resolved_id} not found")
+    allowed = group.get("allowed_recipes", [])
+    if resolved_id not in allowed:
+        return None, error_response(
+            403,
+            "RECIPE_NOT_ALLOWED",
+            f"Recipe {resolved_id} not allowed for delivery group {group.get('id')}",
+        )
+    return recipe, None
+
+
 def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
     guardrails = group.get("guardrails") or {}
     value = guardrails.get(key)
     if isinstance(value, int) and value > 0:
         return value
     return default_value
+
+
+def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
+    if recipe.get("spinnaker_application"):
+        payload["spinnakerApplication"] = recipe.get("spinnaker_application")
+    if recipe.get("deploy_pipeline"):
+        payload["spinnakerPipeline"] = recipe.get("deploy_pipeline")
 
 
 def enforce_idempotency(request: Request, idempotency_key: str):
@@ -192,6 +218,43 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
             if original and original.get("state") != "ROLLED_BACK":
                 storage.update_deployment(original["id"], "ROLLED_BACK", original.get("failures", []))
     return deployment
+
+
+def _timeline_event(key: str, label: str, occurred_at: str, detail: Optional[str] = None) -> dict:
+    return TimelineEvent(key=key, label=label, occurredAt=occurred_at, detail=detail).dict()
+
+
+def derive_timeline(deployment: dict) -> list:
+    created_at = deployment.get("createdAt") or utc_now()
+    updated_at = deployment.get("updatedAt") or created_at
+    state = deployment.get("state")
+    events = [
+        _timeline_event("submitted", "Submitted", created_at, "Deployment intent received."),
+        _timeline_event("validated", "Validated", created_at, "Guardrails and inputs validated."),
+    ]
+    if deployment.get("rollbackOf"):
+        events.append(_timeline_event("rollback_started", "Rollback started", created_at, "Rollback requested."))
+        if state == "SUCCEEDED":
+            events.append(_timeline_event("rollback_succeeded", "Rollback succeeded", updated_at, "Rollback completed."))
+        elif state == "FAILED":
+            events.append(_timeline_event("rollback_failed", "Rollback failed", updated_at, "Rollback failed."))
+        elif state in ["ACTIVE", "IN_PROGRESS"]:
+            events.append(_timeline_event("in_progress", "In progress", updated_at, "Rollback executing."))
+        return events
+
+    if state in ["ACTIVE", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]:
+        events.append(_timeline_event("in_progress", "In progress", created_at, "Deployment executing."))
+    if state == "ACTIVE":
+        events.append(_timeline_event("active", "Active", updated_at, "Deployment is active."))
+    if state == "SUCCEEDED":
+        events.append(_timeline_event("succeeded", "Succeeded", updated_at, "Deployment completed."))
+    elif state == "FAILED":
+        events.append(_timeline_event("failed", "Failed", updated_at, "Deployment failed."))
+    elif state == "CANCELED":
+        events.append(_timeline_event("failed", "Failed", updated_at, "Deployment canceled."))
+    elif state == "ROLLED_BACK":
+        events.append(_timeline_event("rollback_succeeded", "Rollback succeeded", updated_at, "Rollback completed."))
+    return events
 
 
 def _parse_s3_ref(artifact_ref: str) -> tuple[str, str]:
@@ -351,6 +414,9 @@ def create_deployment(
     group, group_error = resolve_delivery_group(intent.service)
     if group_error:
         return group_error
+    recipe, recipe_error = resolve_recipe(intent.recipeId, group)
+    if recipe_error:
+        return recipe_error
     max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
     daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
     rate_limiter.check_mutate(actor.actor_id, "deploy", quota_scope=group["id"], quota_limit=daily_deploy_quota)
@@ -360,13 +426,13 @@ def create_deployment(
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
 
     payload = intent.dict()
+    payload.pop("spinnakerApplication", None)
+    payload.pop("spinnakerPipeline", None)
+    payload.pop("recipeId", None)
+    _apply_recipe_mapping(payload, recipe)
     if spinnaker.mode == "http":
-        if not payload.get("spinnakerApplication") or not payload.get("spinnakerPipeline"):
-            return error_response(
-                400,
-                "INVALID_REQUEST",
-                "spinnakerApplication and spinnakerPipeline are required for deploy",
-            )
+        if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
+            return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for deploy")
         build = storage.find_latest_build(intent.service, intent.version)
         if not build:
             auto_key = f"{intent.service}/{intent.service}-{intent.version}.zip"
@@ -395,6 +461,7 @@ def create_deployment(
         "service": intent.service,
         "environment": intent.environment,
         "version": intent.version,
+        "recipeId": recipe.get("id"),
         "state": "IN_PROGRESS",
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
@@ -459,6 +526,24 @@ def get_delivery_group(
     if not group:
         return error_response(404, "NOT_FOUND", "Delivery group not found")
     return DeliveryGroup(**group).dict()
+
+
+@app.get("/v1/recipes")
+def list_recipes(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    recipes = storage.list_recipes()
+    return [Recipe(**recipe).dict() for recipe in recipes]
+
+
+@app.get("/v1/recipes/{recipe_id}")
+def get_recipe(recipe_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    recipe = storage.get_recipe(recipe_id)
+    if not recipe:
+        return error_response(404, "NOT_FOUND", "Recipe not found")
+    return Recipe(**recipe).dict()
 
 
 @app.get("/v1/services/{service}/versions")
@@ -532,6 +617,21 @@ def get_deployment_failures(
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
     return deployment.get("failures", [])
+
+
+@app.get("/v1/deployments/{deployment_id}/timeline")
+def get_deployment_timeline(
+    deployment_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    deployment = storage.get_deployment(deployment_id)
+    if not deployment:
+        return error_response(404, "NOT_FOUND", "Deployment not found")
+    deployment = refresh_from_spinnaker(deployment)
+    return derive_timeline(deployment)
 
 
 @app.get("/v1/spinnaker/applications")
@@ -615,11 +715,17 @@ def rollback_deployment(
         "spinnakerApplication": deployment.get("spinnakerApplication"),
         "spinnakerPipeline": deployment.get("spinnakerPipeline"),
     }
-    if not payload.get("spinnakerApplication") or not payload.get("spinnakerPipeline"):
+    recipe = storage.get_recipe(deployment.get("recipeId") or "default")
+    if recipe:
+        if recipe.get("spinnaker_application"):
+            payload["spinnakerApplication"] = recipe.get("spinnaker_application")
+        if recipe.get("rollback_pipeline"):
+            payload["spinnakerPipeline"] = recipe.get("rollback_pipeline")
+    if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
         return error_response(
             400,
             "MISSING_SPINNAKER_TARGET",
-            "Deployment is missing spinnakerApplication/spinnakerPipeline; redeploy with those fields set",
+            "Deployment is missing spinnakerApplication; redeploy with a recipe configured",
         )
     if spinnaker.mode == "http":
         build = storage.find_latest_build(deployment["service"], prior["version"])
@@ -636,6 +742,7 @@ def rollback_deployment(
         "service": deployment["service"],
         "environment": deployment["environment"],
         "version": prior["version"],
+        "recipeId": deployment.get("recipeId") or "default",
         "state": "IN_PROGRESS",
         "changeSummary": f"rollback of {deployment_id} to {prior['version']}",
         "rollbackOf": deployment_id,

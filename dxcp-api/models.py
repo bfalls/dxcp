@@ -24,6 +24,7 @@ class DeploymentIntent(BaseModel):
     environment: str
     version: str
     changeSummary: str = Field(..., max_length=240)
+    recipeId: Optional[str] = None
     spinnakerApplication: Optional[str] = None
     spinnakerPipeline: Optional[str] = None
 
@@ -41,6 +42,7 @@ class DeploymentRecord(BaseModel):
     service: str
     environment: str
     version: str
+    recipeId: Optional[str] = None
     state: DeploymentState
     createdAt: str
     updatedAt: str
@@ -48,6 +50,13 @@ class DeploymentRecord(BaseModel):
     spinnakerExecutionUrl: str
     rollbackOf: Optional[str] = None
     failures: List[NormalizedFailure] = []
+
+
+class TimelineEvent(BaseModel):
+    key: str
+    label: str
+    occurredAt: str
+    detail: Optional[str] = None
 
 
 class DeliveryGroupGuardrails(BaseModel):
@@ -64,6 +73,16 @@ class DeliveryGroup(BaseModel):
     services: List[str]
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
+
+
+class Recipe(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    allowed_parameters: List[str]
+    spinnaker_application: Optional[str] = None
+    deploy_pipeline: Optional[str] = None
+    rollback_pipeline: Optional[str] = None
 
 
 class Actor(BaseModel):

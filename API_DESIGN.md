@@ -89,8 +89,10 @@ Fields:
 - environment (string, must be "sandbox")
 - version (string, validated format)
 - changeSummary (string, required, max 240 chars)
-- spinnakerApplication (string, required in http mode)
-- spinnakerPipeline (string, required in http mode)
+- recipeId (string, required)
+
+Notes:
+- spinnakerApplication and spinnakerPipeline are mapped from the Recipe and not user-provided.
 
 ### DeploymentRecord
 
@@ -99,6 +101,7 @@ Fields:
 - service
 - environment
 - version
+- recipeId
 - state (PENDING | IN_PROGRESS | ACTIVE | SUCCEEDED | FAILED | CANCELED | ROLLED_BACK)
 - createdAt
 - updatedAt
@@ -106,6 +109,14 @@ Fields:
 - spinnakerExecutionUrl (required, deep-linkable)
 - rollbackOf (optional; deployment id being rolled back)
 - failures (list of NormalizedFailure)
+
+### TimelineEvent
+
+Fields:
+- key
+- label
+- occurredAt
+- detail (optional)
 
 ### NormalizedFailure
 
@@ -162,6 +173,17 @@ Fields:
 - daily_deploy_quota
 - daily_rollback_quota
 
+### Recipe
+
+Fields:
+- id
+- name
+- description (optional)
+- allowed_parameters
+- spinnaker_application
+- deploy_pipeline
+- rollback_pipeline
+
 ---
 
 ## Endpoints
@@ -186,6 +208,10 @@ Fields:
   - View normalized failures
   - Response: list of NormalizedFailure
 
+- GET /v1/deployments/{deploymentId}/timeline
+  - View normalized timeline events
+  - Response: list of TimelineEvent
+
 ### Delivery Groups (read-only)
 
 - GET /v1/delivery-groups
@@ -195,6 +221,16 @@ Fields:
 - GET /v1/delivery-groups/{id}
   - Get delivery group by id
   - Response: DeliveryGroup
+
+### Recipes (read-only)
+
+- GET /v1/recipes
+  - List recipes
+  - Response: list of Recipe
+
+- GET /v1/recipes/{id}
+  - Get recipe by id
+  - Response: Recipe
 
 - POST /v1/deployments/{deploymentId}/rollback
   - Trigger rollback for a prior deployment
@@ -243,10 +279,13 @@ Fields:
 - 400 IDMP_KEY_REQUIRED
 - 400 INVALID_ARTIFACT
 - 400 NO_PRIOR_SUCCESSFUL_VERSION
+- 400 RECIPE_ID_REQUIRED
 - 401 UNAUTHORIZED
 - 403 SERVICE_NOT_ALLOWLISTED
 - 403 SERVICE_NOT_IN_DELIVERY_GROUP
 - 403 ROLE_FORBIDDEN
+- 403 RECIPE_NOT_ALLOWED
+- 404 RECIPE_NOT_FOUND
 - 409 DEPLOYMENT_LOCKED
 - 429 RATE_LIMITED
 - 503 MUTATIONS_DISABLED
