@@ -355,6 +355,25 @@ class SpinnakerAdapter:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+def _normalize_failure_category(value: Optional[str]) -> str:
+    if not value:
+        return "UNKNOWN"
+    category = str(value).strip().upper()
+    mapping = {
+        "INFRA": "INFRASTRUCTURE",
+        "INFRASTRUCTURE": "INFRASTRUCTURE",
+        "CONFIG": "CONFIG",
+        "APP": "APP",
+        "POLICY": "POLICY",
+        "VALIDATION": "VALIDATION",
+        "ARTIFACT": "ARTIFACT",
+        "TIMEOUT": "TIMEOUT",
+        "ROLLBACK": "ROLLBACK",
+        "UNKNOWN": "UNKNOWN",
+    }
+    return mapping.get(category, "UNKNOWN")
+
+
 def normalize_failures(raw_failures: Optional[List[dict]]) -> List[dict]:
     if not raw_failures:
         return []
@@ -362,7 +381,7 @@ def normalize_failures(raw_failures: Optional[List[dict]]) -> List[dict]:
     for failure in raw_failures:
         normalized.append(
             {
-                "category": failure.get("category", "UNKNOWN"),
+                "category": _normalize_failure_category(failure.get("category")),
                 "summary": failure.get("summary", "Unknown failure"),
                 "detail": failure.get("detail"),
                 "actionHint": failure.get("actionHint"),

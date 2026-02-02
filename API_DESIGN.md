@@ -121,7 +121,7 @@ Fields:
 ### NormalizedFailure
 
 Fields:
-- category (INFRA | CONFIG | APP | POLICY | UNKNOWN)
+- category (INFRASTRUCTURE | CONFIG | APP | POLICY | VALIDATION | ARTIFACT | TIMEOUT | ROLLBACK | UNKNOWN)
 - summary (string)
 - detail (string)
 - actionHint (string)
@@ -231,6 +231,12 @@ Fields:
 - GET /v1/recipes/{id}
   - Get recipe by id
   - Response: Recipe
+
+### Insights (read-only)
+
+- GET /v1/insights/failures?windowDays=7&groupId=...
+  - Aggregate failures and rollback rate over the window.
+  - Response: { windowDays, windowStart, windowEnd, totalDeployments, totalRollbacks, rollbackRate, failuresByCategory, deploymentsByRecipe, deploymentsByGroup }
 
 - POST /v1/deployments/{deploymentId}/rollback
   - Trigger rollback for a prior deployment

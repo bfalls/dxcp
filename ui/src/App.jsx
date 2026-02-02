@@ -5,6 +5,7 @@ const API_TOKEN = import.meta.env.VITE_API_TOKEN || 'demo-token'
 const SERVICE_URL_BASE = import.meta.env.VITE_SERVICE_URL_BASE || ''
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
+const INSIGHTS_WINDOW_DAYS = 7
 
 function useApi() {
   const headers = {
@@ -45,6 +46,11 @@ function formatTime(value) {
   }
 }
 
+function formatPercent(value) {
+  if (value === null || value === undefined) return '-'
+  return `${(value * 100).toFixed(1)}%`
+}
+
 function statusClass(state) {
   return `status ${state || ''}`
 }
@@ -73,6 +79,7 @@ export default function App() {
   const [versionsError, setVersionsError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
+  const [insights, setInsights] = useState(null)
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
 
@@ -144,6 +151,20 @@ export default function App() {
     const tasks = [loadRecipes(), loadVersions(true)]
     await Promise.allSettled(tasks)
     setRefreshing(false)
+  }
+
+  async function loadInsights() {
+    setErrorMessage('')
+    try {
+      const data = await api.get(`/insights/failures?windowDays=${INSIGHTS_WINDOW_DAYS}`)
+      if (data && data.code) {
+        setErrorMessage(`${data.code}: ${data.message}`)
+        return
+      }
+      setInsights(data)
+    } catch (err) {
+      setErrorMessage('Failed to load insights')
+    }
   }
 
   async function handleDeploy() {
@@ -275,6 +296,11 @@ export default function App() {
     }
   }, [view, selected?.id])
 
+  useEffect(() => {
+    if (view !== 'insights') return
+    loadInsights()
+  }, [view])
+
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
   if (selectedService?.stable_service_url_template) {
@@ -313,6 +339,15 @@ export default function App() {
             }}
           >
             Detail
+          </button>
+          <button
+            className={view === 'insights' ? 'active' : ''}
+            onClick={() => {
+              setView('insights')
+              loadInsights()
+            }}
+          >
+            Insights
           </button>
         </nav>
       </header>
@@ -532,6 +567,58 @@ export default function App() {
                 {f.observedAt && <div className="helper">Observed: {formatTime(f.observedAt)}</div>}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {view === 'insights' && (
+        <div className="shell">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Insights (last {INSIGHTS_WINDOW_DAYS} days)</h2>
+              <button className="button secondary" onClick={loadInsights}>Refresh</button>
+            </div>
+            {!insights && <div className="helper">No insights yet.</div>}
+            {insights && (
+              <div className="list">
+                <div className="list-item">
+                  <div><strong>Rollback rate</strong></div>
+                  <div>{formatPercent(insights.rollbackRate)}</div>
+                  <div>Deployments: {insights.totalDeployments}</div>
+                  <div>Rollbacks: {insights.totalRollbacks}</div>
+                </div>
+                <div style={{ marginTop: '16px' }}>
+                  <strong>Top failure categories</strong>
+                  {insights.failuresByCategory?.length === 0 && <div className="helper">No failures in window.</div>}
+                  {insights.failuresByCategory?.map((item) => (
+                    <div className="list-item" key={item.key}>
+                      <div>{item.key}</div>
+                      <div>{item.count}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: '16px' }}>
+                  <strong>Deployments by recipe</strong>
+                  {insights.deploymentsByRecipe?.length === 0 && <div className="helper">No deployments in window.</div>}
+                  {insights.deploymentsByRecipe?.map((item) => (
+                    <div className="list-item" key={item.key}>
+                      <div>{item.key}</div>
+                      <div>{item.count}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: '16px' }}>
+                  <strong>Deployments by delivery group</strong>
+                  {insights.deploymentsByGroup?.length === 0 && <div className="helper">No deployments in window.</div>}
+                  {insights.deploymentsByGroup?.map((item) => (
+                    <div className="list-item" key={item.key}>
+                      <div>{item.key}</div>
+                      <div>{item.count}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -93,6 +93,7 @@ npm run dev
 Open http://127.0.0.1:5173
 
 Deployment detail view includes a normalized timeline (no engine stages).
+Insights view summarizes failure categories, rollback rate, and deployment counts by recipe and delivery group (last 7 days).
 
 ---
 

@@ -257,6 +257,41 @@ def derive_timeline(deployment: dict) -> list:
     return events
 
 
+def _normalize_failure_category(value: Optional[str]) -> str:
+    if not value:
+        return "UNKNOWN"
+    category = str(value).strip().upper()
+    mapping = {
+        "INFRA": "INFRASTRUCTURE",
+        "INFRASTRUCTURE": "INFRASTRUCTURE",
+        "CONFIG": "CONFIG",
+        "APP": "APP",
+        "POLICY": "POLICY",
+        "VALIDATION": "VALIDATION",
+        "ARTIFACT": "ARTIFACT",
+        "TIMEOUT": "TIMEOUT",
+        "ROLLBACK": "ROLLBACK",
+        "UNKNOWN": "UNKNOWN",
+    }
+    return mapping.get(category, "UNKNOWN")
+
+
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _rollup_counts(items: list[tuple[str, int]]) -> list[dict]:
+    return [
+        {"key": key, "count": count}
+        for key, count in sorted(items, key=lambda item: item[1], reverse=True)
+    ]
+
+
 def _parse_s3_ref(artifact_ref: str) -> tuple[str, str]:
     if not artifact_ref.startswith("s3://"):
         raise ValueError("artifactRef must start with s3://")
@@ -632,6 +667,63 @@ def get_deployment_timeline(
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
     return derive_timeline(deployment)
+
+
+@app.get("/v1/insights/failures")
+def get_failure_insights(
+    request: Request,
+    windowDays: Optional[int] = Query(7),
+    groupId: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    if windowDays is None or windowDays < 1 or windowDays > 30:
+        return error_response(400, "INVALID_REQUEST", "windowDays must be between 1 and 30")
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=windowDays)
+    deployments = storage.list_deployments(None, None)
+    filtered = []
+    for deployment in deployments:
+        if groupId and deployment.get("deliveryGroupId") != groupId:
+            continue
+        created_at = _parse_iso(deployment.get("createdAt"))
+        if not created_at:
+            continue
+        if not (start <= created_at <= end):
+            continue
+        filtered.append(deployment)
+
+    failures_by_category = {}
+    by_recipe = {}
+    by_group = {}
+    rollbacks = 0
+    primary = 0
+    for deployment in filtered:
+        recipe_id = deployment.get("recipeId") or "unknown"
+        by_recipe[recipe_id] = by_recipe.get(recipe_id, 0) + 1
+        group_id = deployment.get("deliveryGroupId") or "unknown"
+        by_group[group_id] = by_group.get(group_id, 0) + 1
+        if deployment.get("rollbackOf"):
+            rollbacks += 1
+        else:
+            primary += 1
+        for failure in deployment.get("failures", []):
+            category = _normalize_failure_category(failure.get("category"))
+            failures_by_category[category] = failures_by_category.get(category, 0) + 1
+
+    rollback_rate = round((rollbacks / primary) if primary else 0.0, 4)
+    return {
+        "windowDays": windowDays,
+        "windowStart": start.isoformat().replace("+00:00", "Z"),
+        "windowEnd": end.isoformat().replace("+00:00", "Z"),
+        "totalDeployments": primary,
+        "totalRollbacks": rollbacks,
+        "rollbackRate": rollback_rate,
+        "failuresByCategory": _rollup_counts(list(failures_by_category.items())),
+        "deploymentsByRecipe": _rollup_counts(list(by_recipe.items())),
+        "deploymentsByGroup": _rollup_counts(list(by_group.items())),
+    }
 
 
 @app.get("/v1/spinnaker/applications")
