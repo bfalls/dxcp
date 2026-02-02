@@ -43,6 +43,9 @@ This repository contains:
   - docs/API_DESIGN.md
   - docs/SPINNAKER.md
   - docs/BACKSTAGE_INTEGRATION.md
+- UI & admin
+  - docs/UI_SPEC.md
+  - docs/ADMIN_SURFACES.md
 - Demo & evaluation
   - docs/DEMO.md
   - docs/EVAL_SCORECARD.md
@@ -111,6 +114,14 @@ Open http://127.0.0.1:5173
 
 Deployment detail view includes a normalized timeline (no engine stages).
 Insights view summarizes failure categories, rollback rate, and deployment counts by recipe and delivery group (last 7 days).
+
+## UI overview
+
+See docs/UI_SPEC.md for the enterprise UI specification and role-aware behavior.
+
+## Admin configuration
+
+See docs/ADMIN_SURFACES.md for DeliveryGroup and Recipe administration expectations.
 
 ## Backstage integration
 

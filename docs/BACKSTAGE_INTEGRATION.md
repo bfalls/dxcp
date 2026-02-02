@@ -3,6 +3,18 @@
 DXCP is the delivery control plane. Backstage remains the catalog and surface for service ownership.
 This integration is read-first and optional. DXCP runs without Backstage.
 
+## Responsibility split
+
+DXCP owns:
+- Delivery intent, guardrails, and normalized delivery records.
+- Read endpoints for status, actions, and insights.
+
+Backstage owns:
+- Catalog, ownership, and discovery.
+- Rendering DXCP read data in service-centric views.
+
+Backstage should not perform write actions in DXCP.
+
 ## Conceptual mapping
 
 - Backstage system/group -> DXCP DeliveryGroup
