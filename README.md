@@ -18,7 +18,7 @@ DXCP reduces cognitive load by:
 
 ## Product philosophy
 
-Guardrails are first-class product features: DXCP is an intent-based control plane that triggers real deployments, so limits and serialization are part of the API contract, not optional add-ons. The defaults are conservative, but the guardrail concept is permanent even as values evolve. See Decision 4a in DECISIONS.md.
+Guardrails are first-class product features: DXCP is an intent-based control plane that triggers real deployments, so limits and serialization are part of the API contract, not optional add-ons. The defaults are conservative, but the guardrail concept is permanent even as values evolve. See Decision 4a in docs/DECISIONS.md.
 
 ---
 
@@ -29,6 +29,23 @@ This repository contains:
 - API and UI owned by the platform
 - Integration adapters for Spinnaker as the execution engine (external)
 - Reference artifacts to validate behavior
+
+## Docs
+
+- Product & decisions
+  - docs/PRODUCT_VISION.md
+  - docs/DECISIONS.md
+- Architecture & domains
+  - docs/ARCHITECTURE.md
+  - docs/DOMAIN_MODEL.md
+  - docs/SERVICES.md
+- API & integrations
+  - docs/API_DESIGN.md
+  - docs/SPINNAKER.md
+  - docs/BACKSTAGE_INTEGRATION.md
+- Demo & evaluation
+  - docs/DEMO.md
+  - docs/EVAL_SCORECARD.md
 
 ---
 
@@ -68,7 +85,7 @@ export DXCP_ROLE=DELIVERY_OWNER
 
 ## Secrets handling
 
-Secrets are never passed as pipeline parameters; Spinnaker resolves controller tokens from an external secret backend at execution time. This keeps execution payloads free of raw credentials. See `SPINNAKER.md`.
+Secrets are never passed as pipeline parameters; Spinnaker resolves controller tokens from an external secret backend at execution time. This keeps execution payloads free of raw credentials. See `docs/SPINNAKER.md`.
 
 ---
 
@@ -94,6 +111,10 @@ Open http://127.0.0.1:5173
 
 Deployment detail view includes a normalized timeline (no engine stages).
 Insights view summarizes failure categories, rollback rate, and deployment counts by recipe and delivery group (last 7 days).
+
+## Backstage integration
+
+See docs/BACKSTAGE_INTEGRATION.md for read-first endpoints and mapping guidance.
 
 ---
 

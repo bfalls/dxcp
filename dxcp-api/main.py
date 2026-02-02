@@ -126,6 +126,18 @@ def require_role(actor: Actor, allowed: set[Role], action: str):
     return error_response(403, "ROLE_FORBIDDEN", f"Role {actor.role.value} cannot {action}")
 
 
+def can_deploy(actor: Actor) -> bool:
+    return actor.role in {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
+
+
+def can_rollback(actor: Actor) -> bool:
+    return actor.role in {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
+
+
+def can_view(actor: Actor) -> bool:
+    return actor.role in {Role.OBSERVER, Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
+
+
 def resolve_delivery_group(service: str):
     group = storage.get_delivery_group_for_service(service)
     if not group:
@@ -604,6 +616,59 @@ def list_service_versions(
         except Exception as exc:
             return error_response(502, "ARTIFACT_DISCOVERY_FAILED", str(exc)[:240])
     return {"service": service, "source": source, "versions": versions, "refreshedAt": utc_now()}
+
+
+@app.get("/v1/services/{service}/delivery-status")
+def get_service_delivery_status(
+    service: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    guardrails.validate_service(service)
+    deployments = storage.list_deployments(service, None)
+    if not deployments:
+        return {
+            "service": service,
+            "hasDeployments": False,
+            "latest": None,
+        }
+    latest = deployments[0]
+    return {
+        "service": service,
+        "hasDeployments": True,
+        "latest": {
+            "id": latest.get("id"),
+            "state": latest.get("state"),
+            "version": latest.get("version"),
+            "recipeId": latest.get("recipeId"),
+            "createdAt": latest.get("createdAt"),
+            "updatedAt": latest.get("updatedAt"),
+            "spinnakerExecutionUrl": latest.get("spinnakerExecutionUrl"),
+            "rollbackOf": latest.get("rollbackOf"),
+        },
+    }
+
+
+@app.get("/v1/services/{service}/allowed-actions")
+def get_service_allowed_actions(
+    service: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(request, authorization)
+    rate_limiter.check_read(actor.actor_id)
+    guardrails.validate_service(service)
+    return {
+        "service": service,
+        "actions": {
+            "view": can_view(actor),
+            "deploy": can_deploy(actor),
+            "rollback": can_rollback(actor),
+        },
+        "role": actor.role.value,
+    }
 
 
 @app.get("/v1/health")

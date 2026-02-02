@@ -232,6 +232,16 @@ Fields:
   - Get recipe by id
   - Response: Recipe
 
+### Services (Backstage)
+
+- GET /v1/services/{service}/delivery-status
+  - Latest deployment summary for a service
+  - Response: { service, hasDeployments, latest }
+
+- GET /v1/services/{service}/allowed-actions
+  - Allowed actions for the service and caller role
+  - Response: { service, role, actions }
+
 ### Insights (read-only)
 
 - GET /v1/insights/failures?windowDays=7&groupId=...
