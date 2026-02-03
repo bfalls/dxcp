@@ -75,6 +75,16 @@ class DeliveryGroup(BaseModel):
     guardrails: Optional[DeliveryGroupGuardrails] = None
 
 
+class DeliveryGroupUpsert(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    owner: Optional[str] = None
+    services: List[str]
+    allowed_recipes: List[str]
+    guardrails: Optional[DeliveryGroupGuardrails] = None
+
+
 class Recipe(BaseModel):
     id: str
     name: str

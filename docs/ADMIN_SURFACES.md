@@ -11,7 +11,7 @@ Status legend:
 
 ## DeliveryGroup management
 
-Status: Planned
+Status: Current (create and edit)
 
 Purpose:
 - Organize services for discovery and policy enforcement.
@@ -111,6 +111,6 @@ Validation endpoints (planned):
 ## Current admin surfaces
 
 Current:
-- No admin UI exists.
-- No admin CRUD endpoints exist.
+- Admin UI supports DeliveryGroup create and edit.
+- Admin CRUD endpoints exist for DeliveryGroup create and update.
 - Recipes and delivery groups are seeded in storage by the platform.

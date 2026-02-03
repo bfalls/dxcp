@@ -9,10 +9,54 @@ const ok = (data) =>
     json: () => Promise.resolve(data)
   })
 
-const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse, timeline, failures }) =>
-  async (url, options = {}) => {
+const buildFetchMock = ({
+  role,
+  deployAllowed,
+  rollbackAllowed,
+  deployResponse,
+  timeline,
+  failures,
+  deliveryGroups,
+  recipes,
+  servicesList
+}) => {
+  let groups = deliveryGroups || [
+    {
+      id: 'default',
+      name: 'Default Delivery Group',
+      services: ['demo-service'],
+      allowed_recipes: ['default'],
+      guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+    }
+  ]
+  const recipeList = recipes || [{ id: 'default', name: 'Default Deploy' }]
+  const serviceList = servicesList || [{ service_name: 'demo-service' }]
+  return async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
+    if (pathname === '/v1/delivery-groups' && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}')
+      const serviceConflict = body.services?.find((svc) =>
+        groups.some((group) => group.id !== body.id && group.services?.includes(svc))
+      )
+      if (serviceConflict) {
+        return ok({ code: 'SERVICE_ALREADY_ASSIGNED', message: 'Service already assigned' })
+      }
+      groups = [...groups, body]
+      return ok(body)
+    }
+    if (pathname.startsWith('/v1/delivery-groups/') && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      const groupId = pathname.split('/').pop()
+      const serviceConflict = body.services?.find((svc) =>
+        groups.some((group) => group.id !== groupId && group.services?.includes(svc))
+      )
+      if (serviceConflict) {
+        return ok({ code: 'SERVICE_ALREADY_ASSIGNED', message: 'Service already assigned' })
+      }
+      groups = groups.map((group) => (group.id === groupId ? body : group))
+      return ok(body)
+    }
     if (pathname === '/v1/deployments' && options.method === 'POST') {
       return ok(deployResponse || { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' })
     }
@@ -31,7 +75,7 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse, 
       })
     }
     if (pathname === '/v1/services') {
-      return ok([{ service_name: 'demo-service' }])
+      return ok(serviceList)
     }
     if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
       return ok({
@@ -47,18 +91,10 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse, 
       })
     }
     if (pathname === '/v1/recipes') {
-      return ok([{ id: 'default', name: 'Default Deploy' }])
+      return ok(recipeList)
     }
     if (pathname === '/v1/delivery-groups') {
-      return ok([
-        {
-          id: 'default',
-          name: 'Default Delivery Group',
-          services: ['demo-service'],
-          allowed_recipes: ['default'],
-          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
-        }
-      ])
+      return ok(groups)
     }
     if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
       return ok([
@@ -110,6 +146,7 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse, 
     }
     return ok({})
   }
+}
 
 function buildFakeJwt(roles) {
   const header = { alg: 'RS256', typ: 'JWT' }
@@ -386,6 +423,112 @@ export async function runAllTests() {
     assert.equal(deployButton.disabled, false)
     fireEvent.click(deployButton)
     await view.findByText('Deployment detail')
+  })
+
+  await runTest('Admin can create and edit delivery group', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'payments-service' }],
+      recipes: [
+        { id: 'default', name: 'Default Deploy' },
+        { id: 'canary', name: 'Canary Deploy' }
+      ]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    await view.findByText('Delivery groups')
+    fireEvent.click(view.getByRole('button', { name: 'Create group' }))
+    const idInput = await view.findByLabelText('Group id')
+    fireEvent.input(idInput, { target: { value: 'payments' } })
+    await waitForCondition(() => view.getByLabelText('Group id').value === 'payments')
+    const nameInput = view.getByLabelText('Name')
+    fireEvent.input(nameInput, { target: { value: 'Payments Group' } })
+    await waitForCondition(() => view.getByLabelText('Name').value === 'Payments Group')
+    const ownerInput = view.getByLabelText('Owner')
+    fireEvent.input(ownerInput, { target: { value: 'team-payments' } })
+    await waitForCondition(() => view.getByLabelText('Owner').value === 'team-payments')
+    fireEvent.click(view.getByLabelText('payments-service'))
+    fireEvent.click(view.getByLabelText(/Canary Deploy/))
+    fireEvent.change(view.getByLabelText('Max concurrent deployments'), { target: { value: '2' } })
+    fireEvent.change(view.getByLabelText('Daily deploy quota'), { target: { value: '10' } })
+    fireEvent.click(view.getByRole('button', { name: 'Save group' }))
+    await waitForCondition(() => view.queryAllByText('Payments Group').length > 0)
+    assert.ok(view.getAllByText('Payments Group').length > 0)
+
+    const editButtons = view.getAllByRole('button', { name: 'Edit' })
+    fireEvent.click(editButtons[editButtons.length - 1])
+    await view.findByText('Edit delivery group')
+    fireEvent.input(view.getByLabelText('Name'), { target: { value: 'Payments Core' } })
+    await waitForCondition(() => view.getByLabelText('Name').value === 'Payments Core')
+    fireEvent.click(view.getByLabelText(/Default Deploy/))
+    fireEvent.click(view.getByRole('button', { name: 'Save group' }))
+    await waitForCondition(() => view.queryAllByText('Payments Core').length > 0)
+    assert.ok(view.getAllByText('Payments Core').length > 0)
+  })
+
+  await runTest('Delivery group validation errors shown', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      servicesList: [{ service_name: 'demo-service' }]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    await view.findByText('Delivery groups')
+    fireEvent.click(view.getByRole('button', { name: 'Create group' }))
+    const conflictId = await view.findByLabelText('Group id')
+    conflictId.value = 'conflict'
+    conflictId.dispatchEvent(new window.Event('input', { bubbles: true }))
+    conflictId.dispatchEvent(new window.Event('change', { bubbles: true }))
+    const conflictName = view.getByLabelText('Name')
+    conflictName.value = 'Conflict Group'
+    conflictName.dispatchEvent(new window.Event('input', { bubbles: true }))
+    conflictName.dispatchEvent(new window.Event('change', { bubbles: true }))
+    fireEvent.click(view.getByLabelText('demo-service'))
+    fireEvent.click(view.getByRole('button', { name: 'Save group' }))
+    const messages = await view.findAllByText(/already belongs to/i)
+    assert.ok(messages.length > 0)
   })
 
   await runTest('Timeline renders normalized order', async () => {

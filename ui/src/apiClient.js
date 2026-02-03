@@ -29,5 +29,16 @@ export function createApiClient({ baseUrl, getToken }) {
     return res.json()
   }
 
-  return { get, post }
+  async function put(path, body) {
+    const headers = await buildHeaders()
+    headers['Content-Type'] = 'application/json'
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body)
+    })
+    return res.json()
+  }
+
+  return { get, post, put }
 }

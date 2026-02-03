@@ -280,6 +280,29 @@ class Storage:
         conn.close()
         return group
 
+    def update_delivery_group(self, group: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE delivery_groups
+            SET name = ?, description = ?, owner = ?, services = ?, allowed_recipes = ?, guardrails = ?
+            WHERE id = ?
+            """,
+            (
+                group["name"],
+                group.get("description"),
+                group.get("owner"),
+                self._serialize_json(group.get("services", [])),
+                self._serialize_json(group.get("allowed_recipes", [])),
+                self._serialize_json(group.get("guardrails")),
+                group["id"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return group
+
     def _has_recipes(self) -> bool:
         conn = self._connect()
         cur = conn.cursor()
@@ -819,6 +842,21 @@ class DynamoStorage:
         return None
 
     def insert_delivery_group(self, group: dict) -> dict:
+        item = {
+            "pk": "DELIVERY_GROUP",
+            "sk": group["id"],
+            "id": group["id"],
+            "name": group["name"],
+            "description": group.get("description"),
+            "owner": group.get("owner"),
+            "services": group.get("services", []),
+            "allowed_recipes": group.get("allowed_recipes", []),
+            "guardrails": group.get("guardrails"),
+        }
+        self.table.put_item(Item=item)
+        return group
+
+    def update_delivery_group(self, group: dict) -> dict:
         item = {
             "pk": "DELIVERY_GROUP",
             "sk": group["id"],

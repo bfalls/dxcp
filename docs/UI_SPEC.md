@@ -234,7 +234,7 @@ Defaults and bounds:
 
 ### Admin section
 
-Status: Planned (shell implemented, no CRUD yet)
+Status: Current (Delivery Groups); Recipes planned
 
 Entry visibility:
 - Visible to PLATFORM_ADMIN only.
@@ -254,8 +254,8 @@ Key data:
 - Allowed recipes and guardrails.
 
 Primary actions:
-- Create, edit, and deactivate groups.
-- Update service membership.
+- Create and edit groups.
+- Update service membership with impact preview before save.
 
 Blocked-action UX:
 - If a service is already assigned to another group, show a clear validation error.

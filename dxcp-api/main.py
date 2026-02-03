@@ -22,6 +22,7 @@ from models import (
     BuildUploadCapability,
     BuildUploadRequest,
     DeliveryGroup,
+    DeliveryGroupUpsert,
     DeploymentIntent,
     Recipe,
     Role,
@@ -153,6 +154,49 @@ def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
     if isinstance(value, int) and value > 0:
         return value
     return default_value
+
+
+def _validate_guardrails(guardrails: Optional[dict]) -> Optional[JSONResponse]:
+    if guardrails is None:
+        return None
+    for key, value in guardrails.items():
+        if value is None:
+            continue
+        if not isinstance(value, int) or value <= 0:
+            return error_response(400, "INVALID_GUARDRAIL", f"Guardrail {key} must be a positive integer")
+    return None
+
+
+def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None) -> Optional[JSONResponse]:
+    if not group.get("id"):
+        return error_response(400, "MISSING_ID", "Delivery group id is required")
+    if not group.get("name"):
+        return error_response(400, "MISSING_NAME", "Delivery group name is required")
+    services = group.get("services") or []
+    recipes = group.get("allowed_recipes") or []
+    if not isinstance(services, list):
+        return error_response(400, "INVALID_SERVICES", "services must be a list")
+    if not isinstance(recipes, list):
+        return error_response(400, "INVALID_RECIPES", "allowed_recipes must be a list")
+    allowlisted_services = {entry.get("service_name") for entry in storage.list_services()}
+    for service in services:
+        if service not in allowlisted_services:
+            return error_response(400, "SERVICE_NOT_ALLOWLISTED", f"Service {service} is not allowlisted")
+        existing = storage.get_delivery_group_for_service(service)
+        if existing and existing.get("id") != group_id:
+            return error_response(
+                409,
+                "SERVICE_ALREADY_ASSIGNED",
+                f"Service {service} already belongs to delivery group {existing.get('id')}",
+            )
+    recipe_ids = {recipe.get("id") for recipe in storage.list_recipes()}
+    for recipe_id in recipes:
+        if recipe_id not in recipe_ids:
+            return error_response(400, "RECIPE_NOT_FOUND", f"Recipe {recipe_id} not found")
+    guardrail_error = _validate_guardrails(group.get("guardrails"))
+    if guardrail_error:
+        return guardrail_error
+    return None
 
 
 def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
@@ -573,6 +617,56 @@ def get_delivery_group(
     if not group:
         return error_response(404, "NOT_FOUND", "Delivery group not found")
     return DeliveryGroup(**group).dict()
+
+
+@app.post("/v1/delivery-groups", status_code=201)
+def create_delivery_group(
+    group: DeliveryGroupUpsert,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create delivery groups")
+    if role_error:
+        return role_error
+    rate_limiter.check_mutate(actor.actor_id, "delivery_group_create")
+    payload = group.dict()
+    if storage.get_delivery_group(payload["id"]):
+        return error_response(409, "DELIVERY_GROUP_EXISTS", "Delivery group id already exists")
+    validation_error = _validate_delivery_group_payload(payload, None)
+    if validation_error:
+        return validation_error
+    storage.insert_delivery_group(payload)
+    return DeliveryGroup(**payload).dict()
+
+
+@app.put("/v1/delivery-groups/{group_id}")
+def update_delivery_group(
+    group_id: str,
+    group: DeliveryGroupUpsert,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update delivery groups")
+    if role_error:
+        return role_error
+    rate_limiter.check_mutate(actor.actor_id, "delivery_group_update")
+    payload = group.dict()
+    if payload.get("id") and payload["id"] != group_id:
+        return error_response(400, "ID_MISMATCH", "Delivery group id cannot be changed")
+    existing = storage.get_delivery_group(group_id)
+    if not existing:
+        return error_response(404, "NOT_FOUND", "Delivery group not found")
+    payload["id"] = group_id
+    validation_error = _validate_delivery_group_payload(payload, group_id)
+    if validation_error:
+        return validation_error
+    if hasattr(storage, "update_delivery_group"):
+        storage.update_delivery_group(payload)
+    else:
+        storage.insert_delivery_group(payload)
+    return DeliveryGroup(**payload).dict()
 
 
 @app.get("/v1/recipes")
