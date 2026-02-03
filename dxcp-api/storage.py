@@ -162,10 +162,12 @@ class Storage:
                 allowed_parameters TEXT NOT NULL,
                 spinnaker_application TEXT,
                 deploy_pipeline TEXT,
-                rollback_pipeline TEXT
+                rollback_pipeline TEXT,
+                status TEXT
             )
             """
         )
+        self._ensure_column(cur, "recipes", "status", "TEXT")
         conn.commit()
         conn.close()
 
@@ -318,8 +320,8 @@ class Storage:
             """
             INSERT INTO recipes (
                 id, name, description, allowed_parameters,
-                spinnaker_application, deploy_pipeline, rollback_pipeline
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                spinnaker_application, deploy_pipeline, rollback_pipeline, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recipe["id"],
@@ -329,6 +331,32 @@ class Storage:
                 recipe.get("spinnaker_application"),
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
+                recipe.get("status", "active"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return recipe
+
+    def update_recipe(self, recipe: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE recipes
+            SET name = ?, description = ?, allowed_parameters = ?,
+                spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, status = ?
+            WHERE id = ?
+            """,
+            (
+                recipe["name"],
+                recipe.get("description"),
+                self._serialize_json(recipe.get("allowed_parameters", [])),
+                recipe.get("spinnaker_application"),
+                recipe.get("deploy_pipeline"),
+                recipe.get("rollback_pipeline"),
+                recipe.get("status", "active"),
+                recipe["id"],
             ),
         )
         conn.commit()
@@ -344,6 +372,7 @@ class Storage:
             "spinnaker_application": row["spinnaker_application"],
             "deploy_pipeline": row["deploy_pipeline"],
             "rollback_pipeline": row["rollback_pipeline"],
+            "status": row["status"] or "active",
         }
 
     def list_recipes(self) -> List[dict]:
@@ -426,6 +455,7 @@ class Storage:
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
+            "status": "active",
         }
         return self.insert_recipe(recipe)
 
@@ -893,6 +923,7 @@ class DynamoStorage:
                     "spinnaker_application": item.get("spinnaker_application"),
                     "deploy_pipeline": item.get("deploy_pipeline"),
                     "rollback_pipeline": item.get("rollback_pipeline"),
+                    "status": item.get("status") or "active",
                 }
             )
         recipes.sort(key=lambda r: r.get("name", ""))
@@ -911,6 +942,7 @@ class DynamoStorage:
             "spinnaker_application": item.get("spinnaker_application"),
             "deploy_pipeline": item.get("deploy_pipeline"),
             "rollback_pipeline": item.get("rollback_pipeline"),
+            "status": item.get("status") or "active",
         }
 
     def insert_recipe(self, recipe: dict) -> dict:
@@ -924,6 +956,23 @@ class DynamoStorage:
             "spinnaker_application": recipe.get("spinnaker_application"),
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
+            "status": recipe.get("status", "active"),
+        }
+        self.table.put_item(Item=item)
+        return recipe
+
+    def update_recipe(self, recipe: dict) -> dict:
+        item = {
+            "pk": "RECIPE",
+            "sk": recipe["id"],
+            "id": recipe["id"],
+            "name": recipe["name"],
+            "description": recipe.get("description"),
+            "allowed_parameters": recipe.get("allowed_parameters", []),
+            "spinnaker_application": recipe.get("spinnaker_application"),
+            "deploy_pipeline": recipe.get("deploy_pipeline"),
+            "rollback_pipeline": recipe.get("rollback_pipeline"),
+            "status": recipe.get("status", "active"),
         }
         self.table.put_item(Item=item)
         return recipe
@@ -956,6 +1005,7 @@ class DynamoStorage:
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
+            "status": "active",
         }
         return self.insert_recipe(recipe)
 

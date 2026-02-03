@@ -94,6 +94,30 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
+            "status": "active",
+        }
+    )
+    main.storage.insert_recipe(
+        {
+            "id": "deprecated",
+            "name": "Deprecated Recipe",
+            "description": "Deprecated recipe for tests",
+            "allowed_parameters": [],
+            "spinnaker_application": None,
+            "deploy_pipeline": "demo-deploy",
+            "rollback_pipeline": "rollback-demo-service",
+            "status": "deprecated",
+        }
+    )
+    main.storage.update_delivery_group(
+        {
+            "id": "default",
+            "name": "Default Delivery Group",
+            "description": "Default group for allowlisted services",
+            "owner": None,
+            "services": ["demo-service"],
+            "allowed_recipes": ["default", "deprecated"],
+            "guardrails": None,
         }
     )
     async with httpx.AsyncClient(
@@ -146,3 +170,14 @@ async def test_deploy_requires_recipe_id(tmp_path: Path, monkeypatch):
         )
     assert response.status_code == 400
     assert response.json()["code"] == "RECIPE_ID_REQUIRED"
+
+
+async def test_deploy_rejects_deprecated_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-deprecated", **auth_header(["dxcp-platform-admins"])},
+            json=_deployment_payload("deprecated"),
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "RECIPE_DEPRECATED"

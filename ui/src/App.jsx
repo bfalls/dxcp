@@ -254,6 +254,33 @@ function buildGroupDraft(group) {
   }
 }
 
+function buildRecipeDraft(recipe) {
+  return {
+    id: recipe?.id || '',
+    name: recipe?.name || '',
+    description: recipe?.description || '',
+    allowed_parameters: Array.isArray(recipe?.allowed_parameters) ? recipe.allowed_parameters.join(', ') : '',
+    spinnaker_application: recipe?.spinnaker_application || '',
+    deploy_pipeline: recipe?.deploy_pipeline || '',
+    rollback_pipeline: recipe?.rollback_pipeline || '',
+    status: recipe?.status || 'active'
+  }
+}
+
+function parseAllowedParameters(value) {
+  if (!value) return []
+  const parts = String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return Array.from(new Set(parts))
+}
+
+function recipeStatusLabel(value) {
+  const status = String(value || 'active').toLowerCase()
+  return status === 'deprecated' ? 'Deprecated' : 'Active'
+}
+
 function parseGuardrailValue(value) {
   if (value === null || value === undefined) return null
   const trimmed = String(value).trim()
@@ -375,6 +402,12 @@ export default function App() {
   const [adminGroupError, setAdminGroupError] = useState('')
   const [adminGroupNote, setAdminGroupNote] = useState('')
   const [adminGroupSaving, setAdminGroupSaving] = useState(false)
+  const [adminRecipeId, setAdminRecipeId] = useState('')
+  const [adminRecipeMode, setAdminRecipeMode] = useState('view')
+  const [adminRecipeDraft, setAdminRecipeDraft] = useState(buildRecipeDraft(null))
+  const [adminRecipeError, setAdminRecipeError] = useState('')
+  const [adminRecipeNote, setAdminRecipeNote] = useState('')
+  const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const contextService = selected?.service || service
@@ -433,6 +466,7 @@ export default function App() {
     () => recipes.find((recipe) => recipe.id === recipeId) || null,
     [recipes, recipeId]
   )
+  const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
@@ -449,10 +483,26 @@ export default function App() {
         .sort((a, b) => (a.name || a.id || '').localeCompare(b.name || b.id || '')),
     [recipes]
   )
+  const recipeUsageCounts = useMemo(() => {
+    const counts = {}
+    deliveryGroups.forEach((group) => {
+      const allowed = Array.isArray(group.allowed_recipes) ? group.allowed_recipes : []
+      allowed.forEach((recipeIdValue) => {
+        if (!recipeIdValue) return
+        counts[recipeIdValue] = (counts[recipeIdValue] || 0) + 1
+      })
+    })
+    return counts
+  }, [deliveryGroups])
   const activeAdminGroup = useMemo(
     () => deliveryGroups.find((group) => group.id === adminGroupId) || null,
     [deliveryGroups, adminGroupId]
   )
+  const activeAdminRecipe = useMemo(
+    () => recipes.find((recipe) => recipe.id === adminRecipeId) || null,
+    [recipes, adminRecipeId]
+  )
+  const activeAdminRecipeUsage = recipeUsageCounts[adminRecipeId] || 0
   const adminServiceConflicts = useMemo(
     () => findServiceConflicts(adminGroupDraft.services, deliveryGroups, adminGroupDraft.id),
     [adminGroupDraft.services, adminGroupDraft.id, deliveryGroups]
@@ -929,6 +979,92 @@ export default function App() {
     }
   }
 
+  function startAdminRecipeCreate() {
+    setAdminRecipeMode('create')
+    setAdminRecipeId('')
+    setAdminRecipeDraft(buildRecipeDraft(null))
+    setAdminRecipeError('')
+    setAdminRecipeNote('')
+  }
+
+  function startAdminRecipeEdit(recipe) {
+    if (!recipe) return
+    setAdminRecipeMode('edit')
+    setAdminRecipeId(recipe.id)
+    setAdminRecipeDraft(buildRecipeDraft(recipe))
+    setAdminRecipeError('')
+    setAdminRecipeNote('')
+  }
+
+  function handleAdminRecipeDraftChange(field, value) {
+    setAdminRecipeDraft((prev) => ({ ...prev, [field]: value }))
+  }
+
+  function buildAdminRecipePayload() {
+    const mappingLocked = adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && activeAdminRecipe
+    const spinnakerApplication = mappingLocked
+      ? activeAdminRecipe.spinnaker_application
+      : adminRecipeDraft.spinnaker_application.trim() || null
+    const deployPipeline = mappingLocked
+      ? activeAdminRecipe.deploy_pipeline
+      : adminRecipeDraft.deploy_pipeline.trim() || null
+    const rollbackPipeline = mappingLocked
+      ? activeAdminRecipe.rollback_pipeline
+      : adminRecipeDraft.rollback_pipeline.trim() || null
+    const payload = {
+      id: adminRecipeDraft.id.trim(),
+      name: adminRecipeDraft.name.trim(),
+      description: adminRecipeDraft.description.trim() || null,
+      allowed_parameters: parseAllowedParameters(adminRecipeDraft.allowed_parameters),
+      spinnaker_application: spinnakerApplication,
+      deploy_pipeline: deployPipeline,
+      rollback_pipeline: rollbackPipeline,
+      status: adminRecipeDraft.status === 'deprecated' ? 'deprecated' : 'active'
+    }
+    if (!payload.id) return { error: 'Recipe id is required.' }
+    if (!payload.name) return { error: 'Recipe name is required.' }
+    const hasAnyPipeline = Boolean(payload.deploy_pipeline) || Boolean(payload.rollback_pipeline)
+    if (hasAnyPipeline && !payload.spinnaker_application) {
+      return { error: 'Spinnaker application is required when pipelines are set.' }
+    }
+    if (payload.spinnaker_application && (!payload.deploy_pipeline || !payload.rollback_pipeline)) {
+      return { error: 'Deploy and rollback pipelines are required when Spinnaker application is set.' }
+    }
+    return { payload }
+  }
+
+  async function saveAdminRecipe() {
+    setAdminRecipeError('')
+    setAdminRecipeNote('')
+    const { payload, error } = buildAdminRecipePayload()
+    if (error) {
+      setAdminRecipeError(error)
+      return
+    }
+    if (!payload) return
+    setAdminRecipeSaving(true)
+    try {
+      const result =
+        adminRecipeMode === 'create'
+          ? await api.post('/recipes', payload)
+          : await api.put(`/recipes/${encodeURIComponent(payload.id)}`, payload)
+      if (result && result.code) {
+        setAdminRecipeError(`${result.code}: ${result.message}`)
+        return
+      }
+      await loadRecipes()
+      setAdminRecipeId(result.id || payload.id)
+      setAdminRecipeMode('view')
+      setAdminRecipeDraft(buildRecipeDraft(result || payload))
+      setAdminRecipeNote('Recipe saved.')
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAdminRecipeError('Failed to save recipe.')
+    } finally {
+      setAdminRecipeSaving(false)
+    }
+  }
+
   function handleRefreshMinutesChange(value) {
     const rawValue = String(value ?? '')
     setRefreshMinutesInput(rawValue)
@@ -1058,6 +1194,10 @@ export default function App() {
       setErrorMessage('Recipe is required')
       return
     }
+    if (selectedRecipeDeprecated) {
+      setErrorMessage('Selected recipe is deprecated and cannot be used for new deployments.')
+      return
+    }
     if (!changeSummary.trim()) {
       setErrorMessage('Change summary is required')
       return
@@ -1076,6 +1216,7 @@ export default function App() {
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
         RATE_LIMITED: 'Daily deploy quota exceeded for this delivery group.',
         RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+        RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
         SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.'
       }
       const inline = inlineMessages[result.code]
@@ -1285,6 +1426,16 @@ export default function App() {
       setAdminGroupDraft(buildGroupDraft(null))
     }
   }, [isPlatformAdmin, activeAdminGroup, adminGroupId, adminGroupMode])
+
+  useEffect(() => {
+    if (!isPlatformAdmin) return
+    if (adminRecipeMode === 'create') return
+    if (activeAdminRecipe) {
+      setAdminRecipeDraft(buildRecipeDraft(activeAdminRecipe))
+    } else if (!adminRecipeId) {
+      setAdminRecipeDraft(buildRecipeDraft(null))
+    }
+  }, [isPlatformAdmin, activeAdminRecipe, adminRecipeId, adminRecipeMode])
 
   useEffect(() => {
     if (versions.length > 0 && versionMode === 'auto') {
@@ -1758,10 +1909,14 @@ export default function App() {
                 {filteredRecipes.map((recipe) => (
                   <option key={recipe.id} value={recipe.id}>
                     {recipe.name}
+                    {recipe.status === 'deprecated' ? ' (deprecated)' : ''}
                   </option>
                 ))}
               </select>
               <div className="helper">Recipes are filtered by delivery group policy.</div>
+              {selectedRecipeDeprecated && (
+                <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
+              )}
             </div>
             <div className="row">
               <div className="field">
@@ -1828,7 +1983,7 @@ export default function App() {
             <button
               className="button"
               onClick={handleDeploy}
-              disabled={!canDeploy || !recipeId || !changeSummary.trim() || !validVersion}
+              disabled={!canDeploy || !recipeId || !changeSummary.trim() || !validVersion || selectedRecipeDeprecated}
               title={!canDeploy ? deployDisabledReason : ''}
             >
               Deploy now
@@ -2431,23 +2586,230 @@ export default function App() {
                 </>
               )}
               {adminTab === 'recipes' && (
-                <div className="card" style={{ gridColumn: '1 / -1' }}>
-                  <h2>Recipes</h2>
-                  {recipes.length === 0 && <div className="helper">No recipes available.</div>}
-                  {recipes.length > 0 && (
-                    <div className="list">
-                      {recipes.map((recipe) => (
-                        <div className="list-item" key={recipe.id}>
-                          <div>{recipe.name}</div>
-                          <div>{recipe.id}</div>
-                          <div>{recipe.description || 'No description'}</div>
-                          <div>{recipe.deploy_pipeline || 'No deploy pipeline'}</div>
-                          <div>{recipe.rollback_pipeline || 'No rollback pipeline'}</div>
-                        </div>
-                      ))}
+                <>
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h2>Recipes</h2>
+                      <button className="button secondary" onClick={startAdminRecipeCreate}>
+                        Create recipe
+                      </button>
                     </div>
-                  )}
-                </div>
+                    {recipes.length === 0 && <div className="helper">No recipes available.</div>}
+                    {recipes.length > 0 && (
+                      <div className="list" style={{ marginTop: '12px' }}>
+                        {sortedRecipes.map((recipe) => {
+                          const usage = recipeUsageCounts[recipe.id] || 0
+                          const status = recipe.status || 'active'
+                          return (
+                            <div className="list-item admin-group" key={recipe.id}>
+                              <div>
+                                <strong>{recipe.name || recipe.id}</strong>
+                                <div className="helper">{recipe.id}</div>
+                              </div>
+                              <div>
+                                <span className={`status ${String(status).toUpperCase()}`}>{recipeStatusLabel(status)}</span>
+                              </div>
+                              <div>{usage} groups</div>
+                              <div>
+                                {recipe.spinnaker_application ? recipe.spinnaker_application : 'No engine mapping'}
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                <button
+                                  className="button secondary"
+                                  onClick={() => {
+                                    setAdminRecipeMode('view')
+                                    setAdminRecipeId(recipe.id)
+                                    setAdminRecipeError('')
+                                    setAdminRecipeNote('')
+                                  }}
+                                >
+                                  View
+                                </button>
+                                <button className="button secondary" onClick={() => startAdminRecipeEdit(recipe)}>
+                                  Edit
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="card">
+                    {adminRecipeMode === 'view' && activeAdminRecipe && (
+                      <>
+                        <h2>Recipe detail</h2>
+                        <div className="helper">Recipe metadata and engine mapping.</div>
+                        <div className="list" style={{ marginTop: '12px' }}>
+                          <div className="list-item admin-detail">
+                            <div>Name</div>
+                            <div>{activeAdminRecipe.name}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Status</div>
+                            <div>{recipeStatusLabel(activeAdminRecipe.status)}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Description</div>
+                            <div>{activeAdminRecipe.description || 'No description'}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Used by</div>
+                            <div>{activeAdminRecipeUsage} delivery groups</div>
+                          </div>
+                        </div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                        <div className="list">
+                          <div className="list-item admin-detail">
+                            <div>Application</div>
+                            <div>{activeAdminRecipe.spinnaker_application || 'Not set'}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Deploy pipeline</div>
+                            <div>{activeAdminRecipe.deploy_pipeline || 'Not set'}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Rollback pipeline</div>
+                            <div>{activeAdminRecipe.rollback_pipeline || 'Not set'}</div>
+                          </div>
+                        </div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Allowed parameters</div>
+                        <div className="list">
+                          {(activeAdminRecipe.allowed_parameters || []).length === 0 && (
+                            <div className="helper">No allowed parameters.</div>
+                          )}
+                          {(activeAdminRecipe.allowed_parameters || []).map((param) => (
+                            <div className="list-item admin-detail" key={param}>
+                              <div>{param}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          className="button secondary"
+                          style={{ marginTop: '12px' }}
+                          onClick={() => startAdminRecipeEdit(activeAdminRecipe)}
+                        >
+                          Edit recipe
+                        </button>
+                      </>
+                    )}
+                    {(adminRecipeMode === 'create' || adminRecipeMode === 'edit') && (
+                      <>
+                        <h2>{adminRecipeMode === 'create' ? 'Create recipe' : 'Edit recipe'}</h2>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-id">Recipe id</label>
+                          <input
+                            id="admin-recipe-id"
+                            value={adminRecipeDraft.id}
+                            onChange={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
+                            disabled={adminRecipeMode === 'edit'}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-name">Name</label>
+                          <input
+                            id="admin-recipe-name"
+                            value={adminRecipeDraft.name}
+                            onChange={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-description">Description</label>
+                          <input
+                            id="admin-recipe-description"
+                            value={adminRecipeDraft.description}
+                            onChange={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-params">Allowed parameters (comma-separated)</label>
+                          <input
+                            id="admin-recipe-params"
+                            value={adminRecipeDraft.allowed_parameters}
+                            onChange={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
+                          />
+                        </div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                        {adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && (
+                          <div className="helper">Engine mapping is locked while recipe is in use.</div>
+                        )}
+                        <div className="field">
+                          <label htmlFor="admin-recipe-app">Spinnaker application</label>
+                          <input
+                            id="admin-recipe-app"
+                            value={adminRecipeDraft.spinnaker_application}
+                            onChange={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
+                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-deploy">Deploy pipeline</label>
+                          <input
+                            id="admin-recipe-deploy"
+                            value={adminRecipeDraft.deploy_pipeline}
+                            onChange={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
+                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-rollback">Rollback pipeline</label>
+                          <input
+                            id="admin-recipe-rollback"
+                            value={adminRecipeDraft.rollback_pipeline}
+                            onChange={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
+                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                          />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-status">Deprecated</label>
+                          <input
+                            id="admin-recipe-status"
+                            type="checkbox"
+                            checked={adminRecipeDraft.status === 'deprecated'}
+                            onChange={(e) =>
+                              handleAdminRecipeDraftChange('status', e.target.checked ? 'deprecated' : 'active')
+                            }
+                          />
+                          {adminRecipeDraft.status === 'deprecated' && (
+                            <div className="helper">Deprecated recipes cannot be used for new deployments.</div>
+                          )}
+                        </div>
+                        {adminRecipeError && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeError}</div>}
+                        {adminRecipeNote && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeNote}</div>}
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                          <button className="button" onClick={saveAdminRecipe} disabled={adminRecipeSaving}>
+                            {adminRecipeSaving ? 'Saving...' : 'Save recipe'}
+                          </button>
+                          <button
+                            className="button secondary"
+                            onClick={() => {
+                              setAdminRecipeMode('view')
+                              setAdminRecipeError('')
+                              setAdminRecipeNote('')
+                              if (activeAdminRecipe) {
+                                setAdminRecipeDraft(buildRecipeDraft(activeAdminRecipe))
+                              } else {
+                                setAdminRecipeDraft(buildRecipeDraft(null))
+                              }
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {adminRecipeMode === 'view' && !activeAdminRecipe && (
+                      <div className="helper">Select a recipe to view details.</div>
+                    )}
+                  </div>
+                </>
               )}
             </>
           )}

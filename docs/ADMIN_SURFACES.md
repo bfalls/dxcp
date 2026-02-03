@@ -44,7 +44,7 @@ Audit expectations:
 
 ## Recipe management
 
-Status: Planned
+Status: Current (create, edit, deprecate)
 
 Purpose:
 - Define approved deployment paths, mapped to the execution engine.
@@ -67,6 +67,7 @@ Lifecycle:
 - Create and edit are supported by admin surfaces.
 - Deprecate recipes instead of deleting them.
 - Deprecated recipes cannot be used for new deployments.
+- Engine mapping is locked while a recipe is in use by a delivery group.
 
 Role enforcement:
 - PLATFORM_ADMIN only for create, edit, and deprecate actions.
@@ -97,11 +98,10 @@ DeliveryGroup admin endpoints (planned):
 - PATCH /v1/delivery-groups/{id}
 - DELETE /v1/delivery-groups/{id} (discouraged, optional)
 
-Recipe admin endpoints (planned):
+Recipe admin endpoints (current):
 - POST /v1/recipes
 - PUT /v1/recipes/{id}
-- PATCH /v1/recipes/{id}
-- POST /v1/recipes/{id}/deprecate
+- Deprecation is handled by setting status=deprecated via PUT.
 
 Validation endpoints (planned):
 - GET /v1/recipes/validate?spinnakerApplication=...&deployPipeline=...&rollbackPipeline=...
@@ -113,4 +113,6 @@ Validation endpoints (planned):
 Current:
 - Admin UI supports DeliveryGroup create and edit.
 - Admin CRUD endpoints exist for DeliveryGroup create and update.
+- Admin UI supports Recipe create, edit, and deprecation.
+- Admin CRUD endpoints exist for Recipe create and update.
 - Recipes and delivery groups are seeded in storage by the platform.

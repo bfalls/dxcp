@@ -28,3 +28,4 @@ cdk/cdk.context.json
 *.pub
 ui/.env.local
 dxcp-api/.env
+dxcp-api/data/*.db

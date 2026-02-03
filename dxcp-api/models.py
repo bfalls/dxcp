@@ -19,6 +19,11 @@ class DeploymentState(str, Enum):
     ROLLED_BACK = "ROLLED_BACK"
 
 
+class RecipeStatus(str, Enum):
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+
+
 class DeploymentIntent(BaseModel):
     service: str
     environment: str
@@ -89,10 +94,22 @@ class Recipe(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    allowed_parameters: List[str]
+    allowed_parameters: List[str] = Field(default_factory=list)
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
+    status: RecipeStatus = RecipeStatus.ACTIVE
+
+
+class RecipeUpsert(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    allowed_parameters: List[str] = Field(default_factory=list)
+    spinnaker_application: Optional[str] = None
+    deploy_pipeline: Optional[str] = None
+    rollback_pipeline: Optional[str] = None
+    status: RecipeStatus = RecipeStatus.ACTIVE
 
 
 class Actor(BaseModel):

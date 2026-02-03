@@ -234,7 +234,7 @@ Defaults and bounds:
 
 ### Admin section
 
-Status: Current (Delivery Groups); Recipes planned
+Status: Current (Delivery Groups and Recipes)
 
 Entry visibility:
 - Visible to PLATFORM_ADMIN only.
@@ -269,9 +269,12 @@ Key data:
 - Recipe id, name, description.
 - Spinnaker application and deploy/rollback pipelines.
 - Status (active, deprecated).
+- Used-by count (delivery groups).
 
 Primary actions:
 - Create, edit, deprecate recipes.
+- View engine mapping and usage before changes.
 
 Blocked-action UX:
 - If a recipe is deprecated or not allowed for a group, block deploy and explain why.
+- Engine mapping is read-only while the recipe is in use.

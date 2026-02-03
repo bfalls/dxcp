@@ -29,7 +29,7 @@ const buildFetchMock = ({
       guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
     }
   ]
-  const recipeList = recipes || [{ id: 'default', name: 'Default Deploy' }]
+  let recipeList = recipes || [{ id: 'default', name: 'Default Deploy', status: 'active' }]
   const serviceList = servicesList || [{ service_name: 'demo-service' }]
   return async (url, options = {}) => {
     const parsed = new URL(url)
@@ -73,6 +73,20 @@ const buildFetchMock = ({
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
       })
+    }
+    if (pathname === '/v1/recipes' && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}')
+      if (recipeList.some((recipe) => recipe.id === body.id)) {
+        return ok({ code: 'RECIPE_EXISTS', message: 'Recipe already exists' })
+      }
+      recipeList = [...recipeList, body]
+      return ok(body)
+    }
+    if (pathname.startsWith('/v1/recipes/') && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      const recipeId = pathname.split('/').pop()
+      recipeList = recipeList.map((recipe) => (recipe.id === recipeId ? body : recipe))
+      return ok(body)
     }
     if (pathname === '/v1/services') {
       return ok(serviceList)
@@ -423,6 +437,36 @@ export async function runAllTests() {
     assert.equal(deployButton.disabled, false)
     fireEvent.click(deployButton)
     await view.findByText('Deployment detail')
+  })
+
+  await runTest('Deprecated recipe blocks deploy', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      recipes: [{ id: 'default', name: 'Default Deploy', status: 'deprecated' }]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
+    const changeInput = view.getByLabelText('Change summary')
+    changeInput.value = 'release'
+    changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await view.findByDisplayValue('release')
+    await view.findByText('Selected recipe is deprecated and cannot be used for new deployments.')
+    const deployButton = view.getByRole('button', { name: 'Deploy now' })
+    assert.equal(deployButton.disabled, true)
   })
 
   await runTest('Admin can create and edit delivery group', async () => {

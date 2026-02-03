@@ -25,6 +25,7 @@ from models import (
     DeliveryGroupUpsert,
     DeploymentIntent,
     Recipe,
+    RecipeUpsert,
     Role,
     TimelineEvent,
 )
@@ -138,6 +139,8 @@ def resolve_recipe(recipe_id: Optional[str], group: dict):
     recipe = storage.get_recipe(resolved_id)
     if not recipe:
         return None, error_response(404, "RECIPE_NOT_FOUND", f"Recipe {resolved_id} not found")
+    if recipe.get("status") == "deprecated":
+        return None, error_response(403, "RECIPE_DEPRECATED", f"Recipe {resolved_id} is deprecated")
     allowed = group.get("allowed_recipes", [])
     if resolved_id not in allowed:
         return None, error_response(
@@ -196,6 +199,39 @@ def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None
     guardrail_error = _validate_guardrails(group.get("guardrails"))
     if guardrail_error:
         return guardrail_error
+    return None
+
+
+def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
+    if not payload.get("id"):
+        return error_response(400, "RECIPE_ID_REQUIRED", "Recipe id is required")
+    if recipe_id and payload["id"] != recipe_id:
+        return error_response(400, "ID_MISMATCH", "Recipe id cannot be changed")
+    if not payload.get("name"):
+        return error_response(400, "RECIPE_NAME_REQUIRED", "Recipe name is required")
+    allowed_parameters = payload.get("allowed_parameters", [])
+    if not isinstance(allowed_parameters, list):
+        return error_response(400, "INVALID_ALLOWED_PARAMETERS", "allowed_parameters must be a list")
+    spinnaker_application = payload.get("spinnaker_application")
+    deploy_pipeline = payload.get("deploy_pipeline")
+    rollback_pipeline = payload.get("rollback_pipeline")
+    has_any_pipeline = bool(deploy_pipeline) or bool(rollback_pipeline)
+    if has_any_pipeline and not spinnaker_application:
+        return error_response(
+            400,
+            "MISSING_ENGINE_APP",
+            "spinnaker_application is required when pipelines are set",
+        )
+    if spinnaker_application and (not deploy_pipeline or not rollback_pipeline):
+        return error_response(
+            400,
+            "MISSING_ENGINE_PIPELINE",
+            "deploy_pipeline and rollback_pipeline are required when spinnaker_application is set",
+        )
+    status = payload.get("status") or "active"
+    if status not in {"active", "deprecated"}:
+        return error_response(400, "INVALID_STATUS", "status must be active or deprecated")
+    payload["status"] = status
     return None
 
 
@@ -667,6 +703,53 @@ def update_delivery_group(
     else:
         storage.insert_delivery_group(payload)
     return DeliveryGroup(**payload).dict()
+
+
+@app.post("/v1/recipes")
+def create_recipe(
+    recipe: RecipeUpsert,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create recipes")
+    if role_error:
+        return role_error
+    rate_limiter.check_mutate(actor.actor_id, "recipe_create")
+    payload = recipe.dict()
+    validation_error = _validate_recipe_payload(payload)
+    if validation_error:
+        return validation_error
+    if storage.get_recipe(payload["id"]):
+        return error_response(409, "RECIPE_EXISTS", "Recipe already exists")
+    storage.insert_recipe(payload)
+    return Recipe(**payload).dict()
+
+
+@app.put("/v1/recipes/{recipe_id}")
+def update_recipe(
+    recipe_id: str,
+    recipe: RecipeUpsert,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update recipes")
+    if role_error:
+        return role_error
+    rate_limiter.check_mutate(actor.actor_id, "recipe_update")
+    payload = recipe.dict()
+    validation_error = _validate_recipe_payload(payload, recipe_id)
+    if validation_error:
+        return validation_error
+    if not storage.get_recipe(recipe_id):
+        return error_response(404, "NOT_FOUND", "Recipe not found")
+    payload["id"] = recipe_id
+    if hasattr(storage, "update_recipe"):
+        storage.update_recipe(payload)
+    else:
+        storage.insert_recipe(payload)
+    return Recipe(**payload).dict()
 
 
 @app.get("/v1/recipes")
