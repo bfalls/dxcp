@@ -225,6 +225,11 @@ class Storage:
                         entry.get("stable_service_url_template"),
                         ssm_cache,
                     ),
+                    "backstage_entity_ref": entry.get("backstage_entity_ref"),
+                    "backstage_entity_url": _resolve_ssm_template(
+                        entry.get("backstage_entity_url_template"),
+                        ssm_cache,
+                    ),
                 }
                 for entry in data
                 if entry.get("service_name")
@@ -805,6 +810,11 @@ class DynamoStorage:
                         item.get("stable_service_url_template"),
                         ssm_cache,
                     ),
+                    "backstage_entity_ref": item.get("backstage_entity_ref"),
+                    "backstage_entity_url": _resolve_ssm_template(
+                        item.get("backstage_entity_url_template"),
+                        ssm_cache,
+                    ),
                 }
             )
         return sorted([s for s in services if s.get("service_name")], key=lambda item: item["service_name"])
@@ -820,6 +830,8 @@ class DynamoStorage:
             "allowed_recipes": item.get("allowed_recipes", []),
             "allowed_artifact_sources": item.get("allowed_artifact_sources", []),
             "stable_service_url_template": item.get("stable_service_url_template"),
+            "backstage_entity_ref": item.get("backstage_entity_ref"),
+            "backstage_entity_url": item.get("backstage_entity_url"),
         }
 
     def _scan_delivery_groups(self, limit: Optional[int] = None) -> List[dict]:

@@ -23,6 +23,17 @@ Backstage should not perform write actions in DXCP.
 Recommended link: store the DXCP DeliveryGroup id in Backstage metadata and use it when
 requesting insights or listing DeliveryGroup details.
 
+## Service registry fields
+
+DXCP can surface Backstage links in the Service detail view when these optional fields
+are present in the service registry. All fields are read-only in the UI.
+
+- `backstage_entity_ref`: Backstage entity ref (example: `component:default/demo-service`).
+- `backstage_entity_url_template`: Optional URL template. Supports `{service}` and SSM
+  resolution via `ssm:/path` entries (same pattern as `stable_service_url_template`).
+- `VITE_BACKSTAGE_BASE_URL`: Optional UI config. When set and no explicit URL template
+  is provided, the UI builds `https://<base>/catalog/<namespace>/<kind>/<name>`.
+
 ## Required endpoints
 
 These endpoints are safe for OBSERVER role.

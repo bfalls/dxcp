@@ -31,12 +31,11 @@ Current:
 - Primary navigation: Services, Deploy, Deployments, Detail, Insights.
 - Admin appears for PLATFORM_ADMIN only.
 - Global scope is a single environment (sandbox).
+- Admin section includes Delivery Groups and Recipes.
+- Role-based visibility in navigation (admin screens only for PLATFORM_ADMIN).
 
 Planned:
 - Dashboard as landing view.
-- Services list with service detail views.
-- Admin section for Delivery Groups and Recipes.
-- Role-based visibility in navigation (admin screens only for PLATFORM_ADMIN).
 
 ---
 
@@ -94,6 +93,7 @@ Overview tab
 - Goal: quick status and latest activity.
 - Key data: latest deployment state, version, updatedAt, rollbackOf if any.
 - Actions: open deployment detail, open Spinnaker deep link.
+- Integrations: show Backstage entity ref and link when configured.
 
 Deploy tab
 - Goal: submit deployment intent.

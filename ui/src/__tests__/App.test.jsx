@@ -801,6 +801,38 @@ export async function runAllTests() {
     await view.findByText('Version: 2.1.0')
   })
 
+  await runTest('Service detail shows Backstage link when configured', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [
+        {
+          service_name: 'demo-service',
+          backstage_entity_ref: 'component:default/demo-service',
+          backstage_entity_url: 'https://backstage.example/catalog/default/component/demo-service'
+        }
+      ]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    await view.findByText('demo-service')
+    fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
+    await view.findByText('Integrations')
+    await view.findByText('component:default/demo-service')
+    assert.ok(view.getByRole('link', { name: 'Open in Backstage' }))
+  })
+
   await runTest('API client attaches Authorization header', async () => {
     let capturedAuth = ''
     globalThis.fetch = async (url, options) => {

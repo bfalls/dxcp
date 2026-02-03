@@ -10,6 +10,7 @@ const AUTH0_CLIENT_ID = ENV.VITE_AUTH0_CLIENT_ID || ''
 const AUTH0_AUDIENCE = ENV.VITE_AUTH0_AUDIENCE || ''
 const ROLES_CLAIM = ENV.VITE_AUTH0_ROLES_CLAIM || 'https://dxcp.example/claims/roles'
 const SERVICE_URL_BASE = ENV.VITE_SERVICE_URL_BASE || ''
+const BACKSTAGE_BASE_URL = ENV.VITE_BACKSTAGE_BASE_URL || ''
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
 const INSIGHTS_WINDOW_DAYS = 7
@@ -228,6 +229,36 @@ function computeQuotaStats(deployments, groupId) {
   return { deployUsed, rollbackUsed }
 }
 
+function applyTemplate(value, serviceName) {
+  if (!value) return ''
+  if (!serviceName) return value
+  return String(value).replace('{service}', serviceName)
+}
+
+function parseBackstageRef(ref) {
+  if (!ref) return null
+  const trimmed = String(ref).trim()
+  const parts = trimmed.split(':')
+  if (parts.length < 2) return null
+  const kind = parts[0].toLowerCase()
+  const rest = parts.slice(1).join(':')
+  const slash = rest.split('/')
+  if (slash.length !== 2) return null
+  const namespace = slash[0]
+  const name = slash[1]
+  if (!namespace || !name) return null
+  return { kind, namespace, name }
+}
+
+function buildBackstageUrl(ref, explicitUrl, baseUrl) {
+  if (explicitUrl) return explicitUrl
+  if (!baseUrl || !ref) return ''
+  const parsed = parseBackstageRef(ref)
+  if (!parsed) return ''
+  const trimmedBase = baseUrl.replace(/\/$/, '')
+  return `${trimmedBase}/catalog/${parsed.namespace}/${parsed.kind}/${parsed.name}`
+}
+
 function buildGroupDraft(group) {
   const guardrails = group?.guardrails || {}
   return {
@@ -432,6 +463,16 @@ export default function App() {
     if (!serviceDetailName) return null
     return findDeliveryGroup(serviceDetailName)
   }, [serviceDetailName, findDeliveryGroup])
+  const serviceDetailService = useMemo(
+    () => services.find((svc) => svc.service_name === serviceDetailName) || null,
+    [services, serviceDetailName]
+  )
+  const backstageEntityRef = serviceDetailService?.backstage_entity_ref || ''
+  const backstageEntityUrl = buildBackstageUrl(
+    backstageEntityRef,
+    applyTemplate(serviceDetailService?.backstage_entity_url, serviceDetailName),
+    BACKSTAGE_BASE_URL
+  )
   const serviceDetailLatest = serviceDetailStatus?.latest || null
   // UI-only role display; API permissions are authoritative.
   const derivedRole = Array.isArray(derivedRoles)
@@ -1834,6 +1875,34 @@ export default function App() {
                   <div className="helper">Service is not assigned to a delivery group.</div>
                 )}
               </div>
+              <div className="card">
+                <h2>Integrations</h2>
+                {!backstageEntityRef && !backstageEntityUrl && (
+                  <div className="helper">No integrations configured for this service.</div>
+                )}
+                {(backstageEntityRef || backstageEntityUrl) && (
+                  <div className="list">
+                    {backstageEntityRef && (
+                      <div className="list-item admin-detail">
+                        <div>Backstage entity</div>
+                        <div>{backstageEntityRef}</div>
+                      </div>
+                    )}
+                    <div className="list-item admin-detail">
+                      <div>Backstage</div>
+                      <div>
+                        {backstageEntityUrl ? (
+                          <a className="link" href={backstageEntityUrl} target="_blank" rel="noreferrer">
+                            Open in Backstage
+                          </a>
+                        ) : (
+                          'Not linked'
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -1960,7 +2029,7 @@ export default function App() {
               <div className="field">
                 <label>Environment</label>
                 <input value="sandbox" disabled />
-                <div className="helper">Single environment for demo safety.</div>
+                <div className="helper">Single environment for controlled rollout.</div>
               </div>
             <div className="field">
               <label>Version</label>
@@ -2278,7 +2347,9 @@ export default function App() {
               </div>
             </div>
             {insightsError && <div className="helper" style={{ marginTop: '8px' }}>{insightsError}</div>}
-            {!insights && !insightsLoading && !insightsError && <div className="helper">No insights yet.</div>}
+            {!insights && !insightsLoading && !insightsError && (
+              <div className="helper">No insights available for the selected filters.</div>
+            )}
             {insights && (
               <div className="list">
                 <div className="list-item">
