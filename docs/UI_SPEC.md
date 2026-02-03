@@ -130,11 +130,21 @@ Key data:
 - Recipe (required).
 - Environment (sandbox only).
 - Version (auto-discovered or custom).
-- Change summary.
+- Change summary (required).
 
 Primary actions:
 - Deploy now.
 - Refresh services, recipes, and versions.
+
+Form behavior:
+- Recipe list is filtered by the selected service's DeliveryGroup allowlist.
+- Change summary is required before deploy is enabled.
+
+Policy side panel:
+- DeliveryGroup name and owner.
+- Guardrails (max concurrent deployments, daily deploy/rollback quotas).
+- Quota remaining for today (derived from deployment activity).
+- Selected recipe description.
 
 Blocked-action UX:
 - Show API error codes and messages in the UI shell when blocked.

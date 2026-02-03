@@ -142,8 +142,35 @@ function statusClass(state) {
   return `status ${state || ''}`
 }
 
+function isSameUtcDay(date, now) {
+  return (
+    date.getUTCFullYear() === now.getUTCFullYear() &&
+    date.getUTCMonth() === now.getUTCMonth() &&
+    date.getUTCDate() === now.getUTCDate()
+  )
+}
+
+function computeQuotaStats(deployments, groupId) {
+  if (!groupId) return { deployUsed: 0, rollbackUsed: 0 }
+  const now = new Date()
+  let deployUsed = 0
+  let rollbackUsed = 0
+  deployments.forEach((item) => {
+    if (!item || item.deliveryGroupId !== groupId || !item.createdAt) return
+    const createdAt = new Date(item.createdAt)
+    if (Number.isNaN(createdAt.getTime())) return
+    if (!isSameUtcDay(createdAt, now)) return
+    if (item.rollbackOf) {
+      rollbackUsed += 1
+    } else {
+      deployUsed += 1
+    }
+  })
+  return { deployUsed, rollbackUsed }
+}
+
 export default function App() {
-  if (import.meta?.env?.DEV && typeof window !== 'undefined' && window.__DXCP_AUTH0_RESET__) {
+  if (typeof window !== 'undefined' && window.__DXCP_AUTH0_RESET__) {
     sharedAuthInitPromise = null
     sharedAuthResult = null
     sharedAuthError = null
@@ -167,7 +194,7 @@ export default function App() {
   const [version, setVersion] = useState('1.0.0')
   const [versionMode, setVersionMode] = useState('custom')
   const [versionSelection, setVersionSelection] = useState('auto')
-  const [changeSummary, setChangeSummary] = useState('Initial demo deploy')
+  const [changeSummary, setChangeSummary] = useState('')
   const [deployResult, setDeployResult] = useState(null)
   const [deployments, setDeployments] = useState([])
   const [selected, setSelected] = useState(null)
@@ -200,6 +227,10 @@ export default function App() {
   const [serviceDetailFailures, setServiceDetailFailures] = useState([])
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
   const [serviceDetailError, setServiceDetailError] = useState('')
+  const [deployInlineMessage, setDeployInlineMessage] = useState('')
+  const [policyDeployments, setPolicyDeployments] = useState([])
+  const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
+  const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
   const [publicSettings, setPublicSettings] = useState({
     default_refresh_interval_seconds: 300,
     min_refresh_interval_seconds: 60,
@@ -256,18 +287,32 @@ export default function App() {
   const maxRefreshSeconds = publicSettings.max_refresh_interval_seconds || 3600
   const defaultRefreshSeconds = publicSettings.default_refresh_interval_seconds || 300
   const rawRefreshSeconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
-  const { value: refreshIntervalSeconds, reason: refreshIntervalClamp } = useMemo(
+  const { value: refreshIntervalSeconds } = useMemo(
     () => clampRefreshIntervalSeconds(rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds),
     [rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds]
   )
   const refreshIntervalMinutes = Math.round(refreshIntervalSeconds / 60)
+  const filteredRecipes = useMemo(() => {
+    if (!currentDeliveryGroup) return []
+    const allowed = Array.isArray(currentDeliveryGroup.allowed_recipes) ? currentDeliveryGroup.allowed_recipes : []
+    return recipes.filter((recipe) => allowed.includes(recipe.id))
+  }, [recipes, currentDeliveryGroup])
+  const selectedRecipe = useMemo(
+    () => recipes.find((recipe) => recipe.id === recipeId) || null,
+    [recipes, recipeId]
+  )
+  const policyQuotaStats = useMemo(
+    () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
+    [policyDeployments, currentDeliveryGroup]
+  )
 
   const getAccessToken = useCallback(async () => {
-    if (!authClient || !isAuthenticated) return null
-    return authClient.getTokenSilently({
+    if (!authClient) return accessToken || null
+    const token = await authClient.getTokenSilently({
       authorizationParams: { audience: authAudience }
     })
-  }, [authClient, isAuthenticated, authAudience])
+    return token || accessToken || null
+  }, [authClient, authAudience, accessToken])
 
   const api = useMemo(() => createApiClient({ baseUrl: apiBase, getToken: getAccessToken }), [apiBase, getAccessToken])
 
@@ -385,10 +430,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!authClient || !isAuthenticated) {
+    if (!isAuthenticated) {
       setAccessToken('')
       return
     }
+    if (!authClient) return
     let cancelled = false
     authClient
       .getTokenSilently({ authorizationParams: { audience: authAudience } })
@@ -419,7 +465,9 @@ export default function App() {
       if (Array.isArray(data)) {
         setServices(data)
         if (!service && data.length > 0) {
-          setService(data[0].service_name)
+          const nextService = data[0].service_name
+          setService(nextService)
+          loadAllowedActions(nextService)
         }
       }
     } catch (err) {
@@ -578,14 +626,30 @@ export default function App() {
     }
   }
 
+  async function loadPolicyDeployments() {
+    setPolicyDeploymentsError('')
+    setPolicyDeploymentsLoading(true)
+    try {
+      const data = await api.get('/deployments')
+      setPolicyDeployments(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setPolicyDeployments([])
+      setPolicyDeploymentsError('Failed to load policy context')
+    } finally {
+      setPolicyDeploymentsLoading(false)
+    }
+  }
+
   function handleRefreshMinutesChange(value) {
-    setRefreshMinutesInput(value)
+    const rawValue = String(value ?? '')
+    setRefreshMinutesInput(rawValue)
     setRefreshInputError('')
-    if (value.trim() === '') {
+    if (rawValue.trim() === '') {
       setRefreshInputError('Enter a number.')
       return
     }
-    const parsed = Number(value)
+    const parsed = Number(rawValue)
     if (!Number.isFinite(parsed)) {
       setRefreshInputError('Enter a number.')
       return
@@ -601,8 +665,12 @@ export default function App() {
       minRefreshSeconds,
       maxRefreshSeconds
     )
-    if (userSettingsKey) {
-      saveUserSettings(userSettingsKey, { refresh_interval_seconds: clampedSeconds })
+    const resolvedKey = userSettingsKey || getUserSettingsKey(user, decodedToken)
+    if (resolvedKey) {
+      if (resolvedKey !== userSettingsKey) {
+        setUserSettingsKey(resolvedKey)
+      }
+      saveUserSettings(resolvedKey, { refresh_interval_seconds: clampedSeconds })
     }
     setUserSettings({ refresh_interval_seconds: clampedSeconds })
     setRefreshClampNote(reason ? `Clamped to admin ${reason}.` : '')
@@ -659,12 +727,17 @@ export default function App() {
     setErrorMessage('')
     setStatusMessage('')
     setDeployResult(null)
+    setDeployInlineMessage('')
     if (!validVersion) {
       setErrorMessage('Version format is invalid')
       return
     }
     if (!recipeId) {
       setErrorMessage('Recipe is required')
+      return
+    }
+    if (!changeSummary.trim()) {
+      setErrorMessage('Change summary is required')
       return
     }
     const key = `deploy-${Date.now()}`
@@ -677,12 +750,24 @@ export default function App() {
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
-      setErrorMessage(`${result.code}: ${result.message}`)
+      const inlineMessages = {
+        DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
+        RATE_LIMITED: 'Daily deploy quota exceeded for this delivery group.',
+        RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+        SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.'
+      }
+      const inline = inlineMessages[result.code]
+      if (inline) {
+        setDeployInlineMessage(`${result.code}: ${inline}`)
+      } else {
+        setErrorMessage(`${result.code}: ${result.message}`)
+      }
       return
     }
     setDeployResult(result)
     setStatusMessage(`Deployment created with id ${result.id}`)
     await refreshDeployments()
+    await openDeployment(result)
   }
 
   async function openDeployment(deployment) {
@@ -767,8 +852,15 @@ export default function App() {
     if (!userSettingsLoaded) return
     const seconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
     const minutes = Math.round(seconds / 60)
-    setRefreshMinutesInput(String(minutes))
-  }, [userSettingsLoaded, userSettings, defaultRefreshSeconds])
+    const nextValue = String(minutes)
+    if (!refreshMinutesInput) {
+      setRefreshMinutesInput(nextValue)
+      return
+    }
+    if (userSettings && refreshMinutesInput !== nextValue) {
+      setRefreshMinutesInput(nextValue)
+    }
+  }, [userSettingsLoaded, userSettings, defaultRefreshSeconds, refreshMinutesInput])
 
   useEffect(() => {
     if (!userSettingsLoaded || !userSettingsKey || !userSettings) return
@@ -788,16 +880,20 @@ export default function App() {
   }, [userSettingsLoaded, userSettingsKey, userSettings, minRefreshSeconds, maxRefreshSeconds])
 
   useEffect(() => {
-      if (!isAuthenticated) {
-        setServices([])
-        setService('')
-        setRecipes([])
-        setRecipeId('')
-        setDeployments([])
-        setSelected(null)
-        setFailures([])
-        setTimeline([])
-        setInsights(null)
+    if (!isAuthenticated) {
+      setServices([])
+      setService('')
+      setRecipes([])
+      setRecipeId('')
+      setDeployments([])
+      setPolicyDeployments([])
+      setPolicyDeploymentsError('')
+      setPolicyDeploymentsLoading(false)
+      setDeployInlineMessage('')
+      setSelected(null)
+      setFailures([])
+      setTimeline([])
+      setInsights(null)
         setServicesView([])
         setServicesViewError('')
         setServiceDetailName('')
@@ -815,15 +911,31 @@ export default function App() {
         setUserSettings(null)
         setUserSettingsLoaded(false)
         setRefreshMinutesInput('')
-        setRefreshClampNote('')
-        setRefreshInputError('')
-        setActionInfo({
-          actions: { view: true, deploy: false, rollback: false },
-          loading: true,
-          error: ''
+      setRefreshClampNote('')
+      setRefreshInputError('')
+      setActionInfo({
+        actions: { view: true, deploy: false, rollback: false },
+        loading: true,
+        error: ''
         })
-      }
+    }
   }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+    if (!currentDeliveryGroup) {
+      setRecipeId('')
+      return
+    }
+    if (filteredRecipes.length === 0) {
+      setRecipeId('')
+      return
+    }
+    const allowedIds = filteredRecipes.map((recipe) => recipe.id)
+    if (!allowedIds.includes(recipeId)) {
+      setRecipeId(allowedIds[0])
+    }
+  }, [isAuthenticated, currentDeliveryGroup, filteredRecipes, recipeId])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -833,7 +945,14 @@ export default function App() {
       loadVersions()
       loadAllowedActions(service)
     }
-  }, [service, isAuthenticated])
+  }, [service, isAuthenticated, accessToken])
+
+  useEffect(() => {
+    if (!isAuthenticated || !service || !accessToken) return
+    if (actionInfo.loading) {
+      loadAllowedActions(service)
+    }
+  }, [accessToken, actionInfo.loading, isAuthenticated, service])
 
   useEffect(() => {
     if (versions.length > 0 && versionMode === 'auto') {
@@ -914,6 +1033,11 @@ export default function App() {
     if (!authReady || !isAuthenticated || view !== 'services') return
     loadServicesList()
   }, [authReady, isAuthenticated, view])
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || view !== 'deploy') return
+    loadPolicyDeployments()
+  }, [authReady, isAuthenticated, view, currentDeliveryGroup?.id])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'service' || !serviceDetailName) return
@@ -1294,16 +1418,22 @@ export default function App() {
               <div className="helper">Allowlisted services only.</div>
             </div>
             <div className="field">
-              <label>Recipe</label>
-              <select value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
-                {recipes.length === 0 && <option value="">No recipes registered</option>}
-                {recipes.map((recipe) => (
+              <label htmlFor="deploy-recipe">Recipe</label>
+              <select
+                id="deploy-recipe"
+                value={recipeId}
+                onChange={(e) => setRecipeId(e.target.value)}
+                disabled={!currentDeliveryGroup || filteredRecipes.length === 0}
+              >
+                {!currentDeliveryGroup && <option value="">No delivery group assigned</option>}
+                {currentDeliveryGroup && filteredRecipes.length === 0 && <option value="">No allowed recipes</option>}
+                {filteredRecipes.map((recipe) => (
                   <option key={recipe.id} value={recipe.id}>
                     {recipe.name}
                   </option>
                 ))}
               </select>
-              <div className="helper">Recipe controls the delivery path.</div>
+              <div className="helper">Recipes are filtered by delivery group policy.</div>
             </div>
             <div className="row">
               <div className="field">
@@ -1358,13 +1488,19 @@ export default function App() {
             </div>
             </div>
             <div className="field">
-              <label>Change summary</label>
-              <input value={changeSummary} onChange={(e) => setChangeSummary(e.target.value)} />
+              <label htmlFor="change-summary">Change summary</label>
+              <input
+                id="change-summary"
+                value={changeSummary}
+                onChange={(e) => setChangeSummary(e.target.value)}
+                onInput={(e) => setChangeSummary(e.target.value)}
+              />
+              {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
             </div>
             <button
               className="button"
               onClick={handleDeploy}
-              disabled={!canDeploy}
+              disabled={!canDeploy || !recipeId || !changeSummary.trim() || !validVersion}
               title={!canDeploy ? deployDisabledReason : ''}
             >
               Deploy now
@@ -1374,9 +1510,81 @@ export default function App() {
                 Deploy disabled. {deployDisabledReason}
               </div>
             )}
+            {canDeploy && !changeSummary.trim() && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Change summary is required.
+              </div>
+            )}
+            {deployInlineMessage && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                {deployInlineMessage}
+              </div>
+            )}
             {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
           </div>
           <div className="card">
+            <h2>Policy context</h2>
+            {!currentDeliveryGroup && <div className="helper">Service is not assigned to a delivery group.</div>}
+            {currentDeliveryGroup && (
+              <>
+                <div className="list">
+                  <div className="list-item">
+                    <div>Delivery group</div>
+                    <div>{currentDeliveryGroup.name}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Owner</div>
+                    <div>{currentDeliveryGroup.owner || 'Unassigned'}</div>
+                  </div>
+                </div>
+                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+                <div className="list">
+                  <div className="list-item">
+                    <div>Max concurrent deployments</div>
+                    <div>{currentDeliveryGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Daily deploy quota</div>
+                    <div>{currentDeliveryGroup.guardrails?.daily_deploy_quota || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Deploys remaining today</div>
+                    <div>
+                      {currentDeliveryGroup.guardrails?.daily_deploy_quota
+                        ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+                        : '-'}
+                    </div>
+                  </div>
+                  <div className="list-item">
+                    <div>Daily rollback quota</div>
+                    <div>{currentDeliveryGroup.guardrails?.daily_rollback_quota || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Rollbacks remaining today</div>
+                    <div>
+                      {currentDeliveryGroup.guardrails?.daily_rollback_quota
+                        ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
+                        : '-'}
+                    </div>
+                  </div>
+                </div>
+                {policyDeploymentsLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading quota usage...</div>}
+                {policyDeploymentsError && <div className="helper" style={{ marginTop: '8px' }}>{policyDeploymentsError}</div>}
+                <div className="helper" style={{ marginTop: '12px' }}>Recipe</div>
+                <div className="list">
+                  <div className="list-item">
+                    <div>Selected</div>
+                    <div>{selectedRecipe?.name || 'None'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Description</div>
+                    <div>{selectedRecipe?.description || 'No description'}</div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
             <h2>Latest deployment</h2>
             {deployResult ? (
               <div>
@@ -1572,6 +1780,7 @@ export default function App() {
                 step="1"
                 value={refreshMinutesInput}
                 onChange={(e) => handleRefreshMinutesChange(e.target.value)}
+                onInput={(e) => handleRefreshMinutesChange(e.target.value)}
                 disabled={!userSettingsKey}
               />
               <div className="helper">Default is {Math.round(defaultRefreshSeconds / 60)} minutes.</div>

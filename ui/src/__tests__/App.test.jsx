@@ -9,10 +9,13 @@ const ok = (data) =>
     json: () => Promise.resolve(data)
   })
 
-const buildFetchMock = ({ role, deployAllowed, rollbackAllowed }) =>
-  async (url) => {
+const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse }) =>
+  async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
+    if (pathname === '/v1/deployments' && options.method === 'POST') {
+      return ok(deployResponse || { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' })
+    }
     if (pathname === '/v1/settings/public') {
       return ok({
         default_refresh_interval_seconds: 300,
@@ -47,7 +50,15 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed }) =>
       return ok([{ id: 'default', name: 'Default Deploy' }])
     }
     if (pathname === '/v1/delivery-groups') {
-      return ok([{ id: 'default', name: 'Default Delivery Group', services: ['demo-service'] }])
+      return ok([
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ])
     }
     if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
       return ok([
@@ -59,7 +70,31 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed }) =>
         }
       ])
     }
+    if (pathname === '/v1/deployments') {
+      return ok([
+        {
+          id: 'dep-1',
+          state: 'SUCCEEDED',
+          version: '2.1.0',
+          createdAt: '2025-01-01T00:00:00Z',
+          deliveryGroupId: 'default'
+        }
+      ])
+    }
+    if (pathname === '/v1/deployments/dep-1') {
+      return ok({
+        id: 'dep-1',
+        state: 'IN_PROGRESS',
+        service: 'demo-service',
+        version: '2.1.0',
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: '2025-01-01T00:00:00Z'
+      })
+    }
     if (pathname === '/v1/deployments/dep-1/failures') {
+      return ok([])
+    }
+    if (pathname === '/v1/deployments/dep-1/timeline') {
       return ok([])
     }
     if (pathname.endsWith('/versions')) {
@@ -88,13 +123,46 @@ function buildFakeJwt(roles) {
   return `${encode(header)}.${encode(payload)}.sig`
 }
 
+async function waitForCondition(check, attempts = 200) {
+  for (let i = 0; i < attempts; i += 1) {
+    if (check()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error('Condition not met in time')
+}
+
 async function withDom(fn) {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' })
+  const storage = (() => {
+    const store = new Map()
+    return {
+      getItem(key) {
+        return store.has(key) ? store.get(key) : null
+      },
+      setItem(key, value) {
+        store.set(String(key), String(value))
+      },
+      removeItem(key) {
+        store.delete(key)
+      },
+      clear() {
+        store.clear()
+      },
+      key(index) {
+        return Array.from(store.keys())[index] || null
+      },
+      get length() {
+        return store.size
+      }
+    }
+  })()
   Object.defineProperty(globalThis, 'window', { value: dom.window, configurable: true })
   Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true })
   Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
   Object.defineProperty(globalThis, 'HTMLElement', { value: dom.window.HTMLElement, configurable: true })
   Object.defineProperty(globalThis, 'getComputedStyle', { value: dom.window.getComputedStyle, configurable: true })
+  Object.defineProperty(dom.window, 'localStorage', { value: storage, configurable: true })
+  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
   Object.defineProperty(globalThis, 'requestAnimationFrame', {
     value: (cb) => setTimeout(cb, 0),
     configurable: true
@@ -121,6 +189,7 @@ async function withDom(fn) {
     delete globalThis.navigator
     delete globalThis.HTMLElement
     delete globalThis.getComputedStyle
+    delete globalThis.localStorage
     delete globalThis.requestAnimationFrame
     delete globalThis.fetch
   }
@@ -226,14 +295,96 @@ export async function runAllTests() {
 
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('button', { name: 'Settings' }))
-    const input = view.getByLabelText('Auto-refresh interval (minutes)')
-    fireEvent.change(input, { target: { value: '2' } })
+    await view.findByText('Resolved refresh interval: 5 minutes.')
+    const input = await view.findByLabelText('Auto-refresh interval (minutes)')
+    await view.findByDisplayValue('5')
+    await waitForCondition(() => !input.disabled)
+    input.value = '2'
+    input.dispatchEvent(new window.Event('input', { bubbles: true }))
+    input.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await view.findByDisplayValue('2')
     await view.findByText('Resolved refresh interval: 2 minutes.')
-    const stored = window.localStorage.getItem('dxcp.user_settings.v1.user-1')
+    const keyBySub = 'dxcp.user_settings.v1.user-1'
+    const keyByEmail = 'dxcp.user_settings.v1.owner@example.com'
+    let stored = null
+    await waitForCondition(() => {
+      stored = window.localStorage.getItem(keyBySub) || window.localStorage.getItem(keyByEmail)
+      return Boolean(stored)
+    })
     assert.ok(stored)
     const parsed = JSON.parse(stored)
     assert.equal(parsed.refresh_interval_seconds, 120)
     assert.ok(view.getByText('Admin defaults'))
+  })
+
+  await runTest('Blocked deploy shows correct message', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deployResponse: { code: 'RATE_LIMITED', message: 'Daily quota exceeded' }
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
+    await view.findByRole('option', { name: 'Default Deploy' })
+    fireEvent.change(view.getByLabelText('Recipe'), { target: { value: 'default' } })
+    const changeInput = view.getByLabelText('Change summary')
+    changeInput.value = 'release'
+    changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await view.findByDisplayValue('release')
+    const deployButton = view.getByRole('button', { name: 'Deploy now' })
+    await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
+    await waitForCondition(() => !deployButton.disabled)
+    assert.equal(deployButton.disabled, false)
+    fireEvent.click(deployButton)
+    await view.findByText('RATE_LIMITED: Daily deploy quota exceeded for this delivery group.')
+  })
+
+  await runTest('Allowed deploy redirects to detail page', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deployResponse: { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' }
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
+    await view.findByRole('option', { name: 'Default Deploy' })
+    fireEvent.change(view.getByLabelText('Recipe'), { target: { value: 'default' } })
+    const changeInput = view.getByLabelText('Change summary')
+    changeInput.value = 'release'
+    changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await view.findByDisplayValue('release')
+    const deployButton = view.getByRole('button', { name: 'Deploy now' })
+    await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
+    await waitForCondition(() => !deployButton.disabled)
+    assert.equal(deployButton.disabled, false)
+    fireEvent.click(deployButton)
+    await view.findByText('Deployment detail')
   })
 
   await runTest('Services list renders from API', async () => {
