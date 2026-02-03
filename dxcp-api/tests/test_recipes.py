@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
 pytestmark = pytest.mark.anyio
@@ -49,7 +50,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
-    os.environ["DXCP_ROLE"] = "PLATFORM_ADMIN"
+    configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
     for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
@@ -63,8 +64,9 @@ def _load_main(tmp_path: Path):
 
 
 @asynccontextmanager
-async def _client_and_state(tmp_path: Path):
+async def _client_and_state(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
     fake = FakeSpinnaker()
     main.spinnaker = fake
     main.idempotency = main.IdempotencyStore()
@@ -113,33 +115,33 @@ def _deployment_payload(recipe_id: str | None = None) -> dict:
     return payload
 
 
-async def test_deploy_rejects_unknown_recipe(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_deploy_rejects_unknown_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-unknown"},
+            headers={"Idempotency-Key": "deploy-unknown", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload("missing"),
         )
     assert response.status_code == 404
     assert response.json()["code"] == "RECIPE_NOT_FOUND"
 
 
-async def test_deploy_rejects_not_allowed_recipe(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_deploy_rejects_not_allowed_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-disallowed"},
+            headers={"Idempotency-Key": "deploy-disallowed", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload("extra"),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "RECIPE_NOT_ALLOWED"
 
 
-async def test_deploy_requires_recipe_id(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_deploy_requires_recipe_id(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-default"},
+            headers={"Idempotency-Key": "deploy-default", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload(),
         )
     assert response.status_code == 400

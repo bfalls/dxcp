@@ -1,40 +1,97 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { createAuth0Client } from '@auth0/auth0-spa-js'
+import { createApiClient } from './apiClient.js'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/v1'
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || 'demo-token'
-const SERVICE_URL_BASE = import.meta.env.VITE_SERVICE_URL_BASE || ''
+const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
+const API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '') + '/v1'
+const AUTH0_DOMAIN = ENV.VITE_AUTH0_DOMAIN || ''
+const AUTH0_CLIENT_ID = ENV.VITE_AUTH0_CLIENT_ID || ''
+const AUTH0_AUDIENCE = ENV.VITE_AUTH0_AUDIENCE || ''
+const ROLES_CLAIM = ENV.VITE_AUTH0_ROLES_CLAIM || 'https://dxcp.example/claims/roles'
+const SERVICE_URL_BASE = ENV.VITE_SERVICE_URL_BASE || ''
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
 const INSIGHTS_WINDOW_DAYS = 7
 
-function useApi() {
-  const headers = {
-    Authorization: `Bearer ${API_TOKEN}`
-  }
+let sharedAuthInitPromise = null
+let sharedAuthResult = null
+let sharedAuthError = null
+let sharedRedirectCode = null
 
-  const jsonHeaders = {
-    ...headers,
-    'Content-Type': 'application/json'
-  }
-
-  async function get(path) {
-    const res = await fetch(`${API_BASE}${path}`, { headers })
-    return res.json()
-  }
-
-  async function post(path, body, idempotencyKey) {
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: {
-        ...jsonHeaders,
-        'Idempotency-Key': idempotencyKey
-      },
-      body: JSON.stringify(body)
+async function initAuthOnce(runtimeConfig, factory) {
+  if (sharedAuthResult) return sharedAuthResult
+  if (sharedAuthError) throw sharedAuthError
+  if (sharedAuthInitPromise) return sharedAuthInitPromise
+  sharedAuthInitPromise = (async () => {
+    const client = await factory({
+      domain: runtimeConfig.domain,
+      clientId: runtimeConfig.clientId,
+      cacheLocation: 'localstorage',
+      useCookiesForTransactions: true,
+      authorizationParams: {
+        redirect_uri: window.location.origin,
+        audience: runtimeConfig.audience
+      }
     })
-    return res.json()
+    const params = new URLSearchParams(window.location.search || '')
+    const code = params.get('code')
+    const state = params.get('state')
+    if (code && state && code !== sharedRedirectCode) {
+      sharedRedirectCode = code
+      await client.handleRedirectCallback()
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+    let token = ''
+    let user = null
+    try {
+      token = await client.getTokenSilently({ authorizationParams: { audience: runtimeConfig.audience } })
+      if (token) {
+        user = (await client.getUser()) || null
+      }
+    } catch (err) {
+      // Ignore silent auth errors; fall back to isAuthenticated.
+    }
+    let isAuthenticated = false
+    if (token) {
+      isAuthenticated = true
+    } else {
+      isAuthenticated = await client.isAuthenticated()
+      if (isAuthenticated) {
+        user = (await client.getUser()) || null
+      }
+    }
+    const result = { client, isAuthenticated, user, token }
+    sharedAuthResult = result
+    return result
+  })()
+  try {
+    return await sharedAuthInitPromise
+  } catch (err) {
+    sharedAuthError = err
+    throw err
+  } finally {
+    sharedAuthInitPromise = null
   }
+}
 
-  return { get, post }
+function decodeJwt(token) {
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length < 2) return null
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const decoded =
+      typeof atob === 'function'
+        ? atob(payload)
+        : Buffer.from(payload, 'base64').toString('utf-8')
+    return JSON.parse(decoded)
+  } catch (err) {
+    return null
+  }
+}
+
+function isLoginRequiredError(err) {
+  return err?.code === 'LOGIN_REQUIRED' || err?.message === 'LOGIN_REQUIRED'
 }
 
 function formatTime(value) {
@@ -56,7 +113,14 @@ function statusClass(state) {
 }
 
 export default function App() {
-  const api = useApi()
+  const [authClient, setAuthClient] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [user, setUser] = useState(null)
+  const [authError, setAuthError] = useState('')
+  const [accessToken, setAccessToken] = useState('')
+  const [authAudience, setAuthAudience] = useState(AUTH0_AUDIENCE)
+  const [rolesClaim, setRolesClaim] = useState(ROLES_CLAIM)
   const [view, setView] = useState('deploy')
   const [services, setServices] = useState([])
   const [service, setService] = useState('')
@@ -80,8 +144,160 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
+  const [actionInfo, setActionInfo] = useState({
+    actions: { view: true, deploy: false, rollback: false },
+    loading: true,
+    error: ''
+  })
+  const [deliveryGroups, setDeliveryGroups] = useState([])
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
+  const contextService = selected?.service || service
+  const currentDeliveryGroup = useMemo(() => {
+    if (!contextService) return null
+    return deliveryGroups.find((group) => Array.isArray(group.services) && group.services.includes(contextService)) || null
+  }, [deliveryGroups, contextService])
+  const decodedToken = useMemo(() => decodeJwt(accessToken), [accessToken])
+  const derivedRoles = decodedToken?.[rolesClaim] || []
+  // UI-only role display; API permissions are authoritative.
+  const derivedRole = Array.isArray(derivedRoles)
+    ? derivedRoles.includes('dxcp-platform-admins')
+      ? 'PLATFORM_ADMIN'
+      : derivedRoles.includes('dxcp-observers')
+        ? 'OBSERVER'
+        : 'UNKNOWN'
+    : 'UNKNOWN'
+  const canDeploy = actionInfo.actions?.deploy === true
+  const canRollback = actionInfo.actions?.rollback === true
+  const isPlatformAdmin = derivedRole === 'PLATFORM_ADMIN'
+  const deployDisabledReason = actionInfo.loading
+    ? 'Loading access policy.'
+    : derivedRole === 'OBSERVER'
+      ? 'Observers are read-only.'
+      : `Role ${derivedRole} cannot deploy.`
+  const rollbackDisabledReason = actionInfo.loading
+    ? 'Loading access policy.'
+    : derivedRole === 'OBSERVER'
+      ? 'Observers are read-only.'
+      : `Role ${derivedRole} cannot rollback.`
+
+  const getAccessToken = useCallback(async () => {
+    if (!authClient || !isAuthenticated) return null
+    return authClient.getTokenSilently({
+      authorizationParams: { audience: authAudience }
+    })
+  }, [authClient, isAuthenticated, authAudience])
+
+  const api = useMemo(() => createApiClient({ baseUrl: API_BASE, getToken: getAccessToken }), [getAccessToken])
+
+  const getRuntimeConfig = useCallback(() => {
+    return typeof window !== 'undefined' && window.__DXCP_AUTH0_CONFIG__
+      ? window.__DXCP_AUTH0_CONFIG__
+      : {
+          domain: AUTH0_DOMAIN,
+          clientId: AUTH0_CLIENT_ID,
+          audience: AUTH0_AUDIENCE,
+          rolesClaim: ROLES_CLAIM
+        }
+  }, [])
+
+  const ensureAuthClient = useCallback(async () => {
+    if (authClient) return authClient
+    const runtimeConfig = getRuntimeConfig()
+    if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
+      throw new Error('Auth0 configuration is missing.')
+    }
+    const factory =
+      typeof window !== 'undefined' && window.__DXCP_AUTH0_FACTORY__
+        ? window.__DXCP_AUTH0_FACTORY__
+        : createAuth0Client
+    const result = await initAuthOnce(runtimeConfig, factory)
+    setAuthClient(result.client)
+    return result.client
+  }, [authClient, getRuntimeConfig])
+
+  const handleLogin = useCallback(async () => {
+    try {
+      const client = await ensureAuthClient()
+      client.loginWithRedirect({
+        authorizationParams: { audience: authAudience }
+      })
+    } catch (err) {
+      const message = err?.error_description || err?.error || err?.message || 'Failed to initialize Auth0.'
+      setAuthError(message)
+    }
+  }, [ensureAuthClient, authAudience])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      const client = await ensureAuthClient()
+      sharedAuthResult = null
+      sharedAuthError = null
+      sharedRedirectCode = null
+      client.logout({
+        logoutParams: { returnTo: window.location.origin }
+      })
+    } catch (err) {
+      const message = err?.error_description || err?.error || err?.message || 'Failed to initialize Auth0.'
+      setAuthError(message)
+    }
+  }, [ensureAuthClient])
+
+  useEffect(() => {
+    let active = true
+    async function initAuth() {
+      const runtimeConfig = getRuntimeConfig()
+      if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
+        if (active) {
+          setAuthError('Auth0 configuration is missing.')
+          setAuthReady(true)
+        }
+        return
+      }
+      setAuthAudience(runtimeConfig.audience)
+      setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
+      try {
+        const factory =
+          typeof window !== 'undefined' && window.__DXCP_AUTH0_FACTORY__
+            ? window.__DXCP_AUTH0_FACTORY__
+            : createAuth0Client
+        const result = await initAuthOnce(runtimeConfig, factory)
+        if (!active) return
+        setAuthClient(result.client)
+        setAccessToken(result.token || '')
+        setUser(result.user || null)
+        setIsAuthenticated(Boolean(result.isAuthenticated))
+        setAuthReady(true)
+      } catch (err) {
+        if (active) {
+          const message = err?.error_description || err?.error || err?.message || 'Failed to initialize Auth0.'
+          setAuthError(message)
+          setAuthReady(true)
+        }
+      }
+    }
+    initAuth()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authClient || !isAuthenticated) {
+      setAccessToken('')
+      return
+    }
+    let cancelled = false
+    authClient
+      .getTokenSilently({ authorizationParams: { audience: authAudience } })
+      .then((token) => {
+        if (!cancelled) setAccessToken(token || '')
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [authClient, isAuthenticated, authAudience])
 
   async function refreshDeployments() {
     setErrorMessage('')
@@ -89,6 +305,7 @@ export default function App() {
       const data = await api.get('/deployments')
       setDeployments(Array.isArray(data) ? data : [])
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load deployments')
     }
   }
@@ -104,6 +321,7 @@ export default function App() {
         }
       }
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load services')
     }
   }
@@ -118,7 +336,46 @@ export default function App() {
         setRecipeId(list[0].id)
       }
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load recipes')
+    }
+  }
+
+  async function loadDeliveryGroups() {
+    try {
+      const data = await api.get('/delivery-groups')
+      setDeliveryGroups(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setDeliveryGroups([])
+    }
+  }
+
+  async function loadAllowedActions(serviceName) {
+    if (!serviceName) return
+    setActionInfo((prev) => ({ ...prev, loading: true, error: '' }))
+    try {
+      const data = await api.get(`/services/${encodeURIComponent(serviceName)}/allowed-actions`)
+      if (data && data.code) {
+        setActionInfo({
+          actions: { view: true, deploy: false, rollback: false },
+          loading: false,
+          error: data.message || 'Access check failed'
+        })
+        return
+      }
+      setActionInfo({
+        actions: data?.actions || { view: true, deploy: false, rollback: false },
+        loading: false,
+        error: ''
+      })
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setActionInfo({
+        actions: { view: true, deploy: false, rollback: false },
+        loading: false,
+        error: 'Access check failed'
+      })
     }
   }
 
@@ -136,6 +393,7 @@ export default function App() {
       const list = Array.isArray(data?.versions) ? data.versions : []
       setVersions(list)
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setVersionsError('Failed to load versions')
     } finally {
       if (refresh) {
@@ -163,6 +421,7 @@ export default function App() {
       }
       setInsights(data)
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load insights')
     }
   }
@@ -217,6 +476,7 @@ export default function App() {
       setTimeline(Array.isArray(timelineData) ? timelineData : [])
       setView('detail')
     } catch (err) {
+      if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load deployment detail')
     }
   }
@@ -241,17 +501,40 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated) return
     loadServices()
     loadRecipes()
-  }, [])
+    loadDeliveryGroups()
+  }, [authReady, isAuthenticated])
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setServices([])
+      setService('')
+      setRecipes([])
+      setRecipeId('')
+      setDeployments([])
+      setSelected(null)
+      setFailures([])
+      setTimeline([])
+      setInsights(null)
+      setActionInfo({
+        actions: { view: true, deploy: false, rollback: false },
+        loading: true,
+        error: ''
+      })
+    }
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
     setVersions([])
     if (service) {
       setVersionSelection('auto')
       loadVersions()
+      loadAllowedActions(service)
     }
-  }, [service])
+  }, [service, isAuthenticated])
 
   useEffect(() => {
     if (versions.length > 0 && versionMode === 'auto') {
@@ -262,7 +545,7 @@ export default function App() {
   }, [versions, versionMode, versionSelection])
 
   useEffect(() => {
-    if (view !== 'deploy' || !service) return undefined
+    if (!isAuthenticated || view !== 'deploy' || !service) return undefined
     let cancelled = false
     const interval = setInterval(() => {
       if (!cancelled) loadVersions()
@@ -274,21 +557,22 @@ export default function App() {
   }, [view, service])
 
   useEffect(() => {
-    if (view !== 'detail' || !selected?.id) return undefined
+    if (!isAuthenticated || view !== 'detail' || !selected?.id) return undefined
     let cancelled = false
     const interval = setInterval(async () => {
-      try {
-        const detail = await api.get(`/deployments/${selected.id}`)
-        if (!cancelled && detail && !detail.code) {
-          setSelected(detail)
-          const failureData = await api.get(`/deployments/${selected.id}/failures`)
-          setFailures(Array.isArray(failureData) ? failureData : [])
-          const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
-          setTimeline(Array.isArray(timelineData) ? timelineData : [])
-        }
-      } catch (err) {
-        if (!cancelled) setErrorMessage('Failed to refresh deployment status')
+    try {
+      const detail = await api.get(`/deployments/${selected.id}`)
+      if (!cancelled && detail && !detail.code) {
+        setSelected(detail)
+        const failureData = await api.get(`/deployments/${selected.id}/failures`)
+        setFailures(Array.isArray(failureData) ? failureData : [])
+        const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
+        setTimeline(Array.isArray(timelineData) ? timelineData : [])
       }
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      if (!cancelled) setErrorMessage('Failed to refresh deployment status')
+    }
     }, 5000)
     return () => {
       cancelled = true
@@ -297,9 +581,9 @@ export default function App() {
   }, [view, selected?.id])
 
   useEffect(() => {
-    if (view !== 'insights') return
+    if (!isAuthenticated || view !== 'insights') return
     loadInsights()
-  }, [view])
+  }, [view, isAuthenticated])
 
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
@@ -317,6 +601,32 @@ export default function App() {
         <div className="brand">
           <h1>DXCP Control Plane</h1>
           <span>Deploy intent, see normalized status, and recover fast.</span>
+        </div>
+        <div className="context">
+          <div className="context-item">
+            <span className="context-label">Role</span>
+            <span className="context-value">{derivedRole}</span>
+          </div>
+          {currentDeliveryGroup && (
+            <div className="context-item">
+              <span className="context-label">Delivery Group</span>
+              <span className="context-value">{currentDeliveryGroup.name}</span>
+            </div>
+          )}
+        </div>
+        <div className="session">
+          <div className="session-user">
+            {user?.email || user?.name || (isAuthenticated ? 'Authenticated' : 'Not signed in')}
+          </div>
+          {isAuthenticated ? (
+            <button className="button secondary" onClick={handleLogout}>
+              Logout
+            </button>
+          ) : (
+            <button className="button" onClick={handleLogin} disabled={!authReady}>
+              Login
+            </button>
+          )}
         </div>
         <nav className="nav">
           <button className={view === 'deploy' ? 'active' : ''} onClick={() => setView('deploy')}>
@@ -349,6 +659,11 @@ export default function App() {
           >
             Insights
           </button>
+          {isPlatformAdmin && (
+            <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
+              Admin
+            </button>
+          )}
         </nav>
       </header>
 
@@ -358,7 +673,31 @@ export default function App() {
         </div>
       )}
 
-      {view === 'deploy' && (
+      {authError && (
+        <div className="shell">
+          <div className="card">{authError}</div>
+        </div>
+      )}
+
+      {!authReady && (
+        <div className="shell">
+          <div className="card">Loading session…</div>
+        </div>
+      )}
+
+      {authReady && !isAuthenticated && !authError && (
+        <div className="shell">
+          <div className="card">
+            <h2>Login required</h2>
+            <div className="helper">Sign in with Auth0 to view services and deployments.</div>
+            <button className="button" style={{ marginTop: '12px' }} onClick={handleLogin}>
+              Login
+            </button>
+          </div>
+        </div>
+      )}
+
+      {authReady && isAuthenticated && view === 'deploy' && (
         <div className="shell">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -453,7 +792,19 @@ export default function App() {
               <label>Change summary</label>
               <input value={changeSummary} onChange={(e) => setChangeSummary(e.target.value)} />
             </div>
-            <button className="button" onClick={handleDeploy}>Deploy now</button>
+            <button
+              className="button"
+              onClick={handleDeploy}
+              disabled={!canDeploy}
+              title={!canDeploy ? deployDisabledReason : ''}
+            >
+              Deploy now
+            </button>
+            {!canDeploy && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Deploy disabled. {deployDisabledReason}
+              </div>
+            )}
             {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
           </div>
           <div className="card">
@@ -476,7 +827,7 @@ export default function App() {
         </div>
       )}
 
-      {view === 'deployments' && (
+      {authReady && isAuthenticated && view === 'deployments' && (
         <div className="shell">
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -501,7 +852,7 @@ export default function App() {
         </div>
       )}
 
-      {view === 'detail' && (
+      {authReady && isAuthenticated && view === 'detail' && (
         <div className="shell">
           <div className="card">
             <h2>Deployment detail</h2>
@@ -527,9 +878,20 @@ export default function App() {
                     </a>
                   )}
                 </div>
-                <button className="button danger" onClick={handleRollback} style={{ marginTop: '12px' }}>
+                <button
+                  className="button danger"
+                  onClick={handleRollback}
+                  style={{ marginTop: '12px' }}
+                  disabled={!canRollback}
+                  title={!canRollback ? rollbackDisabledReason : ''}
+                >
                   Rollback
                 </button>
+                {!canRollback && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Rollback disabled. {rollbackDisabledReason}
+                  </div>
+                )}
                 {selected.rollbackOf && (
                   <button className="button secondary" onClick={() => openDeployment({ id: selected.rollbackOf })} style={{ marginTop: '8px' }}>
                     View original deployment
@@ -571,7 +933,7 @@ export default function App() {
         </div>
       )}
 
-      {view === 'insights' && (
+      {authReady && isAuthenticated && view === 'insights' && (
         <div className="shell">
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -620,6 +982,58 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {authReady && isAuthenticated && view === 'admin' && (
+        <div className="shell">
+          {!isPlatformAdmin && (
+            <div className="card forbidden">
+              <h2>403 - Access denied</h2>
+              <div className="helper">Your role does not allow access to Admin.</div>
+              <button className="button secondary" style={{ marginTop: '12px' }} onClick={() => setView('deploy')}>
+                Return to Deploy
+              </button>
+            </div>
+          )}
+          {isPlatformAdmin && (
+            <>
+              <div className="card">
+                <h2>Delivery Groups</h2>
+                {deliveryGroups.length === 0 && <div className="helper">No delivery groups available.</div>}
+                {deliveryGroups.length > 0 && (
+                  <div className="list">
+                    {deliveryGroups.map((group) => (
+                      <div className="list-item" key={group.id}>
+                        <div>{group.name}</div>
+                        <div>{group.id}</div>
+                        <div>{group.owner || 'Unassigned owner'}</div>
+                        <div>{Array.isArray(group.services) ? `${group.services.length} services` : '0 services'}</div>
+                        <div>{Array.isArray(group.allowed_recipes) ? `${group.allowed_recipes.length} recipes` : '0 recipes'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="card">
+                <h2>Recipes</h2>
+                {recipes.length === 0 && <div className="helper">No recipes available.</div>}
+                {recipes.length > 0 && (
+                  <div className="list">
+                    {recipes.map((recipe) => (
+                      <div className="list-item" key={recipe.id}>
+                        <div>{recipe.name}</div>
+                        <div>{recipe.id}</div>
+                        <div>{recipe.description || 'No description'}</div>
+                        <div>{recipe.deploy_pipeline || 'No deploy pipeline'}</div>
+                        <div>{recipe.rollback_pipeline || 'No rollback pipeline'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 

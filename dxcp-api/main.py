@@ -10,7 +10,9 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
 
+from auth import get_actor
 from config import SETTINGS
 from idempotency import IdempotencyStore
 from models import (
@@ -92,32 +94,11 @@ def error_response(status_code: int, code: str, message: str) -> JSONResponse:
 async def policy_error_handler(request: Request, exc: PolicyError):
     return error_response(exc.status_code, exc.code, exc.message)
 
-
-def get_client_id(request: Request, authorization: Optional[str]) -> str:
-    token = ""
-    if authorization:
-        parts = authorization.split(" ")
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if SETTINGS.api_token:
-        if token != SETTINGS.api_token:
-            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Unauthorized"})
-    client_host = request.client.host if request.client else None
-    return token or client_host or "anonymous"
-
-
-def _resolve_role() -> Role:
-    value = (SETTINGS.role or "").strip().upper()
-    try:
-        return Role(value)
-    except ValueError:
-        logger.warning("unknown role %s, defaulting to OBSERVER", value)
-        return Role.OBSERVER
-
-
-def get_actor(request: Request, authorization: Optional[str]) -> Actor:
-    client_id = get_client_id(request, authorization)
-    return Actor(actor_id=client_id, role=_resolve_role())
+@app.exception_handler(FastAPIHTTPException)
+async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"code": "HTTP_ERROR", "message": str(exc.detail)})
 
 
 def require_role(actor: Actor, allowed: set[Role], action: str):
@@ -449,7 +430,7 @@ def create_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
     if role_error:
         return role_error
@@ -540,7 +521,7 @@ def list_deployments(
     state: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployments = storage.list_deployments(service, state)
     return deployments
@@ -548,14 +529,14 @@ def list_deployments(
 
 @app.get("/v1/services")
 def list_services(request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     return storage.list_services()
 
 
 @app.get("/v1/delivery-groups")
 def list_delivery_groups(request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     groups = storage.list_delivery_groups()
     return [DeliveryGroup(**group).dict() for group in groups]
@@ -567,7 +548,7 @@ def get_delivery_group(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     group = storage.get_delivery_group(group_id)
     if not group:
@@ -577,7 +558,7 @@ def get_delivery_group(
 
 @app.get("/v1/recipes")
 def list_recipes(request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     recipes = storage.list_recipes()
     return [Recipe(**recipe).dict() for recipe in recipes]
@@ -585,7 +566,7 @@ def list_recipes(request: Request, authorization: Optional[str] = Header(None)):
 
 @app.get("/v1/recipes/{recipe_id}")
 def get_recipe(recipe_id: str, request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     recipe = storage.get_recipe(recipe_id)
     if not recipe:
@@ -600,7 +581,7 @@ def list_service_versions(
     refresh: Optional[bool] = Query(False),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     guardrails.validate_service(service)
     versions = []
@@ -624,7 +605,7 @@ def get_service_delivery_status(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     guardrails.validate_service(service)
     deployments = storage.list_deployments(service, None)
@@ -657,7 +638,7 @@ def get_service_allowed_actions(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     guardrails.validate_service(service)
     return {
@@ -695,7 +676,7 @@ def get_deployment(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -710,7 +691,7 @@ def get_deployment_failures(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -725,7 +706,7 @@ def get_deployment_timeline(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -741,7 +722,7 @@ def get_failure_insights(
     groupId: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     if windowDays is None or windowDays < 1 or windowDays > 30:
         return error_response(400, "INVALID_REQUEST", "windowDays must be between 1 and 30")
@@ -837,7 +818,7 @@ def rollback_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "rollback")
     if role_error:
         return role_error
@@ -922,7 +903,7 @@ def create_upload_capability(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
     if role_error:
         return role_error
@@ -967,7 +948,7 @@ def register_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
+    actor = get_actor(authorization)
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
     if role_error:
         return role_error

@@ -25,3 +25,5 @@ cdk/cdk-outputs.json
 
 *.pem
 *.pub
+ui/.env.local
+dxcp-api/.env

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
 class FakeSpinnaker:
@@ -53,6 +54,7 @@ def _load_main(tmp_path: Path):
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
     os.environ["DXCP_SPINNAKER_MODE"] = "http"
+    configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
     for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
@@ -89,8 +91,9 @@ pytestmark = pytest.mark.anyio
 
 
 @asynccontextmanager
-async def _client_and_state(tmp_path: Path):
+async def _client_and_state(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
     fake = FakeSpinnaker()
     main.spinnaker = fake
     main.idempotency = main.IdempotencyStore()
@@ -104,16 +107,20 @@ async def _client_and_state(tmp_path: Path):
         yield client, main, fake
 
 
-async def test_rollback_requires_idempotency_key(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
-        response = await client.post("/v1/deployments/unknown/rollback", json={})
+async def test_rollback_requires_idempotency_key(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments/unknown/rollback",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={},
+        )
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == "IDMP_KEY_REQUIRED"
 
 
-async def test_rollback_invalid_environment(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, main, _):
+async def test_rollback_invalid_environment(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
         _insert_deployment(
             main.storage,
             deployment_id="dep-prod",
@@ -125,7 +132,7 @@ async def test_rollback_invalid_environment(tmp_path: Path):
         )
         response = await client.post(
             "/v1/deployments/dep-prod/rollback",
-            headers={"Idempotency-Key": "rollback-1"},
+            headers={"Idempotency-Key": "rollback-1", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
     assert response.status_code == 400
@@ -133,8 +140,8 @@ async def test_rollback_invalid_environment(tmp_path: Path):
     assert body["code"] == "INVALID_ENVIRONMENT"
 
 
-async def test_rollback_active_lock(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, main, _):
+async def test_rollback_active_lock(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
         _insert_deployment(
             main.storage,
             deployment_id="dep-success",
@@ -155,7 +162,7 @@ async def test_rollback_active_lock(tmp_path: Path):
         )
         response = await client.post(
             "/v1/deployments/dep-success/rollback",
-            headers={"Idempotency-Key": "rollback-2"},
+            headers={"Idempotency-Key": "rollback-2", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
     assert response.status_code == 409
@@ -163,11 +170,11 @@ async def test_rollback_active_lock(tmp_path: Path):
     assert body["code"] == "DEPLOYMENT_LOCKED"
 
 
-async def test_rollback_unknown_deployment(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_rollback_unknown_deployment(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments/missing/rollback",
-            headers={"Idempotency-Key": "rollback-3"},
+            headers={"Idempotency-Key": "rollback-3", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
     assert response.status_code == 404
@@ -175,8 +182,8 @@ async def test_rollback_unknown_deployment(tmp_path: Path):
     assert body["code"] == "NOT_FOUND"
 
 
-async def test_rollback_requires_prior_success(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, main, _):
+async def test_rollback_requires_prior_success(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
         _insert_deployment(
             main.storage,
             deployment_id="dep-failed",
@@ -197,7 +204,7 @@ async def test_rollback_requires_prior_success(tmp_path: Path):
         )
         response = await client.post(
             "/v1/deployments/dep-target/rollback",
-            headers={"Idempotency-Key": "rollback-4"},
+            headers={"Idempotency-Key": "rollback-4", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
     assert response.status_code == 400
@@ -205,8 +212,8 @@ async def test_rollback_requires_prior_success(tmp_path: Path):
     assert body["code"] == "NO_PRIOR_SUCCESSFUL_VERSION"
 
 
-async def test_rollback_creates_record_and_updates_status(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, main, fake):
+async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, fake):
         _insert_deployment(
             main.storage,
             deployment_id="dep-a",
@@ -227,7 +234,7 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path):
         )
         response = await client.post(
             "/v1/deployments/dep-b/rollback",
-            headers={"Idempotency-Key": "rollback-5"},
+            headers={"Idempotency-Key": "rollback-5", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
         assert response.status_code == 201
@@ -240,7 +247,10 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path):
         assert fake.triggered[0]["payload"]["targetVersion"] == "1.0.0"
 
         fake.executions[body["spinnakerExecutionId"]]["state"] = "SUCCEEDED"
-        detail = await client.get(f"/v1/deployments/{body['id']}")
+        detail = await client.get(
+            f"/v1/deployments/{body['id']}",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
         assert detail.status_code == 200
         detail_body = detail.json()
         assert detail_body["state"] == "SUCCEEDED"

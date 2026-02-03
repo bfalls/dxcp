@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
 class FakeSpinnaker:
@@ -47,12 +48,12 @@ def _write_service_registry(path: Path) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _load_main(tmp_path: Path, role: str):
+def _load_main(tmp_path: Path):
     dxcp_api_dir = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
-    os.environ["DXCP_ROLE"] = role
+    configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
     for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
@@ -69,8 +70,9 @@ pytestmark = pytest.mark.anyio
 
 
 @asynccontextmanager
-async def _client_and_state(tmp_path: Path, role: str):
-    main = _load_main(tmp_path, role)
+async def _client_and_state(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
     fake = FakeSpinnaker()
     main.spinnaker = fake
     main.idempotency = main.IdempotencyStore()
@@ -125,65 +127,65 @@ def _build_payload() -> dict:
     }
 
 
-async def test_observer_denied_deploy(tmp_path: Path):
-    async with _client_and_state(tmp_path, "OBSERVER") as (client, _, _):
+async def test_observer_denied_deploy(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-1"},
+            headers={"Idempotency-Key": "deploy-1", **auth_header(["dxcp-observers"])},
             json=_deployment_payload(),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-async def test_observer_denied_rollback(tmp_path: Path):
-    async with _client_and_state(tmp_path, "OBSERVER") as (client, main, _):
+async def test_observer_denied_rollback(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
         _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
         _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
         response = await client.post(
             "/v1/deployments/dep-b/rollback",
-            headers={"Idempotency-Key": "rollback-1"},
+            headers={"Idempotency-Key": "rollback-1", **auth_header(["dxcp-observers"])},
             json={},
         )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-async def test_observer_denied_build_register(tmp_path: Path):
-    async with _client_and_state(tmp_path, "OBSERVER") as (client, _, _):
+async def test_observer_denied_build_register(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-1"},
+            headers={"Idempotency-Key": "build-1", **auth_header(["dxcp-observers"])},
             json=_build_payload(),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
-async def test_delivery_owner_allowed_deploy(tmp_path: Path):
-    async with _client_and_state(tmp_path, "DELIVERY_OWNER") as (client, _, _):
+async def test_platform_admin_allowed_deploy(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-2"},
+            headers={"Idempotency-Key": "deploy-2", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload(),
         )
     assert response.status_code == 201
 
 
-async def test_delivery_owner_allowed_rollback(tmp_path: Path):
-    async with _client_and_state(tmp_path, "DELIVERY_OWNER") as (client, main, _):
+async def test_platform_admin_allowed_rollback(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
         _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
         _insert_deployment(main.storage, "dep-b", "1.0.1", "2024-01-02T00:00:00Z")
         response = await client.post(
             "/v1/deployments/dep-b/rollback",
-            headers={"Idempotency-Key": "rollback-2"},
+            headers={"Idempotency-Key": "rollback-2", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
     assert response.status_code == 201
 
 
-async def test_platform_admin_allowed_build_register(tmp_path: Path):
-    async with _client_and_state(tmp_path, "PLATFORM_ADMIN") as (client, _, _):
+async def test_platform_admin_allowed_build_register(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         cap_request = {
             "service": "demo-service",
             "version": "1.0.0",
@@ -193,12 +195,12 @@ async def test_platform_admin_allowed_build_register(tmp_path: Path):
         }
         cap_response = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-1"},
+            headers={"Idempotency-Key": "cap-1", **auth_header(["dxcp-platform-admins"])},
             json=cap_request,
         )
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-2"},
+            headers={"Idempotency-Key": "build-2", **auth_header(["dxcp-platform-admins"])},
             json=_build_payload(),
         )
     assert cap_response.status_code == 201

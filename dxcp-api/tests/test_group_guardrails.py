@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
 class FakeSpinnaker:
@@ -52,7 +53,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
-    os.environ["DXCP_ROLE"] = "PLATFORM_ADMIN"
+    configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
     for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
@@ -69,8 +70,9 @@ pytestmark = pytest.mark.anyio
 
 
 @asynccontextmanager
-async def _client_and_state(tmp_path: Path, group_a_guardrails: dict | None = None):
+async def _client_and_state(tmp_path: Path, monkeypatch, group_a_guardrails: dict | None = None):
     main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
     fake = FakeSpinnaker()
     main.spinnaker = fake
     main.idempotency = main.IdempotencyStore()
@@ -125,16 +127,16 @@ def _deploy_payload(service: str) -> dict:
     }
 
 
-async def test_group_lock_blocks_same_group(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_group_lock_blocks_same_group(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         first = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-1"},
+            headers={"Idempotency-Key": "deploy-1", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a"),
         )
         second = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-2"},
+            headers={"Idempotency-Key": "deploy-2", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a"),
         )
     assert first.status_code == 201
@@ -142,25 +144,26 @@ async def test_group_lock_blocks_same_group(tmp_path: Path):
     assert second.json()["code"] == "DEPLOYMENT_LOCKED"
 
 
-async def test_group_lock_allows_different_groups(tmp_path: Path):
-    async with _client_and_state(tmp_path) as (client, _, _):
+async def test_group_lock_allows_different_groups(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         first = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-3"},
+            headers={"Idempotency-Key": "deploy-3", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a"),
         )
         second = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-4"},
+            headers={"Idempotency-Key": "deploy-4", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-b"),
         )
     assert first.status_code == 201
     assert second.status_code == 201
 
 
-async def test_group_quota_scoped(tmp_path: Path):
+async def test_group_quota_scoped(tmp_path: Path, monkeypatch):
     async with _client_and_state(
         tmp_path,
+        monkeypatch,
         group_a_guardrails={
             "max_concurrent_deployments": 2,
             "daily_deploy_quota": 1,
@@ -169,12 +172,12 @@ async def test_group_quota_scoped(tmp_path: Path):
     ) as (client, _, _):
         first = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-5"},
+            headers={"Idempotency-Key": "deploy-5", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a"),
         )
         second = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-6"},
+            headers={"Idempotency-Key": "deploy-6", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a"),
         )
     assert first.status_code == 201

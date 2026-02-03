@@ -36,6 +36,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -58,6 +60,7 @@ body {
 .nav {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .nav button {
@@ -72,6 +75,46 @@ body {
 .nav button.active {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.context {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.context-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1818;
+  min-width: 140px;
+}
+
+.context-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.context-value {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-user {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .shell {
@@ -152,6 +195,11 @@ body {
   color: #2b0b07;
 }
 
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .helper {
   color: var(--muted);
   font-size: 12px;
@@ -230,6 +278,10 @@ body {
 .link {
   color: var(--accent-2);
   text-decoration: none;
+}
+
+.forbidden {
+  grid-column: 1 / -1;
 }
 
 .footer {

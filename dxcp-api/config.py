@@ -5,8 +5,6 @@ from typing import Callable, Optional
 class Settings:
     def __init__(self) -> None:
         self.ssm_prefix = os.getenv("DXCP_SSM_PREFIX", "")
-        self.api_token = self._get("api_token", "DXCP_API_TOKEN", "", str)
-        self.role = self._get("role", "DXCP_ROLE", "PLATFORM_ADMIN", str)
         self.kill_switch = self._get("kill_switch", "DXCP_KILL_SWITCH", "0", str) in ["1", "true", "TRUE", "True"]
         self.demo_mode = self._get("demo_mode", "DXCP_DEMO_MODE", "true", str) in ["1", "true", "TRUE", "True"]
         self.db_path = os.getenv("DXCP_DB_PATH", "./data/dxcp.db")
@@ -44,6 +42,10 @@ class Settings:
         self.engine_lambda_token = self._resolve_secret(
             self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
         )
+        self.oidc_issuer = os.getenv("DXCP_OIDC_ISSUER", "")
+        self.oidc_audience = os.getenv("DXCP_OIDC_AUDIENCE", "")
+        self.oidc_jwks_url = os.getenv("DXCP_OIDC_JWKS_URL", "")
+        self.oidc_roles_claim = os.getenv("DXCP_OIDC_ROLES_CLAIM", "")
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")

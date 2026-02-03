@@ -29,6 +29,7 @@ Role handling is enforced by the API. The UI should surface allowed actions and 
 
 Current:
 - Primary navigation: Deploy, Deployments, Detail, Insights.
+- Admin appears for PLATFORM_ADMIN only.
 - Global scope is a single environment (sandbox).
 
 Planned:
@@ -195,7 +196,7 @@ Blocked-action UX:
 
 ### Admin section
 
-Status: Planned
+Status: Planned (shell implemented, no CRUD yet)
 
 Entry visibility:
 - Visible to PLATFORM_ADMIN only.

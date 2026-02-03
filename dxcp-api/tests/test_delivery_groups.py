@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
+from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
 def _write_service_registry(path: Path) -> None:
@@ -26,6 +27,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
+    configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
     for module in ["main", "config", "storage", "policy", "idempotency", "rate_limit"]:
@@ -42,8 +44,9 @@ pytestmark = pytest.mark.anyio
 
 
 @asynccontextmanager
-async def _client(tmp_path: Path):
+async def _client(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
@@ -54,9 +57,12 @@ async def _client(tmp_path: Path):
         yield client
 
 
-async def test_delivery_groups_list_returns_default(tmp_path: Path):
-    async with _client(tmp_path) as client:
-        response = await client.get("/v1/delivery-groups")
+async def test_delivery_groups_list_returns_default(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch) as client:
+        response = await client.get(
+            "/v1/delivery-groups",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body, list)
@@ -66,18 +72,24 @@ async def test_delivery_groups_list_returns_default(tmp_path: Path):
     assert "demo-service" in default["services"]
 
 
-async def test_delivery_groups_get_by_id(tmp_path: Path):
-    async with _client(tmp_path) as client:
-        response = await client.get("/v1/delivery-groups/default")
+async def test_delivery_groups_get_by_id(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch) as client:
+        response = await client.get(
+            "/v1/delivery-groups/default",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == "default"
     assert "demo-service" in body["services"]
 
 
-async def test_delivery_groups_unknown_returns_404(tmp_path: Path):
-    async with _client(tmp_path) as client:
-        response = await client.get("/v1/delivery-groups/unknown")
+async def test_delivery_groups_unknown_returns_404(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch) as client:
+        response = await client.get(
+            "/v1/delivery-groups/unknown",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
     assert response.status_code == 404
     body = response.json()
     assert body["code"] == "NOT_FOUND"

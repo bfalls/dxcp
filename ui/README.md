@@ -19,18 +19,29 @@ npm run dev
 
 Open http://127.0.0.1:5173
 
-## Configuration
+## Tests
 
-Set these env vars before running the dev server:
+Run UI tests:
 
 ```
-export VITE_API_BASE=http://127.0.0.1:8000/v1
-export VITE_API_TOKEN=demo-token
-export VITE_SERVICE_URL_BASE=
+npm run test:run
+```
+
+## Configuration
+
+Create `ui/.env.local` with the Auth0 and API configuration:
+
+```
+VITE_API_BASE=http://127.0.0.1:8000
+VITE_AUTH0_DOMAIN=<tenant>.us.auth0.com
+VITE_AUTH0_CLIENT_ID=<client_id>
+VITE_AUTH0_AUDIENCE=https://dxcp-api
+VITE_AUTH0_ROLES_CLAIM=https://dxcp.example/claims/roles
+VITE_SERVICE_URL_BASE=
 ```
 
 Notes:
 - Environment is fixed to sandbox.
 - Version input is validated locally before submit.
 - Rollback prompts for confirmation and uses idempotency keys.
- - Services come from the backend registry (/v1/services).
+- Services come from the backend registry (/v1/services).

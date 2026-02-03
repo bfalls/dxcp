@@ -52,15 +52,15 @@ This repository contains:
 
 ---
 
-## Demo mode
+## Evaluation mode
 
-DXCP can be run in a constrained demo mode that:
+DXCP can be run in a constrained evaluation mode that:
 - Uses strict quotas
 - Limits blast radius
-- Allows safe experimentation
+- Enables safe validation of workflows
 
-Demo mode exists to validate product behavior,
-not as the primary product goal.
+Evaluation mode exists to validate product behavior
+prior to broader enablement.
 
 ## Delivery group seeding (local)
 
@@ -71,20 +71,6 @@ python scripts/seed_delivery_groups.py scripts/seed_delivery_groups.example.json
 
 The seed file is a JSON list of DeliveryGroups. Entries are inserted if the id
 does not already exist.
-
-## Roles (demo)
-
-DXCP uses a simple demo role override applied to all requests:
-- PLATFORM_ADMIN: full access (default)
-- DELIVERY_OWNER: deploy and rollback only
-- OBSERVER: read-only
-
-Set the role with:
-```
-export DXCP_ROLE=DELIVERY_OWNER
-```
-
----
 
 ## Secrets handling
 
@@ -105,12 +91,17 @@ Secrets are never passed as pipeline parameters; Spinnaker resolves controller t
 ```
 cd dxcp/ui
 npm install
-export VITE_API_BASE=http://127.0.0.1:8000/v1
-export VITE_API_TOKEN=demo-token
+# Create ui/.env.local (see docs/AUTH.md)
 npm run dev
 ```
 
 Open http://127.0.0.1:5173
+
+UI tests:
+```
+cd dxcp/ui
+npm run test:run
+```
 
 Deployment detail view includes a normalized timeline (no engine stages).
 Insights view summarizes failure categories, rollback rate, and deployment counts by recipe and delivery group (last 7 days).
@@ -118,6 +109,10 @@ Insights view summarizes failure categories, rollback rate, and deployment count
 ## UI overview
 
 See docs/UI_SPEC.md for the enterprise UI specification and role-aware behavior.
+
+## Local Auth0 setup
+
+See docs/AUTH.md for required Auth0 configuration and environment variables.
 
 ## Admin configuration
 
@@ -136,22 +131,22 @@ cd dxcp/dxcp-api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export DXCP_API_TOKEN=demo-token
-export DXCP_ALLOWLIST=demo-service
-uvicorn main:app --reload
+# Create dxcp-api/.env (see dxcp-api/.env.example)
+uvicorn main:app --reload --env-file .env
 ```
 
 Open http://127.0.0.1:8000/docs
 
 List recipes:
 ```
-curl -sS http://127.0.0.1:8000/v1/recipes
+curl -sS http://127.0.0.1:8000/v1/recipes \
+  -H "Authorization: Bearer <access_token>"
 ```
 
 Deploy using a recipe:
 ```
 curl -sS -X POST http://127.0.0.1:8000/v1/deployments \
-  -H "Authorization: Bearer demo-token" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Idempotency-Key: demo-deploy-1" \
   -H "Content-Type: application/json" \
   -d '{"service":"demo-service","environment":"sandbox","version":"1.0.0","changeSummary":"demo","recipeId":"default"}'
