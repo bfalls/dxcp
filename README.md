@@ -200,6 +200,7 @@ export DXCP_CORS_ORIGINS=https://your-ui-url
 export DXCP_CONFIG_PREFIX=/dxcp/config
 ```
 DXCP does not deploy Spinnaker. Execution engines are external.
+When using `scripts/deploy_aws.sh`, the CORS allowlist is sourced from SSM at `${DXCP_CONFIG_PREFIX}/api/cors_origins`.
 
 Deploy:
 ```
