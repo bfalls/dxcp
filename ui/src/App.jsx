@@ -363,6 +363,12 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
+  const [insightsLoading, setInsightsLoading] = useState(false)
+  const [insightsError, setInsightsError] = useState('')
+  const [insightsWindowDays, setInsightsWindowDays] = useState(INSIGHTS_WINDOW_DAYS)
+  const [insightsGroupId, setInsightsGroupId] = useState('')
+  const [insightsService, setInsightsService] = useState('')
+  const [insightsDefaultsApplied, setInsightsDefaultsApplied] = useState(false)
   const [actionInfo, setActionInfo] = useState({
     actions: { view: true, deploy: false, rollback: false },
     loading: true,
@@ -1168,16 +1174,26 @@ export default function App() {
 
   async function loadInsights() {
     setErrorMessage('')
+    setInsightsError('')
+    setInsightsLoading(true)
     try {
-      const data = await api.get(`/insights/failures?windowDays=${INSIGHTS_WINDOW_DAYS}`)
+      const params = new URLSearchParams()
+      params.set('windowDays', String(insightsWindowDays))
+      if (insightsGroupId) params.set('groupId', insightsGroupId)
+      if (insightsService) params.set('service', insightsService)
+      const data = await api.get(`/insights/failures?${params.toString()}`)
       if (data && data.code) {
-        setErrorMessage(`${data.code}: ${data.message}`)
+        setInsightsError(`${data.code}: ${data.message}`)
+        setInsights(null)
         return
       }
       setInsights(data)
     } catch (err) {
       if (isLoginRequiredError(err)) return
-      setErrorMessage('Failed to load insights')
+      setInsightsError('Failed to load insights')
+      setInsights(null)
+    } finally {
+      setInsightsLoading(false)
     }
   }
 
@@ -1438,6 +1454,27 @@ export default function App() {
   }, [isPlatformAdmin, activeAdminRecipe, adminRecipeId, adminRecipeMode])
 
   useEffect(() => {
+    if (!isAuthenticated) return
+    if (insightsDefaultsApplied) return
+    if (isPlatformAdmin) {
+      setInsightsGroupId('')
+      setInsightsDefaultsApplied(true)
+      return
+    }
+    if (deliveryGroups.length > 0) {
+      const fallback = currentDeliveryGroup?.id || deliveryGroups[0]?.id || ''
+      setInsightsGroupId(fallback)
+      setInsightsDefaultsApplied(true)
+    }
+  }, [
+    isAuthenticated,
+    isPlatformAdmin,
+    deliveryGroups,
+    currentDeliveryGroup?.id,
+    insightsDefaultsApplied
+  ])
+
+  useEffect(() => {
     if (versions.length > 0 && versionMode === 'auto') {
       if (versionSelection === 'auto') {
         setVersion(versions[0].version)
@@ -1509,8 +1546,9 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'insights') return
+    if (!isPlatformAdmin && !insightsDefaultsApplied) return
     loadInsights()
-  }, [view, isAuthenticated])
+  }, [view, isAuthenticated, insightsDefaultsApplied, isPlatformAdmin])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'services') return
@@ -2189,10 +2227,58 @@ export default function App() {
         <div className="shell">
           <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Insights (last {INSIGHTS_WINDOW_DAYS} days)</h2>
-              <button className="button secondary" onClick={loadInsights}>Refresh</button>
+              <h2>Insights</h2>
+              <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
+                {insightsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
-            {!insights && <div className="helper">No insights yet.</div>}
+            <div className="row" style={{ marginTop: '12px' }}>
+              <div className="field">
+                <label htmlFor="insights-service">Service</label>
+                <select
+                  id="insights-service"
+                  value={insightsService}
+                  onChange={(e) => setInsightsService(e.target.value)}
+                >
+                  <option value="">All services</option>
+                  {sortedServiceNames.map((svc) => (
+                    <option key={svc} value={svc}>{svc}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="insights-group">Delivery group</label>
+                <select
+                  id="insights-group"
+                  value={insightsGroupId}
+                  onChange={(e) => setInsightsGroupId(e.target.value)}
+                >
+                  <option value="">All delivery groups</option>
+                  {deliveryGroups.map((group) => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="insights-window">Time window (days)</label>
+                <select
+                  id="insights-window"
+                  value={String(insightsWindowDays)}
+                  onChange={(e) => setInsightsWindowDays(Number(e.target.value))}
+                >
+                  {[7, 14, 30].map((value) => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field" style={{ alignSelf: 'flex-end' }}>
+                <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
+                  Apply filters
+                </button>
+              </div>
+            </div>
+            {insightsError && <div className="helper" style={{ marginTop: '8px' }}>{insightsError}</div>}
+            {!insights && !insightsLoading && !insightsError && <div className="helper">No insights yet.</div>}
             {insights && (
               <div className="list">
                 <div className="list-item">

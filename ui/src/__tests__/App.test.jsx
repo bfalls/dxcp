@@ -74,6 +74,29 @@ const buildFetchMock = ({
         max_refresh_interval_seconds: 3600
       })
     }
+    if (pathname === '/v1/insights/failures') {
+      const service = parsed.searchParams.get('service') || ''
+      const groupId = parsed.searchParams.get('groupId') || ''
+      const windowDays = parsed.searchParams.get('windowDays') || '7'
+      if (service === 'payments-service' || groupId === 'payments' || windowDays === '30') {
+        return ok({
+          rollbackRate: 0.25,
+          totalDeployments: 4,
+          totalRollbacks: 1,
+          failuresByCategory: [{ key: 'INFRASTRUCTURE', count: 2 }],
+          deploymentsByRecipe: [{ key: 'canary', count: 4 }],
+          deploymentsByGroup: [{ key: 'payments', count: 4 }]
+        })
+      }
+      return ok({
+        rollbackRate: 0.1,
+        totalDeployments: 10,
+        totalRollbacks: 1,
+        failuresByCategory: [{ key: 'CONFIG', count: 1 }],
+        deploymentsByRecipe: [{ key: 'default', count: 10 }],
+        deploymentsByGroup: [{ key: 'default', count: 10 }]
+      })
+    }
     if (pathname === '/v1/recipes' && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}')
       if (recipeList.some((recipe) => recipe.id === body.id)) {
@@ -367,6 +390,92 @@ export async function runAllTests() {
     const parsed = JSON.parse(stored)
     assert.equal(parsed.refresh_interval_seconds, 120)
     assert.ok(view.getByText('Admin defaults'))
+  })
+
+  await runTest('Insights load correctly', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'payments-service' }],
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        },
+        {
+          id: 'payments',
+          name: 'Payments Delivery Group',
+          services: ['payments-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Insights' }))
+    await view.findByText('Rollback rate')
+    await view.findByText('Deployments: 10')
+    await view.findByText('Rollbacks: 1')
+    await view.findByText('CONFIG')
+  })
+
+  await runTest('Insights filters apply correctly', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'payments-service' }],
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        },
+        {
+          id: 'payments',
+          name: 'Payments Delivery Group',
+          services: ['payments-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Insights' }))
+    await view.findByText('Rollback rate')
+    fireEvent.change(view.getByLabelText('Service'), { target: { value: 'payments-service' } })
+    fireEvent.change(view.getByLabelText('Delivery group'), { target: { value: 'payments' } })
+    fireEvent.change(view.getByLabelText('Time window (days)'), { target: { value: '30' } })
+    fireEvent.click(view.getByRole('button', { name: 'Apply filters' }))
+    await view.findByText('Deployments: 4')
+    await view.findByText('Rollbacks: 1')
+    await view.findByText('INFRASTRUCTURE')
   })
 
   await runTest('Blocked deploy shows correct message', async () => {

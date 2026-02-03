@@ -933,6 +933,7 @@ def get_failure_insights(
     request: Request,
     windowDays: Optional[int] = Query(7),
     groupId: Optional[str] = Query(None),
+    service: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
@@ -941,9 +942,13 @@ def get_failure_insights(
         return error_response(400, "INVALID_REQUEST", "windowDays must be between 1 and 30")
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=windowDays)
+    if service:
+        guardrails.validate_service(service)
     deployments = storage.list_deployments(None, None)
     filtered = []
     for deployment in deployments:
+        if service and deployment.get("service") != service:
+            continue
         if groupId and deployment.get("deliveryGroupId") != groupId:
             continue
         created_at = _parse_iso(deployment.get("createdAt"))

@@ -20,6 +20,12 @@ def _write_service_registry(path: Path) -> None:
             "allowed_environments": ["sandbox"],
             "allowed_recipes": ["default"],
             "allowed_artifact_sources": [],
+        },
+        {
+            "service_name": "payments-service",
+            "allowed_environments": ["sandbox"],
+            "allowed_recipes": ["default"],
+            "allowed_artifact_sources": [],
         }
     ]
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -117,3 +123,69 @@ async def test_insights_aggregation(tmp_path: Path, monkeypatch):
     categories = {item["key"]: item["count"] for item in body["failuresByCategory"]}
     assert categories["INFRASTRUCTURE"] == 1
     assert categories["POLICY"] == 1
+
+
+async def test_insights_service_filter(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        now = datetime.now(timezone.utc)
+        day1 = (now - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+        day2 = (now - timedelta(days=2)).isoformat().replace("+00:00", "Z")
+        main.storage.insert_deployment(
+            {
+                "id": "dep-1",
+                "service": "demo-service",
+                "environment": "sandbox",
+                "version": "1.0.0",
+                "recipeId": "default",
+                "state": "SUCCEEDED",
+                "changeSummary": "demo deploy",
+                "createdAt": day2,
+                "updatedAt": day2,
+                "spinnakerExecutionId": "exec-1",
+                "spinnakerExecutionUrl": "http://spinnaker.local/pipelines/exec-1",
+                "spinnakerApplication": "demo-app",
+                "spinnakerPipeline": "demo-pipeline",
+                "deliveryGroupId": "default",
+                "failures": [],
+            },
+            [],
+        )
+        main.storage.insert_deployment(
+            {
+                "id": "dep-2",
+                "service": "payments-service",
+                "environment": "sandbox",
+                "version": "1.0.1",
+                "recipeId": "default",
+                "state": "SUCCEEDED",
+                "changeSummary": "payments deploy",
+                "createdAt": day1,
+                "updatedAt": day1,
+                "spinnakerExecutionId": "exec-2",
+                "spinnakerExecutionUrl": "http://spinnaker.local/pipelines/exec-2",
+                "spinnakerApplication": "demo-app",
+                "spinnakerPipeline": "demo-pipeline",
+                "deliveryGroupId": "default",
+                "failures": [],
+            },
+            [],
+        )
+        response = await client.get(
+            "/v1/insights/failures?windowDays=30&service=payments-service",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["totalDeployments"] == 1
+    assert body["totalRollbacks"] == 0
+
+
+async def test_insights_service_filter_rejects_unknown(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        response = await client.get(
+            "/v1/insights/failures?windowDays=7&service=unknown-service",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 403
+    body = response.json()
+    assert body["code"] == "SERVICE_NOT_ALLOWLISTED"
