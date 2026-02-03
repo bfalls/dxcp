@@ -91,6 +91,7 @@ Secrets are never passed as pipeline parameters; Spinnaker resolves controller t
 ## Environment configuration
 
 See docs/ENVIRONMENTS.md for local vs AWS configuration, required variables, and SSM guidance.
+Use scripts/bootstrap_config.sh for first-run SSM population.
 
 ---
 

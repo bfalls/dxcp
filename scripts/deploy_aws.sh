@@ -6,6 +6,7 @@ API_BUILD_DIR="$ROOT_DIR/cdk/build/api"
 DXCP_CONFIG_PREFIX="${DXCP_CONFIG_PREFIX:-/dxcp/config}"
 VALIDATE_AUTH=1
 VALIDATE_ONLY=0
+source "$ROOT_DIR/scripts/ssm_helpers.sh"
 
 if ! command -v python >/dev/null 2>&1; then
   echo "python is required. Activate the Python 3.11 virtualenv and retry." >&2
@@ -69,26 +70,6 @@ copy_dir_contents() {
   else
     cp -R "${src}/." "${dest}/"
   fi
-}
-
-param_exists() {
-  local name="$1"
-  set +e
-  aws ssm get-parameter --name "$name" --with-decryption --query "Parameter.Value" --output text >/dev/null 2>&1
-  local status=$?
-  set -e
-  return $status
-}
-
-ensure_param() {
-  local name="$1"
-  local value="$2"
-  aws ssm put-parameter --name "$name" --type "String" --value "$value" --overwrite >/dev/null
-}
-
-get_ssm_param() {
-  local name="$1"
-  aws ssm get-parameter --name "$name" --with-decryption --query "Parameter.Value" --output text
 }
 
 ensure_ssm_auth_config() {

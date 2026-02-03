@@ -65,6 +65,19 @@ Do not use interactive CDK in prod.
 
 ---
 
+## Bootstrap AWS config
+
+Use the bootstrap script to populate SSM once:
+1. `export DXCP_SSM_PREFIX=/dxcp/config`
+2. `./scripts/bootstrap_config.sh`
+
+Notes:
+- Script is idempotent and will not overwrite without confirmation.
+- Values are not echoed back to the console.
+- `deploy_aws.sh` and `bootstrap_config.sh` share SSM helpers and the same prefix logic.
+
+---
+
 ## Store SSM parameters
 
 Store values under `DXCP_SSM_PREFIX` using keys from `dxcp-api/config.py`.
