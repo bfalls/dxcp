@@ -49,6 +49,8 @@ This repository contains:
 - Demo & evaluation
   - docs/DEMO.md
   - docs/EVAL_SCORECARD.md
+- Environments
+  - docs/ENVIRONMENTS.md
 
 ---
 
@@ -83,6 +85,12 @@ Secrets are never passed as pipeline parameters; Spinnaker resolves controller t
 - CI system
 - Infrastructure provisioning
 - Pipeline authoring tool
+
+---
+
+## Environment configuration
+
+See docs/ENVIRONMENTS.md for local vs AWS configuration, required variables, and SSM guidance.
 
 ---
 
