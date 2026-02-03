@@ -219,6 +219,7 @@ Deploy:
 cd dxcp
 ./scripts/deploy_aws.sh
 ```
+Deploy preflight requires SSM config. Run scripts/bootstrap_config.sh first.
 
 The script prints a summary block with UI URL, API base, and resource IDs.
 Set OIDC parameters in SSM before first login (see docs/AUTH.md).

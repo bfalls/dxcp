@@ -75,6 +75,7 @@ Notes:
 - Script is idempotent and will not overwrite without confirmation.
 - Values are not echoed back to the console.
 - `deploy_aws.sh` and `bootstrap_config.sh` share SSM helpers and the same prefix logic.
+- `deploy_aws.sh` fails fast if required SSM parameters are missing.
 
 ---
 

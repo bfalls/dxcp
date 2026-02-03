@@ -73,13 +73,6 @@ copy_dir_contents() {
 }
 
 ensure_ssm_auth_config() {
-  local missing=()
-  local missing_issuer=0
-  local missing_audience=0
-  local missing_jwks=0
-  local missing_roles=0
-  local missing_client_id=0
-  local missing_cors=0
   local issuer_key="${DXCP_CONFIG_PREFIX}/oidc/issuer"
   local audience_key="${DXCP_CONFIG_PREFIX}/oidc/audience"
   local jwks_key="${DXCP_CONFIG_PREFIX}/oidc/jwks_url"
@@ -87,222 +80,107 @@ ensure_ssm_auth_config() {
   local client_id_key="${DXCP_CONFIG_PREFIX}/ui/auth0_client_id"
   local cors_key="${DXCP_CONFIG_PREFIX}/api/cors_origins"
 
-  echo "Checking required SSM parameters under ${DXCP_CONFIG_PREFIX}..."
+  local issuer
+  local audience
+  local jwks_url
+  local roles_claim
+  local client_id
+  local cors_origins
 
-  if ! param_exists "$issuer_key"; then
-    missing+=("$issuer_key")
-    missing_issuer=1
-  fi
-  if ! param_exists "$audience_key"; then
-    missing+=("$audience_key")
-    missing_audience=1
-  fi
-  if ! param_exists "$jwks_key"; then
-    missing+=("$jwks_key")
-    missing_jwks=1
-  fi
-  if ! param_exists "$roles_key"; then
-    missing+=("$roles_key")
-    missing_roles=1
-  fi
-  if ! param_exists "$client_id_key"; then
-    missing+=("$client_id_key")
-    missing_client_id=1
-  fi
-  if ! param_exists "$cors_key"; then
-    missing+=("$cors_key")
-    missing_cors=1
-  fi
-
-  if [[ ${#missing[@]} -eq 0 ]]; then
-    echo "All required SSM parameters are present."
-    return
-  fi
-
-  if [[ "$VALIDATE_AUTH" -eq 1 ]] && ! command -v curl >/dev/null 2>&1; then
-    echo "Missing curl. Install curl to validate Auth0 OIDC endpoints or pass --no-validate." >&2
-    exit 1
-  fi
-
-  echo "Missing SSM parameters. Enter values to create them now."
-  local issuer=""
-  local audience="https://dxcp-api"
-  local jwks_url=""
-  local roles_claim="https://dxcp.example/claims/roles"
-  local client_id=""
-  local cors_origins="http://127.0.0.1:5173,http://localhost:5173"
-
-  if [[ "$missing_issuer" -eq 1 ]]; then
-    read -r -p "Auth0 issuer (e.g. https://<tenant>.us.auth0.com/): " issuer
-  else
-    issuer="$(get_ssm_param "$issuer_key")"
-  fi
-  if [[ -z "$issuer" ]]; then
-    echo "Issuer is required." >&2
-    exit 1
-  fi
-  if [[ "$issuer" != */ ]]; then
-    issuer="${issuer}/"
-  fi
-
-  if [[ "$missing_audience" -eq 1 ]]; then
-    read -r -p "Auth0 audience [${audience}]: " input_audience
-    if [[ -n "$input_audience" ]]; then
-      audience="$input_audience"
-    fi
-  else
-    audience="$(get_ssm_param "$audience_key")"
-  fi
-
-  if [[ "$missing_roles" -eq 1 ]]; then
-    read -r -p "Roles claim namespace [${roles_claim}]: " input_roles
-    if [[ -n "$input_roles" ]]; then
-      roles_claim="$input_roles"
-    fi
-  else
-    roles_claim="$(get_ssm_param "$roles_key")"
-  fi
-
-  if [[ "$missing_client_id" -eq 1 ]]; then
-    read -r -p "Auth0 client ID: " client_id
-  else
-    client_id="$(get_ssm_param "$client_id_key")"
-  fi
-  if [[ -z "$client_id" ]]; then
-    echo "Client ID is required." >&2
-    exit 1
-  fi
-
-  local derived_jwks="${issuer%/}/.well-known/jwks.json"
-  if [[ "$missing_jwks" -eq 1 ]]; then
-    read -r -p "JWKS URL [${derived_jwks}]: " input_jwks
-    if [[ -n "$input_jwks" ]]; then
-      jwks_url="$input_jwks"
-    else
-      jwks_url="$derived_jwks"
-    fi
-  else
-    jwks_url="$(get_ssm_param "$jwks_key")"
-  fi
-
-  if [[ "$missing_cors" -eq 1 ]]; then
-    read -r -p "CORS origins (comma-separated) [${cors_origins}]: " input_cors
-    if [[ -n "$input_cors" ]]; then
-      cors_origins="$input_cors"
-    fi
-  else
-    cors_origins="$(get_ssm_param "$cors_key")"
-  fi
+  issuer="$(get_ssm_param "$issuer_key")"
+  audience="$(get_ssm_param "$audience_key")"
+  jwks_url="$(get_ssm_param "$jwks_key")"
+  roles_claim="$(get_ssm_param "$roles_key")"
+  client_id="$(get_ssm_param "$client_id_key")"
+  cors_origins="$(get_ssm_param "$cors_key")"
 
   if [[ "$VALIDATE_AUTH" -eq 1 ]]; then
-    local validate_auth_fields=0
-    if [[ "$missing_issuer" -eq 1 || "$missing_audience" -eq 1 || "$missing_jwks" -eq 1 || "$missing_roles" -eq 1 || "$missing_client_id" -eq 1 ]]; then
-      validate_auth_fields=1
+    if ! command -v curl >/dev/null 2>&1; then
+      echo "Missing curl. Install curl to validate Auth0 OIDC endpoints or pass --no-validate." >&2
+      exit 1
     fi
 
-    if [[ "$validate_auth_fields" -eq 1 ]]; then
-      if [[ "$issuer" != https://* ]]; then
-        echo "Issuer must start with https://. Provided: $issuer" >&2
-        exit 1
-      fi
-      if [[ "$audience" != https://* ]]; then
-        echo "Audience should be a URL (starts with https://). Provided: $audience" >&2
-        exit 1
-      fi
-      if [[ "$roles_claim" != https://* ]]; then
-        echo "Roles claim should be a URL-like namespace (starts with https://). Provided: $roles_claim" >&2
-        exit 1
-      fi
-      if [[ "$jwks_url" != https://* ]]; then
-        echo "JWKS URL must start with https://. Provided: $jwks_url" >&2
-        exit 1
-      fi
+    if [[ "$issuer" != https://* ]]; then
+      echo "Issuer must start with https://. Provided: $issuer" >&2
+      exit 1
+    fi
+    if [[ "$audience" != https://* ]]; then
+      echo "Audience should be a URL (starts with https://). Provided: $audience" >&2
+      exit 1
+    fi
+    if [[ "$roles_claim" != https://* ]]; then
+      echo "Roles claim should be a URL-like namespace (starts with https://). Provided: $roles_claim" >&2
+      exit 1
+    fi
+    if [[ "$jwks_url" != https://* ]]; then
+      echo "JWKS URL must start with https://. Provided: $jwks_url" >&2
+      exit 1
     fi
 
-    if [[ "$missing_cors" -eq 1 ]]; then
-      IFS=',' read -ra origin_list <<<"$cors_origins"
-      for origin in "${origin_list[@]}"; do
-        origin="$(echo "$origin" | xargs)"
-        if [[ -z "$origin" ]]; then
-          echo "CORS origins must not include empty entries." >&2
-          exit 1
-        fi
-        if [[ "$origin" != http://* && "$origin" != https://* ]]; then
-          echo "CORS origin must start with http:// or https://. Provided: $origin" >&2
-          exit 1
-        fi
-      done
-    fi
-
-    if [[ "$missing_issuer" -eq 1 ]]; then
-      echo "Validating issuer metadata..."
-      local oidc_config_url="${issuer%/}/.well-known/openid-configuration"
-      local oidc_config
-      if ! oidc_config=$(curl -fsSL "$oidc_config_url"); then
-        echo "Failed to fetch openid-configuration from $oidc_config_url" >&2
-        echo "Provided issuer: $issuer" >&2
-        echo "Check the issuer URL and your network connectivity." >&2
+    IFS=',' read -ra origin_list <<<"$cors_origins"
+    for origin in "${origin_list[@]}"; do
+      origin="$(echo "$origin" | xargs)"
+      if [[ -z "$origin" ]]; then
+        echo "CORS origins must not include empty entries." >&2
         exit 1
       fi
+      if [[ "$origin" != http://* && "$origin" != https://* ]]; then
+        echo "CORS origin must start with http:// or https://. Provided: $origin" >&2
+        exit 1
+      fi
+    done
 
-      local issuer_from_metadata
-      issuer_from_metadata=$(echo "$oidc_config" | python - <<'PY'
+    echo "Validating issuer metadata..."
+    local oidc_config_url="${issuer%/}/.well-known/openid-configuration"
+    local oidc_config
+    if ! oidc_config=$(curl -fsSL "$oidc_config_url"); then
+      echo "Failed to fetch openid-configuration from $oidc_config_url" >&2
+      echo "Provided issuer: $issuer" >&2
+      echo "Check the issuer URL and your network connectivity." >&2
+      exit 1
+    fi
+
+    local issuer_from_metadata
+    issuer_from_metadata=$(echo "$oidc_config" | python - <<'PY'
 import json, sys
 data = json.loads(sys.stdin.read())
 print(data.get("issuer", ""))
 PY
 )
-      if [[ -n "$issuer_from_metadata" && "$issuer_from_metadata" != "$issuer" && "$issuer_from_metadata/" != "$issuer" ]]; then
-        echo "Issuer mismatch. Metadata issuer=$issuer_from_metadata, provided=$issuer" >&2
-        echo "Update the issuer value to match metadata." >&2
-        exit 1
-      fi
+    if [[ -n "$issuer_from_metadata" && "$issuer_from_metadata" != "$issuer" && "$issuer_from_metadata/" != "$issuer" ]]; then
+      echo "Issuer mismatch. Metadata issuer=$issuer_from_metadata, provided=$issuer" >&2
+      echo "Update the issuer value to match metadata." >&2
+      exit 1
+    fi
 
-      local jwks_from_metadata
-      jwks_from_metadata=$(echo "$oidc_config" | python - <<'PY'
+    local jwks_from_metadata
+    jwks_from_metadata=$(echo "$oidc_config" | python - <<'PY'
 import json, sys
 data = json.loads(sys.stdin.read())
 print(data.get("jwks_uri", ""))
 PY
 )
-      if [[ -n "$jwks_from_metadata" && "$jwks_from_metadata" != "$jwks_url" ]]; then
-        echo "JWKS URL mismatch. Metadata jwks_uri=$jwks_from_metadata, provided=$jwks_url" >&2
-        echo "Consider using the metadata jwks_uri." >&2
-        exit 1
-      fi
+    if [[ -n "$jwks_from_metadata" && "$jwks_from_metadata" != "$jwks_url" ]]; then
+      echo "JWKS URL mismatch. Metadata jwks_uri=$jwks_from_metadata, provided=$jwks_url" >&2
+      echo "Consider using the metadata jwks_uri." >&2
+      exit 1
+    fi
 
-      echo "Validating JWKS endpoint..."
-      if ! curl -fsSL "$jwks_url" >/dev/null; then
-        echo "Failed to fetch JWKS from $jwks_url" >&2
-        echo "Issuer: $issuer" >&2
-        echo "Verify the JWKS URL and ensure the tenant is reachable." >&2
-        exit 1
-      fi
+    echo "Validating JWKS endpoint..."
+    if ! curl -fsSL "$jwks_url" >/dev/null; then
+      echo "Failed to fetch JWKS from $jwks_url" >&2
+      echo "Issuer: $issuer" >&2
+      echo "Verify the JWKS URL and ensure the tenant is reachable." >&2
+      exit 1
     fi
   else
     echo "Skipping Auth0 validation (--no-validate)."
   fi
-
-  if [[ "$missing_issuer" -eq 1 ]]; then
-    ensure_param "$issuer_key" "$issuer"
-  fi
-  if [[ "$missing_audience" -eq 1 ]]; then
-    ensure_param "$audience_key" "$audience"
-  fi
-  if [[ "$missing_jwks" -eq 1 ]]; then
-    ensure_param "$jwks_key" "$jwks_url"
-  fi
-  if [[ "$missing_roles" -eq 1 ]]; then
-    ensure_param "$roles_key" "$roles_claim"
-  fi
-  if [[ "$missing_client_id" -eq 1 ]]; then
-    ensure_param "$client_id_key" "$client_id"
-  fi
-  if [[ "$missing_cors" -eq 1 ]]; then
-    ensure_param "$cors_key" "$cors_origins"
-  fi
 }
 
+if ! "$ROOT_DIR/scripts/check_ssm_config.sh"; then
+  exit 1
+fi
 ensure_ssm_auth_config
 if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
   echo "Validation completed. Exiting due to --validate-only."
