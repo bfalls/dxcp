@@ -246,7 +246,7 @@ body {
 }
 
 .table-row.history {
-  grid-template-columns: 0.7fr 0.8fr 1fr 0.8fr;
+  grid-template-columns: 0.7fr 0.9fr 1fr 0.8fr 1fr 0.8fr;
 }
 
 .table-row.header {
@@ -336,6 +336,45 @@ body {
   background: #0c1616;
 }
 
+.failure-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  background: rgba(183, 179, 166, 0.2);
+  color: var(--muted);
+}
+
+.badge.info {
+  background: rgba(91, 209, 201, 0.2);
+  color: var(--accent-2);
+}
+
+.badge.warn {
+  background: rgba(227, 176, 75, 0.2);
+  color: var(--accent);
+}
+
+.badge.danger {
+  background: rgba(224, 92, 78, 0.2);
+  color: var(--danger);
+}
+
+.badge.neutral {
+  background: rgba(183, 179, 166, 0.2);
+  color: var(--muted);
+}
+
 .links {
   display: flex;
   gap: 12px;
@@ -345,6 +384,10 @@ body {
 .link {
   color: var(--accent-2);
   text-decoration: none;
+}
+
+.link.secondary {
+  color: var(--muted);
 }
 
 .forbidden {

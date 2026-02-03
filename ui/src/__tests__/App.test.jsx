@@ -9,7 +9,7 @@ const ok = (data) =>
     json: () => Promise.resolve(data)
   })
 
-const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse }) =>
+const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse, timeline, failures }) =>
   async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
@@ -88,14 +88,15 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed, deployResponse }
         service: 'demo-service',
         version: '2.1.0',
         createdAt: '2025-01-01T00:00:00Z',
-        updatedAt: '2025-01-01T00:00:00Z'
+        updatedAt: '2025-01-01T00:00:00Z',
+        spinnakerExecutionUrl: 'https://spinnaker.example/executions/dep-1'
       })
     }
     if (pathname === '/v1/deployments/dep-1/failures') {
-      return ok([])
+      return ok(failures || [])
     }
     if (pathname === '/v1/deployments/dep-1/timeline') {
-      return ok([])
+      return ok(timeline || [])
     }
     if (pathname.endsWith('/versions')) {
       return ok({ versions: [] })
@@ -385,6 +386,85 @@ export async function runAllTests() {
     assert.equal(deployButton.disabled, false)
     fireEvent.click(deployButton)
     await view.findByText('Deployment detail')
+  })
+
+  await runTest('Timeline renders normalized order', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    const timeline = [
+      {
+        key: 'succeeded',
+        label: 'Succeeded',
+        occurredAt: '2025-01-02T00:00:00Z',
+        detail: 'Deployment completed.'
+      },
+      {
+        key: 'submitted',
+        label: 'Submitted',
+        occurredAt: '2025-01-01T00:00:00Z',
+        detail: 'Deployment intent received.'
+      }
+    ]
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      timeline
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deployments' }))
+    await view.findByText('SUCCEEDED')
+    fireEvent.click(view.getAllByRole('button', { name: 'Details' })[0])
+    await view.findByText('Deployment detail')
+    const steps = view.container.querySelectorAll('.timeline-step')
+    assert.equal(steps.length, 2)
+    assert.ok(steps[0].textContent.includes('Submitted'))
+    assert.ok(steps[1].textContent.includes('Succeeded'))
+  })
+
+  await runTest('Failure list renders badge and suggested action', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    const failures = [
+      {
+        category: 'INFRA',
+        summary: 'Execution failed during bake.',
+        actionHint: 'Retry after checking the image registry.',
+        observedAt: '2025-01-02T01:00:00Z'
+      }
+    ]
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      failures
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deployments' }))
+    await view.findByText('SUCCEEDED')
+    fireEvent.click(view.getAllByRole('button', { name: 'Details' })[0])
+    await view.findByText('Failures')
+    assert.ok(view.getByText('Suggested action: Retry after checking the image registry.'))
+    const badge = view.container.querySelector('.failure .badge')
+    assert.ok(badge)
+    assert.equal(badge.textContent, 'INFRASTRUCTURE')
+    assert.ok(view.getByRole('link', { name: 'Open Spinnaker execution' }))
   })
 
   await runTest('Services list renders from API', async () => {

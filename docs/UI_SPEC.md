@@ -104,12 +104,13 @@ Current behavior: Deploy tab links to Deploy view (no duplicate deploy form).
 
 History tab
 - Goal: scan recent deployment records for the service.
-- Key data: deployment id, state, version, createdAt.
+- Key data: deployment id, state, version, recipe, rollback indicator, createdAt.
 - Actions: open deployment detail.
 
 Failures tab
 - Goal: see normalized failures for the service.
-- Key data: category, summary, actionHint, observedAt.
+- Key data: category badge, summary, suggested action, observedAt.
+- Secondary action: open Spinnaker execution when available.
 Current behavior: Failures are derived from the latest deployment for the service.
 
 Insights tab
@@ -177,8 +178,8 @@ User goal:
 Key data:
 - State, service, version, createdAt, updatedAt.
 - Spinnaker execution id and deep link.
-- Timeline events (normalized).
-- Failures (normalized).
+- Timeline events (normalized, ordered by timestamp).
+- Failures (normalized with category badge and suggested action).
 
 Primary actions:
 - Rollback (DELIVERY_OWNER, PLATFORM_ADMIN only).

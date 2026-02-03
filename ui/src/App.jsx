@@ -138,6 +138,65 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`
 }
 
+const TIMELINE_LABELS = {
+  submitted: 'Submitted',
+  validated: 'Validated',
+  in_progress: 'In progress',
+  active: 'Active',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  rollback_started: 'Rollback started',
+  rollback_failed: 'Rollback failed',
+  rollback_succeeded: 'Rollback succeeded'
+}
+
+function normalizeTimelineSteps(items) {
+  if (!Array.isArray(items)) return []
+  const mapped = items.map((item, idx) => {
+    const key = item?.key || `step-${idx}`
+    const rawLabel = item?.label || ''
+    const label = TIMELINE_LABELS[key] || rawLabel || 'Event'
+    const occurredAt = item?.occurredAt || ''
+    const detail = item?.detail || ''
+    return { key, label, occurredAt, detail }
+  })
+  mapped.sort((a, b) => {
+    const at = Date.parse(a.occurredAt || '')
+    const bt = Date.parse(b.occurredAt || '')
+    if (Number.isNaN(at) && Number.isNaN(bt)) return 0
+    if (Number.isNaN(at)) return 1
+    if (Number.isNaN(bt)) return -1
+    return at - bt
+  })
+  return mapped
+}
+
+function normalizeFailureCategory(value) {
+  if (!value) return 'UNKNOWN'
+  const raw = String(value).trim().toUpperCase()
+  const mapping = {
+    INFRA: 'INFRASTRUCTURE',
+    INFRASTRUCTURE: 'INFRASTRUCTURE',
+    CONFIG: 'CONFIG',
+    APP: 'APP',
+    POLICY: 'POLICY',
+    VALIDATION: 'VALIDATION',
+    ARTIFACT: 'ARTIFACT',
+    TIMEOUT: 'TIMEOUT',
+    ROLLBACK: 'ROLLBACK',
+    UNKNOWN: 'UNKNOWN'
+  }
+  return mapping[raw] || 'UNKNOWN'
+}
+
+function failureTone(category) {
+  if (category === 'INFRASTRUCTURE' || category === 'TIMEOUT' || category === 'ARTIFACT') return 'danger'
+  if (category === 'POLICY' || category === 'VALIDATION' || category === 'CONFIG') return 'warn'
+  if (category === 'ROLLBACK') return 'neutral'
+  if (category === 'APP') return 'info'
+  return 'neutral'
+}
+
 function statusClass(state) {
   return `status ${state || ''}`
 }
@@ -304,6 +363,15 @@ export default function App() {
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
+  )
+  const timelineSteps = useMemo(() => normalizeTimelineSteps(timeline), [timeline])
+  const getRecipeLabel = useCallback(
+    (recipeIdValue) => {
+      if (!recipeIdValue) return '-'
+      const found = recipes.find((recipe) => recipe.id === recipeIdValue)
+      return found?.name || recipeIdValue
+    },
+    [recipes]
   )
 
   const getAccessToken = useCallback(async () => {
@@ -674,6 +742,40 @@ export default function App() {
     }
     setUserSettings({ refresh_interval_seconds: clampedSeconds })
     setRefreshClampNote(reason ? `Clamped to admin ${reason}.` : '')
+  }
+
+  function renderFailures(list, spinnakerUrl) {
+    if (!list || list.length === 0) {
+      return <div className="helper">No failures reported.</div>
+    }
+    return (
+      <>
+        {list.map((failure, idx) => {
+          const category = normalizeFailureCategory(failure?.category)
+          const tone = failureTone(category)
+          const summary = failure?.summary || 'Failure reported.'
+          const actionHint = failure?.actionHint || 'Review deployment logs and guardrails.'
+          return (
+            <div key={idx} className="failure">
+              <div className="failure-header">
+                <span className={`badge ${tone}`}>{category}</span>
+                <span>{summary}</span>
+              </div>
+              <div className="helper">Suggested action: {actionHint}</div>
+              {failure?.detail && <div className="helper">Evidence: {failure.detail}</div>}
+              {failure?.observedAt && <div className="helper">Observed: {formatTime(failure.observedAt)}</div>}
+            </div>
+          )
+        })}
+        {spinnakerUrl && (
+          <div className="links" style={{ marginTop: '12px' }}>
+            <a className="link secondary" href={spinnakerUrl} target="_blank" rel="noreferrer">
+              Open Spinnaker execution
+            </a>
+          </div>
+        )}
+      </>
+    )
   }
 
   async function loadVersions(refresh = false) {
@@ -1335,47 +1437,43 @@ export default function App() {
             </div>
           )}
 
-          {!serviceDetailLoading && serviceDetailTab === 'history' && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              <h2>Deployment history</h2>
-              {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
-              {serviceDetailHistory.length > 0 && (
-                <div className="table" style={{ marginTop: '12px' }}>
-                <div className="table-row header history">
-                  <div>State</div>
-                  <div>Version</div>
-                  <div>Created</div>
-                  <div>Deployment</div>
-                </div>
-                {serviceDetailHistory.map((item) => (
-                    <div className="table-row history" key={item.id}>
-                      <div><span className={statusClass(item.state)}>{item.state}</span></div>
-                      <div>{item.version || '-'}</div>
-                      <div>{formatTime(item.createdAt)}</div>
-                      <div>
-                        <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
-                          Open detail
-                        </button>
-                      </div>
+            {!serviceDetailLoading && serviceDetailTab === 'history' && (
+              <div className="card" style={{ gridColumn: '1 / -1' }}>
+                <h2>Deployment history</h2>
+                {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
+                {serviceDetailHistory.length > 0 && (
+                  <div className="table" style={{ marginTop: '12px' }}>
+                    <div className="table-row header history">
+                      <div>State</div>
+                      <div>Version</div>
+                      <div>Recipe</div>
+                      <div>Rollback</div>
+                      <div>Created</div>
+                      <div>Deployment</div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                    {serviceDetailHistory.map((item) => (
+                      <div className="table-row history" key={item.id}>
+                        <div><span className={statusClass(item.state)}>{item.state}</span></div>
+                        <div>{item.version || '-'}</div>
+                        <div>{getRecipeLabel(item.recipeId)}</div>
+                        <div>{item.rollbackOf ? <span className="badge neutral">Rollback</span> : '-'}</div>
+                        <div>{formatTime(item.createdAt)}</div>
+                        <div>
+                          <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
+                            Open detail
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
           {!serviceDetailLoading && serviceDetailTab === 'failures' && (
             <div className="card" style={{ gridColumn: '1 / -1' }}>
               <h2>Latest failures</h2>
-              {serviceDetailFailures.length === 0 && <div className="helper">No failures recorded.</div>}
-              {serviceDetailFailures.map((failure, idx) => (
-                <div key={idx} className="failure">
-                  <div><strong>{failure.category}</strong> - {failure.summary}</div>
-                  {failure.actionHint && <div className="helper">Next action: {failure.actionHint}</div>}
-                  {failure.detail && <div className="helper">Evidence: {failure.detail}</div>}
-                  {failure.observedAt && <div className="helper">Observed: {formatTime(failure.observedAt)}</div>}
-                </div>
-              ))}
+              {renderFailures(serviceDetailFailures, serviceDetailStatus?.latest?.spinnakerExecutionUrl)}
             </div>
           )}
 
@@ -1685,11 +1783,11 @@ export default function App() {
           <div className="card">
             <h2>Timeline</h2>
             <div className="timeline">
-              {timeline.length === 0 && <div className="helper">No timeline events available.</div>}
-              {timeline.map((step) => (
+              {timelineSteps.length === 0 && <div className="helper">No timeline events available.</div>}
+              {timelineSteps.map((step) => (
                 <div key={step.key} className="timeline-step active">
                   <strong>{step.label}</strong>
-                  <div className="helper">{formatTime(step.occurredAt)}</div>
+                  <div className="helper">Event time: {formatTime(step.occurredAt)}</div>
                   {step.detail && <div className="helper">{step.detail}</div>}
                 </div>
               ))}
@@ -1697,15 +1795,7 @@ export default function App() {
           </div>
           <div className="card">
             <h2>Failures</h2>
-            {failures.length === 0 && <div className="helper">No failures reported.</div>}
-            {failures.map((f, idx) => (
-              <div key={idx} className="failure">
-                <div><strong>{f.category}</strong> - {f.summary}</div>
-                {f.actionHint && <div className="helper">Next action: {f.actionHint}</div>}
-                {f.detail && <div className="helper">Evidence: {f.detail}</div>}
-                {f.observedAt && <div className="helper">Observed: {formatTime(f.observedAt)}</div>}
-              </div>
-            ))}
+            {renderFailures(failures, selected?.spinnakerExecutionUrl)}
           </div>
         </div>
       )}
