@@ -13,6 +13,20 @@ const buildFetchMock = ({ role, deployAllowed, rollbackAllowed }) =>
   async (url) => {
     const parsed = new URL(url)
     const { pathname } = parsed
+    if (pathname === '/v1/settings/public') {
+      return ok({
+        default_refresh_interval_seconds: 300,
+        min_refresh_interval_seconds: 60,
+        max_refresh_interval_seconds: 3600
+      })
+    }
+    if (pathname === '/v1/settings/admin') {
+      return ok({
+        default_refresh_interval_seconds: 300,
+        min_refresh_interval_seconds: 60,
+        max_refresh_interval_seconds: 3600
+      })
+    }
     if (pathname === '/v1/services') {
       return ok([{ service_name: 'demo-service' }])
     }
@@ -95,6 +109,9 @@ async function withDom(fn) {
     window.__DXCP_AUTH0_RESET__ = true
     await fn()
   } finally {
+    if (globalThis.window?.localStorage) {
+      globalThis.window.localStorage.clear()
+    }
     cleanup()
     dom.window.close()
     delete globalThis.window.__DXCP_AUTH0_FACTORY__
@@ -171,7 +188,52 @@ export async function runAllTests() {
     assert.ok(view.getByRole('button', { name: 'Deployments' }))
     assert.ok(view.getByRole('button', { name: 'Detail' }))
     assert.ok(view.getByRole('button', { name: 'Insights' }))
+    assert.ok(view.getByRole('button', { name: 'Settings' }))
     assert.ok(view.getByRole('button', { name: 'Admin' }))
+  })
+
+  await runTest('Settings page shows default refresh interval', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-observers']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'OBSERVER', deployAllowed: false, rollbackAllowed: false })
+    const view = render(<App />)
+
+    await view.findByText('OBSERVER')
+    fireEvent.click(view.getByRole('button', { name: 'Settings' }))
+    const input = view.getByLabelText('Auto-refresh interval (minutes)')
+    assert.equal(input.value, '5')
+    await view.findByText('Resolved refresh interval: 5 minutes.')
+    assert.equal(view.queryByText('Admin defaults'), null)
+  })
+
+  await runTest('Changing refresh minutes updates localStorage', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Settings' }))
+    const input = view.getByLabelText('Auto-refresh interval (minutes)')
+    fireEvent.change(input, { target: { value: '2' } })
+    await view.findByText('Resolved refresh interval: 2 minutes.')
+    const stored = window.localStorage.getItem('dxcp.user_settings.v1.user-1')
+    assert.ok(stored)
+    const parsed = JSON.parse(stored)
+    assert.equal(parsed.refresh_interval_seconds, 120)
+    assert.ok(view.getByText('Admin defaults'))
   })
 
   await runTest('Services list renders from API', async () => {

@@ -48,6 +48,24 @@ class Settings:
         self.oidc_roles_claim = self._get("oidc/roles_claim", "DXCP_OIDC_ROLES_CLAIM", "", str)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
+        self.ui_default_refresh_seconds = self._get(
+            "ui_default_refresh_seconds",
+            "DXCP_UI_DEFAULT_REFRESH_SECONDS",
+            300,
+            int,
+        )
+        self.ui_min_refresh_seconds = self._get(
+            "ui_min_refresh_seconds",
+            "DXCP_UI_MIN_REFRESH_SECONDS",
+            60,
+            int,
+        )
+        self.ui_max_refresh_seconds = self._get(
+            "ui_max_refresh_seconds",
+            "DXCP_UI_MAX_REFRESH_SECONDS",
+            3600,
+            int,
+        )
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")
         self.runtime_artifact_bucket = os.getenv("DXCP_RUNTIME_ARTIFACT_BUCKET", "")
         if not self.runtime_artifact_bucket and self.ssm_prefix:

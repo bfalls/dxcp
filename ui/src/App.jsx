@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { createApiClient } from './apiClient.js'
+import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -199,6 +200,18 @@ export default function App() {
   const [serviceDetailFailures, setServiceDetailFailures] = useState([])
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
   const [serviceDetailError, setServiceDetailError] = useState('')
+  const [publicSettings, setPublicSettings] = useState({
+    default_refresh_interval_seconds: 300,
+    min_refresh_interval_seconds: 60,
+    max_refresh_interval_seconds: 3600
+  })
+  const [adminSettings, setAdminSettings] = useState(null)
+  const [userSettingsKey, setUserSettingsKey] = useState('')
+  const [userSettings, setUserSettings] = useState(null)
+  const [userSettingsLoaded, setUserSettingsLoaded] = useState(false)
+  const [refreshMinutesInput, setRefreshMinutesInput] = useState('')
+  const [refreshClampNote, setRefreshClampNote] = useState('')
+  const [refreshInputError, setRefreshInputError] = useState('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const contextService = selected?.service || service
@@ -239,6 +252,15 @@ export default function App() {
     : derivedRole === 'OBSERVER'
       ? 'Observers are read-only.'
       : `Role ${derivedRole} cannot rollback.`
+  const minRefreshSeconds = publicSettings.min_refresh_interval_seconds || 60
+  const maxRefreshSeconds = publicSettings.max_refresh_interval_seconds || 3600
+  const defaultRefreshSeconds = publicSettings.default_refresh_interval_seconds || 300
+  const rawRefreshSeconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
+  const { value: refreshIntervalSeconds, reason: refreshIntervalClamp } = useMemo(
+    () => clampRefreshIntervalSeconds(rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds),
+    [rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds]
+  )
+  const refreshIntervalMinutes = Math.round(refreshIntervalSeconds / 60)
 
   const getAccessToken = useCallback(async () => {
     if (!authClient || !isAuthenticated) return null
@@ -499,6 +521,35 @@ export default function App() {
     }
   }
 
+  async function loadPublicSettings() {
+    try {
+      const data = await api.get('/settings/public')
+      if (!data || data.code) return
+      setPublicSettings({
+        default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
+        min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
+        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600
+      })
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+    }
+  }
+
+  async function loadAdminSettings() {
+    try {
+      const data = await api.get('/settings/admin')
+      if (!data || data.code) return
+      setAdminSettings({
+        default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
+        min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
+        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600
+      })
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAdminSettings(null)
+    }
+  }
+
   async function loadAllowedActions(serviceName) {
     if (!serviceName) return
     setActionInfo((prev) => ({ ...prev, loading: true, error: '' }))
@@ -525,6 +576,36 @@ export default function App() {
         error: 'Access check failed'
       })
     }
+  }
+
+  function handleRefreshMinutesChange(value) {
+    setRefreshMinutesInput(value)
+    setRefreshInputError('')
+    if (value.trim() === '') {
+      setRefreshInputError('Enter a number.')
+      return
+    }
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      setRefreshInputError('Enter a number.')
+      return
+    }
+    const minutes = Math.floor(parsed)
+    if (minutes <= 0) {
+      setRefreshInputError('Enter a positive number.')
+      return
+    }
+    const seconds = minutes * 60
+    const { value: clampedSeconds, reason } = clampRefreshIntervalSeconds(
+      seconds,
+      minRefreshSeconds,
+      maxRefreshSeconds
+    )
+    if (userSettingsKey) {
+      saveUserSettings(userSettingsKey, { refresh_interval_seconds: clampedSeconds })
+    }
+    setUserSettings({ refresh_interval_seconds: clampedSeconds })
+    setRefreshClampNote(reason ? `Clamped to admin ${reason}.` : '')
   }
 
   async function loadVersions(refresh = false) {
@@ -656,29 +737,92 @@ export default function App() {
   }, [authReady, isAuthenticated])
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setServices([])
-      setService('')
-      setRecipes([])
-      setRecipeId('')
-      setDeployments([])
-      setSelected(null)
-      setFailures([])
-      setTimeline([])
-      setInsights(null)
-      setServicesView([])
-      setServicesViewError('')
-      setServiceDetailName('')
-      setServiceDetailStatus(null)
-      setServiceDetailHistory([])
-      setServiceDetailFailures([])
-      setServiceDetailError('')
-      setActionInfo({
-        actions: { view: true, deploy: false, rollback: false },
-        loading: true,
-        error: ''
-      })
+    if (!authReady || !isAuthenticated) return
+    loadPublicSettings()
+    if (isPlatformAdmin) {
+      loadAdminSettings()
+    } else {
+      setAdminSettings(null)
     }
+  }, [authReady, isAuthenticated, isPlatformAdmin])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setUserSettingsKey('')
+      setUserSettings(null)
+      setUserSettingsLoaded(false)
+      setRefreshMinutesInput('')
+      setRefreshClampNote('')
+      setRefreshInputError('')
+      return
+    }
+    const key = getUserSettingsKey(user, decodedToken)
+    setUserSettingsKey(key)
+    const stored = loadUserSettings(key)
+    setUserSettings(stored)
+    setUserSettingsLoaded(true)
+  }, [isAuthenticated, user, decodedToken])
+
+  useEffect(() => {
+    if (!userSettingsLoaded) return
+    const seconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
+    const minutes = Math.round(seconds / 60)
+    setRefreshMinutesInput(String(minutes))
+  }, [userSettingsLoaded, userSettings, defaultRefreshSeconds])
+
+  useEffect(() => {
+    if (!userSettingsLoaded || !userSettingsKey || !userSettings) return
+    const rawSeconds = userSettings.refresh_interval_seconds
+    const { value: clampedSeconds, reason } = clampRefreshIntervalSeconds(
+      rawSeconds,
+      minRefreshSeconds,
+      maxRefreshSeconds
+    )
+    if (clampedSeconds !== rawSeconds) {
+      saveUserSettings(userSettingsKey, { refresh_interval_seconds: clampedSeconds })
+      setUserSettings({ refresh_interval_seconds: clampedSeconds })
+      setRefreshClampNote(reason ? `Clamped to admin ${reason}.` : '')
+    } else {
+      setRefreshClampNote('')
+    }
+  }, [userSettingsLoaded, userSettingsKey, userSettings, minRefreshSeconds, maxRefreshSeconds])
+
+  useEffect(() => {
+      if (!isAuthenticated) {
+        setServices([])
+        setService('')
+        setRecipes([])
+        setRecipeId('')
+        setDeployments([])
+        setSelected(null)
+        setFailures([])
+        setTimeline([])
+        setInsights(null)
+        setServicesView([])
+        setServicesViewError('')
+        setServiceDetailName('')
+        setServiceDetailStatus(null)
+        setServiceDetailHistory([])
+        setServiceDetailFailures([])
+        setServiceDetailError('')
+        setPublicSettings({
+          default_refresh_interval_seconds: 300,
+          min_refresh_interval_seconds: 60,
+          max_refresh_interval_seconds: 3600
+        })
+        setAdminSettings(null)
+        setUserSettingsKey('')
+        setUserSettings(null)
+        setUserSettingsLoaded(false)
+        setRefreshMinutesInput('')
+        setRefreshClampNote('')
+        setRefreshInputError('')
+        setActionInfo({
+          actions: { view: true, deploy: false, rollback: false },
+          loading: true,
+          error: ''
+        })
+      }
   }, [isAuthenticated])
 
   useEffect(() => {
@@ -702,38 +846,64 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated || view !== 'deploy' || !service) return undefined
     let cancelled = false
-    const interval = setInterval(() => {
-      if (!cancelled) loadVersions()
-    }, 60000)
+    const intervalMs = Math.max(refreshIntervalSeconds, 1) * 1000
+    const tick = () => {
+      if (cancelled) return
+      if (typeof document !== 'undefined' && document.hidden) return
+      loadVersions()
+    }
+    const interval = setInterval(tick, intervalMs)
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) tick()
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
     return () => {
       cancelled = true
       clearInterval(interval)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
     }
-  }, [view, service])
+  }, [view, service, isAuthenticated, refreshIntervalSeconds])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'detail' || !selected?.id) return undefined
     let cancelled = false
-    const interval = setInterval(async () => {
-    try {
-      const detail = await api.get(`/deployments/${selected.id}`)
-      if (!cancelled && detail && !detail.code) {
-        setSelected(detail)
-        const failureData = await api.get(`/deployments/${selected.id}/failures`)
-        setFailures(Array.isArray(failureData) ? failureData : [])
-        const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
-        setTimeline(Array.isArray(timelineData) ? timelineData : [])
+    const intervalMs = Math.max(refreshIntervalSeconds, 1) * 1000
+    const tick = async () => {
+      if (cancelled) return
+      if (typeof document !== 'undefined' && document.hidden) return
+      try {
+        const detail = await api.get(`/deployments/${selected.id}`)
+        if (!cancelled && detail && !detail.code) {
+          setSelected(detail)
+          const failureData = await api.get(`/deployments/${selected.id}/failures`)
+          setFailures(Array.isArray(failureData) ? failureData : [])
+          const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
+          setTimeline(Array.isArray(timelineData) ? timelineData : [])
+        }
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        if (!cancelled) setErrorMessage('Failed to refresh deployment status')
       }
-    } catch (err) {
-      if (isLoginRequiredError(err)) return
-      if (!cancelled) setErrorMessage('Failed to refresh deployment status')
     }
-    }, 5000)
+    const interval = setInterval(tick, intervalMs)
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) tick()
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
     return () => {
       cancelled = true
       clearInterval(interval)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
     }
-  }, [view, selected?.id])
+  }, [view, selected?.id, isAuthenticated, refreshIntervalSeconds])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'insights') return
@@ -818,20 +988,23 @@ export default function App() {
           >
             Detail
           </button>
-          <button
-            className={view === 'insights' ? 'active' : ''}
-            onClick={() => {
-              setView('insights')
-              loadInsights()
-            }}
-          >
-            Insights
-          </button>
-          {isPlatformAdmin && (
-            <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-              Admin
+            <button
+              className={view === 'insights' ? 'active' : ''}
+              onClick={() => {
+                setView('insights')
+                loadInsights()
+              }}
+            >
+              Insights
             </button>
-          )}
+            <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
+              Settings
+            </button>
+            {isPlatformAdmin && (
+              <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
+                Admin
+              </button>
+            )}
         </nav>
       </header>
 
@@ -1378,6 +1551,56 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {authReady && isAuthenticated && view === 'settings' && (
+        <div className="shell">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <h2>Settings</h2>
+            <div className="helper">Control auto-refresh behavior for the UI.</div>
+          </div>
+          <div className="card">
+            <h2>User settings</h2>
+            <div className="field">
+              <label htmlFor="refresh-interval-minutes">Auto-refresh interval (minutes)</label>
+              <input
+                id="refresh-interval-minutes"
+                type="number"
+                min={Math.ceil(minRefreshSeconds / 60)}
+                max={Math.floor(maxRefreshSeconds / 60)}
+                step="1"
+                value={refreshMinutesInput}
+                onChange={(e) => handleRefreshMinutesChange(e.target.value)}
+                disabled={!userSettingsKey}
+              />
+              <div className="helper">Default is {Math.round(defaultRefreshSeconds / 60)} minutes.</div>
+              <div className="helper">Applies to versions and deployment detail refresh.</div>
+              {refreshInputError && <div className="helper">{refreshInputError}</div>}
+              {refreshClampNote && <div className="helper">{refreshClampNote}</div>}
+              <div className="helper">Resolved refresh interval: {refreshIntervalMinutes} minutes.</div>
+            </div>
+          </div>
+          {isPlatformAdmin && (
+            <div className="card">
+              <h2>Admin defaults</h2>
+              <div className="helper">Config-driven defaults and guardrails.</div>
+              <div className="list" style={{ marginTop: '8px' }}>
+                <div className="list-item">
+                  <div>Default</div>
+                  <div>{Math.round((adminSettings?.default_refresh_interval_seconds ?? defaultRefreshSeconds) / 60)} minutes</div>
+                </div>
+                <div className="list-item">
+                  <div>Minimum</div>
+                  <div>{Math.round((adminSettings?.min_refresh_interval_seconds ?? minRefreshSeconds) / 60)} minutes</div>
+                </div>
+                <div className="list-item">
+                  <div>Maximum</div>
+                  <div>{Math.round((adminSettings?.max_refresh_interval_seconds ?? maxRefreshSeconds) / 60)} minutes</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

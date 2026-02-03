@@ -198,6 +198,29 @@ Primary actions:
 Blocked-action UX:
 - If API read fails, show error response to the user.
 
+### Settings
+
+Status: Current (refresh interval only)
+
+User goal:
+- Control UI auto-refresh cadence without affecting backend policy.
+
+Key data:
+- Auto-refresh interval (minutes).
+- Resolved refresh interval after admin bounds.
+
+Primary actions:
+- Update refresh interval (stored per-user in local storage).
+
+Role-aware sections:
+- User settings: visible to all authenticated roles.
+- Admin defaults: visible to PLATFORM_ADMIN only (read-only).
+
+Defaults and bounds:
+- Default refresh interval is 5 minutes.
+- Admin-defined minimum and maximum bounds are enforced in the UI.
+  When the user value is outside bounds, it is clamped and a note is shown.
+
 ### Admin section
 
 Status: Planned (shell implemented, no CRUD yet)

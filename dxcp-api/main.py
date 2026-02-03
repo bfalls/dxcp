@@ -310,6 +310,25 @@ def _compute_sha256(client, bucket: str, key: str) -> tuple[str, int, float]:
     return hasher.hexdigest(), total, duration
 
 
+def _ui_refresh_settings() -> dict:
+    default_value = SETTINGS.ui_default_refresh_seconds or 300
+    min_value = SETTINGS.ui_min_refresh_seconds or 60
+    max_value = SETTINGS.ui_max_refresh_seconds or 3600
+    if min_value <= 0:
+        min_value = 60
+    if max_value < min_value:
+        max_value = min_value
+    if default_value < min_value:
+        default_value = min_value
+    if default_value > max_value:
+        default_value = max_value
+    return {
+        "default_refresh_interval_seconds": int(default_value),
+        "min_refresh_interval_seconds": int(min_value),
+        "max_refresh_interval_seconds": int(max_value),
+    }
+
+
 def _register_existing_build_internal(service_entry: dict, service: str, version: str, artifact_ref: Optional[str], s3_bucket: Optional[str], s3_key: Optional[str]) -> dict:
     if not SETTINGS.runtime_artifact_bucket:
         raise ValueError("Runtime artifact bucket is not configured")
@@ -713,6 +732,23 @@ def get_deployment_timeline(
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
     return derive_timeline(deployment)
+
+
+@app.get("/v1/settings/public")
+def get_public_settings(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    return _ui_refresh_settings()
+
+
+@app.get("/v1/settings/admin")
+def get_admin_settings(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view admin settings")
+    if role_error:
+        return role_error
+    return _ui_refresh_settings()
 
 
 @app.get("/v1/insights/failures")

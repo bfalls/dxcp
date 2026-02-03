@@ -71,6 +71,22 @@ Lifecycle:
 Role enforcement:
 - PLATFORM_ADMIN only for create, edit, and deprecate actions.
 
+## Admin settings (refresh defaults)
+
+Status: Current (read-only)
+
+Purpose:
+- Define org-wide defaults and guardrails for UI auto-refresh.
+
+Configuration:
+- Settings are sourced from environment variables and SSM.
+- UI displays these settings to PLATFORM_ADMIN only.
+- No UI or API write path exists yet.
+SSM keys (when `DXCP_SSM_PREFIX` is configured):
+- `/dxcp/config/ui_default_refresh_seconds`
+- `/dxcp/config/ui_min_refresh_seconds`
+- `/dxcp/config/ui_max_refresh_seconds`
+
 ---
 
 ## Minimum API needed
