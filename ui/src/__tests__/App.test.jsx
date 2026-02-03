@@ -1,4 +1,4 @@
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, fireEvent } from '@testing-library/react'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import App from '../App.jsx'
@@ -11,15 +11,42 @@ const ok = (data) =>
 
 const buildFetchMock = ({ role, deployAllowed, rollbackAllowed }) =>
   async (url) => {
-    const { pathname } = new URL(url)
+    const parsed = new URL(url)
+    const { pathname } = parsed
     if (pathname === '/v1/services') {
       return ok([{ service_name: 'demo-service' }])
+    }
+    if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
+      return ok({
+        service: 'demo-service',
+        hasDeployments: true,
+        latest: {
+          id: 'dep-1',
+          state: 'SUCCEEDED',
+          version: '2.1.0',
+          createdAt: '2025-01-01T00:00:00Z',
+          updatedAt: '2025-01-02T00:00:00Z'
+        }
+      })
     }
     if (pathname === '/v1/recipes') {
       return ok([{ id: 'default', name: 'Default Deploy' }])
     }
     if (pathname === '/v1/delivery-groups') {
       return ok([{ id: 'default', name: 'Default Delivery Group', services: ['demo-service'] }])
+    }
+    if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
+      return ok([
+        {
+          id: 'dep-1',
+          state: 'SUCCEEDED',
+          version: '2.1.0',
+          createdAt: '2025-01-01T00:00:00Z'
+        }
+      ])
+    }
+    if (pathname === '/v1/deployments/dep-1/failures') {
+      return ok([])
     }
     if (pathname.endsWith('/versions')) {
       return ok({ versions: [] })
@@ -65,6 +92,7 @@ async function withDom(fn) {
       audience: 'https://dxcp-api',
       rolesClaim: 'https://dxcp.example/claims/roles'
     }
+    window.__DXCP_AUTH0_RESET__ = true
     await fn()
   } finally {
     cleanup()
@@ -144,6 +172,44 @@ export async function runAllTests() {
     assert.ok(view.getByRole('button', { name: 'Detail' }))
     assert.ok(view.getByRole('button', { name: 'Insights' }))
     assert.ok(view.getByRole('button', { name: 'Admin' }))
+  })
+
+  await runTest('Services list renders from API', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    await view.findByText('demo-service')
+    await view.findByText('SUCCEEDED')
+  })
+
+  await runTest('Service detail loads correct data', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    await view.findByText('demo-service')
+    fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
+    await view.findByText('Service detail')
+    await view.findByText('Version: 2.1.0')
   })
 
   await runTest('API client attaches Authorization header', async () => {

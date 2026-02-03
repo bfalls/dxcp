@@ -45,3 +45,4 @@ Notes:
 - Version input is validated locally before submit.
 - Rollback prompts for confirmation and uses idempotency keys.
 - Services come from the backend registry (/v1/services).
+- Production uses /config.json for runtime Auth0 and API configuration (see docs/AUTH.md).

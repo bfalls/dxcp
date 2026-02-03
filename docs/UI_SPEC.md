@@ -28,7 +28,7 @@ Role handling is enforced by the API. The UI should surface allowed actions and 
 ## Navigation and information architecture
 
 Current:
-- Primary navigation: Deploy, Deployments, Detail, Insights.
+- Primary navigation: Services, Deploy, Deployments, Detail, Insights.
 - Admin appears for PLATFORM_ADMIN only.
 - Global scope is a single environment (sandbox).
 
@@ -62,7 +62,7 @@ Blocked-action UX:
 
 ### Services list
 
-Status: Planned
+Status: Current
 
 User goal:
 - Discover services available for deployment and observe their status.
@@ -71,6 +71,7 @@ Key data:
 - Service name.
 - Latest deployment state and version.
 - DeliveryGroup name.
+- Updated time (latest deployment).
 
 Primary actions:
 - Open service detail.
@@ -80,7 +81,7 @@ Blocked-action UX:
 
 ### Service detail
 
-Status: Planned
+Status: Current (deploy tab placeholder)
 
 Tabs:
 - Overview
@@ -99,6 +100,7 @@ Deploy tab
 - Key data: service, recipe, environment, version, change summary.
 - Actions: deploy (DELIVERY_OWNER, PLATFORM_ADMIN only).
 - Blocked-action UX: show reason from API if role or policy blocks action.
+Current behavior: Deploy tab links to Deploy view (no duplicate deploy form).
 
 History tab
 - Goal: scan recent deployment records for the service.
@@ -108,11 +110,13 @@ History tab
 Failures tab
 - Goal: see normalized failures for the service.
 - Key data: category, summary, actionHint, observedAt.
+Current behavior: Failures are derived from the latest deployment for the service.
 
 Insights tab
 - Goal: understand failure trends and rollback rate.
 - Key data: failuresByCategory, rollbackRate, deploymentsByRecipe, deploymentsByGroup.
 - Actions: adjust time window and filters.
+Current behavior: Service-level insights are not available yet; use the Insights view.
 
 ### Deploy intent
 

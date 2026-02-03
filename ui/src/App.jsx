@@ -3,7 +3,7 @@ import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { createApiClient } from './apiClient.js'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
-const API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '') + '/v1'
+const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
 const AUTH0_DOMAIN = ENV.VITE_AUTH0_DOMAIN || ''
 const AUTH0_CLIENT_ID = ENV.VITE_AUTH0_CLIENT_ID || ''
 const AUTH0_AUDIENCE = ENV.VITE_AUTH0_AUDIENCE || ''
@@ -17,6 +17,35 @@ let sharedAuthInitPromise = null
 let sharedAuthResult = null
 let sharedAuthError = null
 let sharedRedirectCode = null
+let sharedUiConfigPromise = null
+let sharedUiConfig = null
+
+function normalizeApiBase(value) {
+  if (!value) return `${DEFAULT_API_BASE}/v1`
+  const trimmed = value.replace(/\/$/, '')
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
+}
+
+async function loadUiConfig() {
+  if (typeof window !== 'undefined' && window.__DXCP_AUTH0_CONFIG__) {
+    return window.__DXCP_AUTH0_CONFIG__
+  }
+  if (sharedUiConfig) return sharedUiConfig
+  if (!sharedUiConfigPromise) {
+    sharedUiConfigPromise = (async () => {
+      try {
+        const response = await fetch('/config.json', { cache: 'no-store' })
+        if (!response.ok) return null
+        return await response.json()
+      } catch (err) {
+        return null
+      }
+    })()
+  }
+  const config = await sharedUiConfigPromise
+  sharedUiConfig = config
+  return config
+}
 
 async function initAuthOnce(runtimeConfig, factory) {
   if (sharedAuthResult) return sharedAuthResult
@@ -113,6 +142,15 @@ function statusClass(state) {
 }
 
 export default function App() {
+  if (import.meta?.env?.DEV && typeof window !== 'undefined' && window.__DXCP_AUTH0_RESET__) {
+    sharedAuthInitPromise = null
+    sharedAuthResult = null
+    sharedAuthError = null
+    sharedRedirectCode = null
+    sharedUiConfigPromise = null
+    sharedUiConfig = null
+    window.__DXCP_AUTH0_RESET__ = false
+  }
   const [authClient, setAuthClient] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -120,6 +158,7 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [accessToken, setAccessToken] = useState('')
   const [authAudience, setAuthAudience] = useState(AUTH0_AUDIENCE)
+  const [apiBase, setApiBase] = useState(normalizeApiBase(DEFAULT_API_BASE))
   const [rolesClaim, setRolesClaim] = useState(ROLES_CLAIM)
   const [view, setView] = useState('deploy')
   const [services, setServices] = useState([])
@@ -150,15 +189,35 @@ export default function App() {
     error: ''
   })
   const [deliveryGroups, setDeliveryGroups] = useState([])
+  const [servicesView, setServicesView] = useState([])
+  const [servicesViewLoading, setServicesViewLoading] = useState(false)
+  const [servicesViewError, setServicesViewError] = useState('')
+  const [serviceDetailName, setServiceDetailName] = useState('')
+  const [serviceDetailTab, setServiceDetailTab] = useState('overview')
+  const [serviceDetailStatus, setServiceDetailStatus] = useState(null)
+  const [serviceDetailHistory, setServiceDetailHistory] = useState([])
+  const [serviceDetailFailures, setServiceDetailFailures] = useState([])
+  const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
+  const [serviceDetailError, setServiceDetailError] = useState('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const contextService = selected?.service || service
+  const findDeliveryGroup = useCallback(
+    (serviceName) =>
+      deliveryGroups.find((group) => Array.isArray(group.services) && group.services.includes(serviceName)) || null,
+    [deliveryGroups]
+  )
   const currentDeliveryGroup = useMemo(() => {
     if (!contextService) return null
-    return deliveryGroups.find((group) => Array.isArray(group.services) && group.services.includes(contextService)) || null
-  }, [deliveryGroups, contextService])
+    return findDeliveryGroup(contextService)
+  }, [contextService, findDeliveryGroup])
   const decodedToken = useMemo(() => decodeJwt(accessToken), [accessToken])
   const derivedRoles = decodedToken?.[rolesClaim] || []
+  const serviceDetailGroup = useMemo(() => {
+    if (!serviceDetailName) return null
+    return findDeliveryGroup(serviceDetailName)
+  }, [serviceDetailName, findDeliveryGroup])
+  const serviceDetailLatest = serviceDetailStatus?.latest || null
   // UI-only role display; API permissions are authoritative.
   const derivedRole = Array.isArray(derivedRoles)
     ? derivedRoles.includes('dxcp-platform-admins')
@@ -188,22 +247,40 @@ export default function App() {
     })
   }, [authClient, isAuthenticated, authAudience])
 
-  const api = useMemo(() => createApiClient({ baseUrl: API_BASE, getToken: getAccessToken }), [getAccessToken])
+  const api = useMemo(() => createApiClient({ baseUrl: apiBase, getToken: getAccessToken }), [apiBase, getAccessToken])
 
-  const getRuntimeConfig = useCallback(() => {
-    return typeof window !== 'undefined' && window.__DXCP_AUTH0_CONFIG__
-      ? window.__DXCP_AUTH0_CONFIG__
-      : {
-          domain: AUTH0_DOMAIN,
-          clientId: AUTH0_CLIENT_ID,
-          audience: AUTH0_AUDIENCE,
-          rolesClaim: ROLES_CLAIM
-        }
+  const getRuntimeConfig = useCallback(async () => {
+    const config = await loadUiConfig()
+    if (config && config.auth0) {
+      return {
+        domain: config.auth0.domain,
+        clientId: config.auth0.clientId,
+        audience: config.auth0.audience,
+        rolesClaim: config.auth0.rolesClaim,
+        apiBase: config.apiBase
+      }
+    }
+    if (config) {
+      return {
+        domain: config.auth0Domain || config.domain || AUTH0_DOMAIN,
+        clientId: config.auth0ClientId || config.clientId || AUTH0_CLIENT_ID,
+        audience: config.auth0Audience || config.audience || AUTH0_AUDIENCE,
+        rolesClaim: config.auth0RolesClaim || config.rolesClaim || ROLES_CLAIM,
+        apiBase: config.apiBase || DEFAULT_API_BASE
+      }
+    }
+    return {
+      domain: AUTH0_DOMAIN,
+      clientId: AUTH0_CLIENT_ID,
+      audience: AUTH0_AUDIENCE,
+      rolesClaim: ROLES_CLAIM,
+      apiBase: DEFAULT_API_BASE
+    }
   }, [])
 
   const ensureAuthClient = useCallback(async () => {
     if (authClient) return authClient
-    const runtimeConfig = getRuntimeConfig()
+    const runtimeConfig = await getRuntimeConfig()
     if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
       throw new Error('Auth0 configuration is missing.')
     }
@@ -246,13 +323,16 @@ export default function App() {
   useEffect(() => {
     let active = true
     async function initAuth() {
-      const runtimeConfig = getRuntimeConfig()
+      const runtimeConfig = await getRuntimeConfig()
       if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
         if (active) {
           setAuthError('Auth0 configuration is missing.')
           setAuthReady(true)
         }
         return
+      }
+      if (runtimeConfig.apiBase) {
+        setApiBase(normalizeApiBase(runtimeConfig.apiBase))
       }
       setAuthAudience(runtimeConfig.audience)
       setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
@@ -344,10 +424,78 @@ export default function App() {
   async function loadDeliveryGroups() {
     try {
       const data = await api.get('/delivery-groups')
-      setDeliveryGroups(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      setDeliveryGroups(list)
+      return list
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setDeliveryGroups([])
+    }
+    return []
+  }
+
+  async function loadServicesList() {
+    setServicesViewError('')
+    setServicesViewLoading(true)
+    try {
+      const data = await api.get('/services')
+      const list = Array.isArray(data) ? data : []
+      const groups = deliveryGroups.length > 0 ? deliveryGroups : await loadDeliveryGroups()
+      const statusResults = await Promise.allSettled(
+        list.map((svc) => api.get(`/services/${encodeURIComponent(svc.service_name)}/delivery-status`))
+      )
+      const rows = list.map((svc, idx) => {
+        const status = statusResults[idx].status === 'fulfilled' ? statusResults[idx].value : null
+        const latest = status?.latest || null
+        const group =
+          groups.find((entry) => Array.isArray(entry.services) && entry.services.includes(svc.service_name)) || null
+        return {
+          name: svc.service_name,
+          deliveryGroup: group?.name || 'Unassigned',
+          latestVersion: latest?.version || '-',
+          latestState: latest?.state || '-',
+          updatedAt: latest?.updatedAt || latest?.createdAt || '',
+          latestDeploymentId: latest?.id || ''
+        }
+      })
+      rows.sort((a, b) => a.name.localeCompare(b.name))
+      setServicesView(rows)
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setServicesView([])
+      setServicesViewError('Failed to load services')
+    } finally {
+      setServicesViewLoading(false)
+    }
+  }
+
+  async function loadServiceDetail(serviceName) {
+    if (!serviceName) return
+    setServiceDetailError('')
+    setServiceDetailLoading(true)
+    try {
+      const [status, deployments] = await Promise.all([
+        api.get(`/services/${encodeURIComponent(serviceName)}/delivery-status`),
+        api.get(`/deployments?service=${encodeURIComponent(serviceName)}`)
+      ])
+      const history = Array.isArray(deployments) ? deployments : []
+      const latest = status?.latest || history[0] || null
+      setServiceDetailStatus(status || null)
+      setServiceDetailHistory(history)
+      if (latest?.id) {
+        const failures = await api.get(`/deployments/${latest.id}/failures`)
+        setServiceDetailFailures(Array.isArray(failures) ? failures : [])
+      } else {
+        setServiceDetailFailures([])
+      }
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setServiceDetailStatus(null)
+      setServiceDetailHistory([])
+      setServiceDetailFailures([])
+      setServiceDetailError('Failed to load service detail')
+    } finally {
+      setServiceDetailLoading(false)
     }
   }
 
@@ -518,6 +666,13 @@ export default function App() {
       setFailures([])
       setTimeline([])
       setInsights(null)
+      setServicesView([])
+      setServicesViewError('')
+      setServiceDetailName('')
+      setServiceDetailStatus(null)
+      setServiceDetailHistory([])
+      setServiceDetailFailures([])
+      setServiceDetailError('')
       setActionInfo({
         actions: { view: true, deploy: false, rollback: false },
         loading: true,
@@ -585,6 +740,16 @@ export default function App() {
     loadInsights()
   }, [view, isAuthenticated])
 
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || view !== 'services') return
+    loadServicesList()
+  }, [authReady, isAuthenticated, view])
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || view !== 'service' || !serviceDetailName) return
+    loadServiceDetail(serviceDetailName)
+  }, [authReady, isAuthenticated, view, serviceDetailName])
+
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
   if (selectedService?.stable_service_url_template) {
@@ -629,6 +794,9 @@ export default function App() {
           )}
         </div>
         <nav className="nav">
+          <button className={view === 'services' ? 'active' : ''} onClick={() => setView('services')}>
+            Services
+          </button>
           <button className={view === 'deploy' ? 'active' : ''} onClick={() => setView('deploy')}>
             Deploy
           </button>
@@ -681,7 +849,7 @@ export default function App() {
 
       {!authReady && (
         <div className="shell">
-          <div className="card">Loading session…</div>
+          <div className="card">Loading session...</div>
         </div>
       )}
 
@@ -697,13 +865,241 @@ export default function App() {
         </div>
       )}
 
+      {authReady && isAuthenticated && view === 'services' && (
+        <div className="shell">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>Services</h2>
+                <div className="helper">Browse services and their latest delivery status.</div>
+              </div>
+              <button className="button secondary" onClick={loadServicesList} disabled={servicesViewLoading}>
+                {servicesViewLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            {servicesViewError && <div className="helper" style={{ marginTop: '8px' }}>{servicesViewError}</div>}
+            {servicesViewLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading services...</div>}
+            {!servicesViewLoading && servicesView.length === 0 && (
+              <div className="helper" style={{ marginTop: '8px' }}>No services registered.</div>
+            )}
+            {servicesView.length > 0 && (
+              <div className="table" style={{ marginTop: '12px' }}>
+                <div className="table-row header">
+                  <div>Service</div>
+                  <div>Delivery group</div>
+                  <div>Latest version</div>
+                  <div>Latest state</div>
+                  <div>Updated</div>
+                </div>
+                {servicesView.map((row) => (
+                  <button
+                    key={row.name}
+                    className="table-row button-row"
+                    onClick={() => {
+                      setServiceDetailName(row.name)
+                      setServiceDetailTab('overview')
+                      setView('service')
+                    }}
+                  >
+                    <div>{row.name}</div>
+                    <div>{row.deliveryGroup}</div>
+                    <div>{row.latestVersion}</div>
+                    <div><span className={statusClass(row.latestState)}>{row.latestState}</span></div>
+                    <div>{row.updatedAt ? formatTime(row.updatedAt) : '-'}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {authReady && isAuthenticated && view === 'service' && (
+        <div className="shell">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>Service detail</h2>
+                <div className="helper">{serviceDetailName || 'Unknown service'}</div>
+              </div>
+              <button className="button secondary" onClick={() => setView('services')}>
+                Back to services
+              </button>
+            </div>
+            <div className="tabs" style={{ marginTop: '12px' }}>
+              {['overview', 'deploy', 'history', 'failures', 'insights'].map((tab) => (
+                <button
+                  key={tab}
+                  className={serviceDetailTab === tab ? 'active' : ''}
+                  onClick={() => setServiceDetailTab(tab)}
+                >
+                  {tab[0].toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {serviceDetailError && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              {serviceDetailError}
+            </div>
+          )}
+
+          {serviceDetailLoading && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              Loading service detail...
+            </div>
+          )}
+
+          {!serviceDetailLoading && serviceDetailTab === 'overview' && (
+            <>
+              <div className="card">
+                <h2>Latest delivery status</h2>
+                {serviceDetailLatest ? (
+                  <div>
+                    <div className={statusClass(serviceDetailLatest.state)}>
+                      {serviceDetailLatest.state}
+                    </div>
+                    <p>Version: {serviceDetailLatest.version || '-'}</p>
+                    <p>Updated: {formatTime(serviceDetailLatest.updatedAt || serviceDetailLatest.createdAt)}</p>
+                    {serviceDetailLatest.rollbackOf && (
+                      <p>Rollback of: {serviceDetailLatest.rollbackOf}</p>
+                    )}
+                    <div className="links" style={{ marginTop: '8px' }}>
+                      <button
+                        className="button secondary"
+                        onClick={() => openDeployment({ id: serviceDetailLatest.id })}
+                      >
+                        Open deployment detail
+                      </button>
+                      {serviceDetailLatest.spinnakerExecutionUrl && (
+                        <a
+                          className="link"
+                          href={serviceDetailLatest.spinnakerExecutionUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open in Spinnaker
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="helper">No deployments recorded yet.</div>
+                )}
+              </div>
+              <div className="card">
+                <h2>Delivery group</h2>
+                {serviceDetailGroup ? (
+                  <>
+                    <p>{serviceDetailGroup.name}</p>
+                    <div className="helper">Owner: {serviceDetailGroup.owner || 'Unassigned'}</div>
+                    <div className="guardrails" style={{ marginTop: '12px' }}>
+                      <div className="helper" style={{ marginBottom: '6px' }}>Guardrails</div>
+                      <div className="list">
+                        <div className="list-item">
+                          <div>Max concurrent deployments</div>
+                          <div>{serviceDetailGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+                        </div>
+                        <div className="list-item">
+                          <div>Daily deploy quota</div>
+                          <div>{serviceDetailGroup.guardrails?.daily_deploy_quota || '-'}</div>
+                        </div>
+                        <div className="list-item">
+                          <div>Daily rollback quota</div>
+                          <div>{serviceDetailGroup.guardrails?.daily_rollback_quota || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="helper">Service is not assigned to a delivery group.</div>
+                )}
+              </div>
+            </>
+          )}
+
+          {!serviceDetailLoading && serviceDetailTab === 'deploy' && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2>Deploy</h2>
+              <div className="helper">
+                Deployment intent stays in the Deploy view for now.
+              </div>
+              <button
+                className="button secondary"
+                style={{ marginTop: '12px' }}
+                onClick={() => {
+                  if (serviceDetailName) setService(serviceDetailName)
+                  setView('deploy')
+                }}
+              >
+                Go to Deploy
+              </button>
+            </div>
+          )}
+
+          {!serviceDetailLoading && serviceDetailTab === 'history' && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2>Deployment history</h2>
+              {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
+              {serviceDetailHistory.length > 0 && (
+                <div className="table" style={{ marginTop: '12px' }}>
+                <div className="table-row header history">
+                  <div>State</div>
+                  <div>Version</div>
+                  <div>Created</div>
+                  <div>Deployment</div>
+                </div>
+                {serviceDetailHistory.map((item) => (
+                    <div className="table-row history" key={item.id}>
+                      <div><span className={statusClass(item.state)}>{item.state}</span></div>
+                      <div>{item.version || '-'}</div>
+                      <div>{formatTime(item.createdAt)}</div>
+                      <div>
+                        <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
+                          Open detail
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!serviceDetailLoading && serviceDetailTab === 'failures' && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2>Latest failures</h2>
+              {serviceDetailFailures.length === 0 && <div className="helper">No failures recorded.</div>}
+              {serviceDetailFailures.map((failure, idx) => (
+                <div key={idx} className="failure">
+                  <div><strong>{failure.category}</strong> - {failure.summary}</div>
+                  {failure.actionHint && <div className="helper">Next action: {failure.actionHint}</div>}
+                  {failure.detail && <div className="helper">Evidence: {failure.detail}</div>}
+                  {failure.observedAt && <div className="helper">Observed: {formatTime(failure.observedAt)}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!serviceDetailLoading && serviceDetailTab === 'insights' && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <h2>Insights</h2>
+              <div className="helper">
+                Service-level insights are not available yet. Use the Insights view for system-wide trends.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {authReady && isAuthenticated && view === 'deploy' && (
         <div className="shell">
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2>Deploy intent</h2>
               <button className="button secondary" onClick={refreshData} disabled={refreshing}>
-                {refreshing ? 'Refreshing…' : 'Refresh data'}
+                {refreshing ? 'Refreshing...' : 'Refresh data'}
               </button>
             </div>
             <div className="field">
@@ -758,13 +1154,13 @@ export default function App() {
                 }}
                 disabled={versions.length === 0}
               >
-                {versions.length === 0 && <option value="__custom__">Custom…</option>}
+                {versions.length === 0 && <option value="__custom__">Custom...</option>}
                 {versions.map((item) => (
                   <option key={item.version} value={item.version}>
                     {item.version}
                   </option>
                 ))}
-                <option value="__custom__">Custom…</option>
+                <option value="__custom__">Custom...</option>
               </select>
               {versionMode === 'custom' && (
                 <input
@@ -777,8 +1173,8 @@ export default function App() {
               <div className="helper">
                   Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
               </div>
-              {versionsLoading && <div className="helper">Loading versions…</div>}
-              {versionsRefreshing && <div className="helper">Refreshing versions…</div>}
+              {versionsLoading && <div className="helper">Loading versions...</div>}
+              {versionsRefreshing && <div className="helper">Refreshing versions...</div>}
               {versionsError && <div className="helper">{versionsError}</div>}
               {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
                 <div className="helper">Latest discovered: {versions[0].version}</div>

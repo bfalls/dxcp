@@ -42,10 +42,10 @@ class Settings:
         self.engine_lambda_token = self._resolve_secret(
             self._get("engine/lambda/token", "DXCP_ENGINE_LAMBDA_TOKEN", "", str)
         )
-        self.oidc_issuer = os.getenv("DXCP_OIDC_ISSUER", "")
-        self.oidc_audience = os.getenv("DXCP_OIDC_AUDIENCE", "")
-        self.oidc_jwks_url = os.getenv("DXCP_OIDC_JWKS_URL", "")
-        self.oidc_roles_claim = os.getenv("DXCP_OIDC_ROLES_CLAIM", "")
+        self.oidc_issuer = self._get("oidc/issuer", "DXCP_OIDC_ISSUER", "", str)
+        self.oidc_audience = self._get("oidc/audience", "DXCP_OIDC_AUDIENCE", "", str)
+        self.oidc_jwks_url = self._get("oidc/jwks_url", "DXCP_OIDC_JWKS_URL", "", str)
+        self.oidc_roles_claim = self._get("oidc/roles_claim", "DXCP_OIDC_ROLES_CLAIM", "", str)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.service_registry_path = os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json")

@@ -53,6 +53,32 @@ UI (.env.local in ui/):
 - VITE_AUTH0_AUDIENCE=https://dxcp-api
 - VITE_AUTH0_ROLES_CLAIM=https://dxcp.example/claims/roles
 
+## Production configuration (AWS)
+
+API (AWS Lambda) reads OIDC settings from SSM Parameter Store using the
+configured prefix (default: /dxcp/config). Create these parameters:
+- /dxcp/config/oidc/issuer = https://<tenant>.us.auth0.com/
+- /dxcp/config/oidc/audience = https://dxcp-api
+- /dxcp/config/oidc/jwks_url = https://<tenant>.us.auth0.com/.well-known/jwks.json
+- /dxcp/config/oidc/roles_claim = https://dxcp.example/claims/roles
+- /dxcp/config/ui/auth0_client_id = <client_id>
+
+UI (CloudFront/S3) loads runtime config from /config.json. Example:
+```
+{
+  "apiBase": "https://api.example.com/v1",
+  "auth0": {
+    "domain": "<tenant>.us.auth0.com",
+    "clientId": "<client_id>",
+    "audience": "https://dxcp-api",
+    "rolesClaim": "https://dxcp.example/claims/roles"
+  }
+}
+```
+
+scripts/deploy_aws.sh reads the SSM parameters above to render config.json.
+Set DXCP_CONFIG_PREFIX to override the default (/dxcp/config).
+
 ## Notes
 
 - All protected endpoints require Authorization: Bearer <JWT>.

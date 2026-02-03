@@ -196,8 +196,8 @@ npx cdk bootstrap aws://ACCOUNT_ID/us-east-1
 
 Optional config (examples):
 ```
-export DXCP_API_TOKEN=your-token
 export DXCP_CORS_ORIGINS=https://your-ui-url
+export DXCP_CONFIG_PREFIX=/dxcp/config
 ```
 DXCP does not deploy Spinnaker. Execution engines are external.
 
@@ -208,6 +208,7 @@ cd dxcp
 ```
 
 The script prints a summary block with UI URL, API base, and resource IDs.
+Set OIDC parameters in SSM before first login (see docs/AUTH.md).
 
 Sanity checks:
 ```
