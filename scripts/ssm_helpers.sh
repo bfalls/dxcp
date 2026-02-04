@@ -33,3 +33,8 @@ get_ssm_param() {
   local name="$1"
   aws ssm get-parameter --name "$name" --with-decryption --query "Parameter.Value" --output text
 }
+
+get_ssm_param_type() {
+  local name="$1"
+  aws ssm get-parameter --name "$name" --query "Parameter.Type" --output text
+}

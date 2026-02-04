@@ -93,6 +93,12 @@ ensure_ssm_auth_config() {
   roles_claim="$(get_ssm_param "$roles_key")"
   client_id="$(get_ssm_param "$client_id_key")"
   cors_origins="$(get_ssm_param "$cors_key")"
+  issuer="$(echo "$issuer" | xargs)"
+  audience="$(echo "$audience" | xargs)"
+  jwks_url="$(echo "$jwks_url" | xargs)"
+  roles_claim="$(echo "$roles_claim" | xargs)"
+  client_id="$(echo "$client_id" | xargs)"
+  cors_origins="$(echo "$cors_origins" | xargs)"
 
   if [[ "$VALIDATE_AUTH" -eq 1 ]]; then
     if ! command -v curl >/dev/null 2>&1; then
@@ -132,34 +138,60 @@ ensure_ssm_auth_config() {
 
     echo "Validating issuer metadata..."
     local oidc_config_url="${issuer%/}/.well-known/openid-configuration"
-    local oidc_config
-    if ! oidc_config=$(curl -fsSL "$oidc_config_url"); then
+    local issuer_from_metadata
+    local jwks_from_metadata
+    local oidc_meta_lines
+    if ! oidc_meta_lines=$(python - "$oidc_config_url" <<'PY'
+import json
+import sys
+from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+
+url = sys.argv[1]
+try:
+    with urlopen(url) as resp:
+        status = getattr(resp, "status", 200)
+        payload = resp.read().decode("utf-8")
+except HTTPError as exc:
+    print(f"HTTP error fetching OIDC metadata: {exc.code}", file=sys.stderr)
+    sys.exit(1)
+except URLError as exc:
+    print(f"Network error fetching OIDC metadata: {exc.reason}", file=sys.stderr)
+    sys.exit(1)
+
+if not payload:
+    print("OIDC metadata response was empty.", file=sys.stderr)
+    sys.exit(1)
+try:
+    data = json.loads(payload)
+except json.JSONDecodeError:
+    print("Failed to parse issuer metadata (invalid JSON).", file=sys.stderr)
+    print(payload[:200], file=sys.stderr)
+    sys.exit(1)
+
+print(data.get("issuer", ""))
+print(data.get("jwks_uri", ""))
+PY
+); then
       echo "Failed to fetch openid-configuration from $oidc_config_url" >&2
       echo "Provided issuer: $issuer" >&2
       echo "Check the issuer URL and your network connectivity." >&2
       exit 1
     fi
-
-    local issuer_from_metadata
-    issuer_from_metadata=$(echo "$oidc_config" | python - <<'PY'
-import json, sys
-data = json.loads(sys.stdin.read())
-print(data.get("issuer", ""))
-PY
-)
+    mapfile -t oidc_meta_array < <(printf "%s\n" "$oidc_meta_lines")
+    issuer_from_metadata="$(echo "${oidc_meta_array[0]:-}" | xargs)"
+    jwks_from_metadata="$(echo "${oidc_meta_array[1]:-}" | xargs)"
+    if [[ -z "$issuer_from_metadata" || -z "$jwks_from_metadata" ]]; then
+      echo "OIDC metadata missing issuer or jwks_uri." >&2
+      echo "Provided issuer: $issuer" >&2
+      exit 1
+    fi
     if [[ -n "$issuer_from_metadata" && "$issuer_from_metadata" != "$issuer" && "$issuer_from_metadata/" != "$issuer" ]]; then
       echo "Issuer mismatch. Metadata issuer=$issuer_from_metadata, provided=$issuer" >&2
       echo "Update the issuer value to match metadata." >&2
       exit 1
     fi
 
-    local jwks_from_metadata
-    jwks_from_metadata=$(echo "$oidc_config" | python - <<'PY'
-import json, sys
-data = json.loads(sys.stdin.read())
-print(data.get("jwks_uri", ""))
-PY
-)
     if [[ -n "$jwks_from_metadata" && "$jwks_from_metadata" != "$jwks_url" ]]; then
       echo "JWKS URL mismatch. Metadata jwks_uri=$jwks_from_metadata, provided=$jwks_url" >&2
       echo "Consider using the metadata jwks_uri." >&2

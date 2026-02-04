@@ -6,6 +6,28 @@ source "$ROOT_DIR/scripts/ssm_helpers.sh"
 
 prefix="${DXCP_CONFIG_PREFIX:-${DXCP_SSM_PREFIX:-/dxcp/config}}"
 
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      cat <<'EOF'
+Usage: bootstrap_config.sh [options]
+
+Options:
+  -h, --help          Show this help message.
+
+Environment:
+  DXCP_CONFIG_PREFIX  SSM prefix to use (default: /dxcp/config)
+  DXCP_SSM_PREFIX     Alternate prefix (used if DXCP_CONFIG_PREFIX is unset)
+
+Notes:
+  - Existing parameters are shown unless marked sensitive (SecureString or name matches token/secret/password/key).
+  - The script prompts before overwriting existing parameters.
+EOF
+      exit 0
+      ;;
+  esac
+done
+
 prompt_required() {
   local name="$1"
   local value=""
@@ -30,6 +52,35 @@ prompt_optional() {
     value="$default_value"
   fi
   put_param "$name" "$value"
+}
+
+is_sensitive_param() {
+  local name="$1"
+  if [[ "$name" =~ (token|secret|password|key) ]]; then
+    return 0
+  fi
+  local type
+  type="$(get_ssm_param_type "$name" 2>/dev/null || true)"
+  if [[ "$type" == "SecureString" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+describe_existing_param() {
+  local name="$1"
+  if is_sensitive_param "$name"; then
+    echo "Exists: ${name} (value hidden)"
+    return
+  fi
+  local value
+  value="$(get_ssm_param "$name" 2>/dev/null || true)"
+  if [[ -z "$value" ]]; then
+    echo "Exists: ${name} (value empty)"
+    return
+  fi
+  echo "Exists: ${name}"
+  echo "Current value: ${value}"
 }
 
 maybe_overwrite() {
@@ -79,7 +130,7 @@ main() {
 
   for name in "${required_params[@]}"; do
     if param_exists "$name"; then
-      echo "Exists: ${name}"
+      describe_existing_param "$name"
       maybe_overwrite "$name"
     else
       echo "Missing: ${name}"
@@ -92,7 +143,7 @@ main() {
     name="${optional_params[$i]}"
     default_value="${optional_defaults[$i]}"
     if param_exists "$name"; then
-      echo "Exists: ${name}"
+      describe_existing_param "$name"
       maybe_overwrite "$name"
     else
       prompt_optional "$name" "$default_value"
