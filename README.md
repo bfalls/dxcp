@@ -53,6 +53,7 @@ This repository contains:
   - docs/SERVICES.md
 - API & integrations
   - docs/API_DESIGN.md
+  - docs/OBSERVABILITY.md
   - docs/SPINNAKER.md
   - docs/BACKSTAGE_INTEGRATION.md
 - UI & admin

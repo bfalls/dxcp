@@ -1,5 +1,4 @@
 import hashlib
-import contextvars
 import json
 import logging
 import os
@@ -51,6 +50,8 @@ from artifacts import build_artifact_source, semver_sort_key
 from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
 from spinnaker_adapter.redaction import redact_text
 
+from observability import get_request_id, log_event, request_id_ctx
+
 
 app = FastAPI(title="DXCP API", version="1.0.0")
 app.add_middleware(
@@ -72,11 +73,11 @@ spinnaker = SpinnakerAdapter(
     application=SETTINGS.spinnaker_application,
     header_name=SETTINGS.spinnaker_header_name,
     header_value=SETTINGS.spinnaker_header_value,
+    request_id_provider=get_request_id,
 )
 logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
 artifact_source = None
-request_id_ctx = contextvars.ContextVar("request_id", default="")
 
 logger.info(
     "config.engine loaded engine_url=%s engine_token=%s",
@@ -388,6 +389,17 @@ def _record_audit_event(
 
 def _record_deploy_denied(actor: Actor, intent: DeploymentIntent, code: str, group_id: Optional[str] = None) -> None:
     summary = f"Deploy rejected ({code}) for {intent.service}"
+    log_event(
+        "deploy_intent_denied",
+        actor_id=actor.actor_id,
+        actor_role=actor.role.value,
+        delivery_group_id=group_id,
+        service_name=intent.service,
+        recipe_id=intent.recipeId,
+        environment=intent.environment,
+        outcome="DENIED",
+        summary=summary,
+    )
     _record_audit_event(
         actor,
         "DEPLOY_DENIED",
@@ -433,12 +445,12 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
     operator_hint = None
     if _include_operator_hint(actor) and redacted:
         operator_hint = redacted
-    logger.warning(
-        "engine.error request_id=%s code=%s status=%s hint=%s",
-        request_id_ctx.get(),
-        code,
-        status,
-        redacted or "none",
+    log_event(
+        "engine_error",
+        outcome="FAILED",
+        summary=redacted or "none",
+        error_code=code,
+        status_code=status,
     )
     request_id = request_id_ctx.get() or str(uuid.uuid4())
     payload = {"code": code, "message": user_message, "request_id": request_id}
@@ -895,6 +907,17 @@ def create_deployment(
         service_name=intent.service,
         environment=intent.environment,
     )
+    log_event(
+        "deploy_intent_submitted",
+        actor_id=actor.actor_id,
+        actor_role=actor.role.value,
+        delivery_group_id=group.get("id"),
+        service_name=intent.service,
+        recipe_id=recipe.get("id"),
+        environment=intent.environment,
+        outcome="SUCCESS",
+        summary=f"Deploy submitted for {intent.service}",
+    )
     return record
 
 
@@ -1194,11 +1217,7 @@ def spinnaker_status(request: Request, authorization: Optional[str] = Header(Non
         spinnaker.check_health()
         return {"status": "UP"}
     except Exception as exc:
-        logger.warning(
-            "spinnaker.health_failed request_id=%s error=%s",
-            request_id_ctx.get(),
-            redact_text(str(exc)),
-        )
+        log_event("spinnaker_health_failed", outcome="FAILED", summary=redact_text(str(exc)))
         return {"status": "DOWN", "error": "Spinnaker health check failed"}
 
 
@@ -1298,6 +1317,7 @@ def get_config_sanity(request: Request, authorization: Optional[str] = Header(No
     oidc_ready = bool(SETTINGS.oidc_issuer and SETTINGS.oidc_audience and SETTINGS.oidc_roles_claim)
     jwks_ready = bool(SETTINGS.oidc_jwks_url or SETTINGS.oidc_issuer)
     return {
+        "request_id": request_id_ctx.get(),
         "oidc_configured": bool(oidc_ready and jwks_ready),
         "spinnaker_configured": bool(SETTINGS.spinnaker_base_url),
         "artifact_discovery_configured": bool(SETTINGS.runtime_artifact_bucket),

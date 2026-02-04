@@ -3,7 +3,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -21,6 +21,7 @@ class SpinnakerAdapter:
         request_timeout_seconds: Optional[float] = None,
         header_name: str = "",
         header_value: str = "",
+        request_id_provider: Optional[Callable[[], str]] = None,
     ) -> None:
         self.base_url = base_url
         self.mode = mode
@@ -30,8 +31,10 @@ class SpinnakerAdapter:
         self.request_timeout_seconds = request_timeout_seconds
         self.header_name = header_name.strip() if header_name else ""
         self.header_value = header_value
+        self.request_id_provider = request_id_provider
         self._executions: Dict[str, dict] = {}
         self._logger = logging.getLogger("dxcp.spinnaker")
+        self._obs_logger = logging.getLogger("dxcp.obs")
 
     def trigger_deploy(self, intent: dict, idempotency_key: str) -> dict:
         if self.mode == "stub":
@@ -54,7 +57,7 @@ class SpinnakerAdapter:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/health"
-        response, status_code, _ = self._request_json("GET", url)
+        response, status_code, _ = self._request_json("GET", url, operation="check_health")
         return {"status": "UP" if 200 <= status_code < 300 else "DOWN", "details": response}
 
     def list_applications(self) -> List[dict]:
@@ -64,7 +67,7 @@ class SpinnakerAdapter:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         # Expand application details so tag metadata is included for filtering.
         url = f"{self.base_url.rstrip('/')}/applications?expand=true"
-        payload, _, _ = self._request_json("GET", url)
+        payload, _, _ = self._request_json("GET", url, operation="list_applications")
         if isinstance(payload, list):
             return payload
         return []
@@ -75,7 +78,7 @@ class SpinnakerAdapter:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/applications/{application}/pipelineConfigs"
-        payload, _, _ = self._request_json("GET", url)
+        payload, _, _ = self._request_json("GET", url, operation="list_pipeline_configs")
         if isinstance(payload, list):
             return payload
         return []
@@ -128,7 +131,7 @@ class SpinnakerAdapter:
             trigger["idempotencyKey"] = idempotency_key
 
         url = f"{self.base_url.rstrip('/')}/pipelines/{application}/{pipeline}"
-        response, status_code, headers = self._request_json("POST", url, trigger)
+        response, status_code, headers = self._request_json("POST", url, trigger, operation=f"trigger_{kind}")
         execution_id = self._extract_execution_id(response)
         if not execution_id:
             correlation_id = self._extract_correlation_id(response, headers)
@@ -152,7 +155,7 @@ class SpinnakerAdapter:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/pipelines/{execution_id}"
         try:
-            execution, _, _ = self._request_json("GET", url)
+            execution, _, _ = self._request_json("GET", url, operation="get_execution")
         except RuntimeError as exc:
             if "404" in str(exc):
                 return {"state": "UNKNOWN", "failures": [], "executionUrl": self._execution_url(execution_id)}
@@ -213,16 +216,31 @@ class SpinnakerAdapter:
             return None
         return bucket, key
 
-    def _request_json(self, method: str, url: str, body: Optional[dict] = None) -> tuple[dict, int, dict]:
+    def _request_json(
+        self,
+        method: str,
+        url: str,
+        body: Optional[dict] = None,
+        operation: str = "request",
+    ) -> tuple[dict, int, dict]:
         data = None
         headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
         header_configured = bool(self.header_name and self.header_value)
         if header_configured:
             headers[self.header_name] = self.header_value
+        request_id = self.request_id_provider() if self.request_id_provider else ""
+        if request_id:
+            headers["X-Request-Id"] = request_id
         if body is not None:
             data = json.dumps(body).encode("utf-8")
         request = Request(url, data=data, headers=headers, method=method)
         start = time.monotonic()
+        self._log_spinnaker_event(
+            "spinnaker_call_started",
+            request_id,
+            operation,
+            url,
+        )
         try:
             if self.request_timeout_seconds is None:
                 response_ctx = urlopen(request)
@@ -242,6 +260,16 @@ class SpinnakerAdapter:
             if correlation_id:
                 message = f"{message}; requestId={correlation_id}"
             redacted_message = redact_text(message)
+            self._log_spinnaker_event(
+                "spinnaker_call_failed",
+                request_id,
+                operation,
+                url,
+                outcome="FAILED",
+                duration_ms=round(latency_ms, 1),
+                error=redacted_message,
+                status_code=exc.code,
+            )
             self._logger.warning(
                 "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s error=%s",
                 method,
@@ -254,6 +282,15 @@ class SpinnakerAdapter:
             raise RuntimeError(redacted_message) from exc
         except URLError as exc:
             latency_ms = (time.monotonic() - start) * 1000
+            self._log_spinnaker_event(
+                "spinnaker_call_failed",
+                request_id,
+                operation,
+                url,
+                outcome="FAILED",
+                duration_ms=round(latency_ms, 1),
+                error=redact_text(str(exc.reason)),
+            )
             self._logger.warning(
                 "spinnaker.request method=%s url=%s status=error latency_ms=%.1f custom_header=%s error=%s",
                 method,
@@ -264,6 +301,15 @@ class SpinnakerAdapter:
             )
             raise RuntimeError(redact_text(f"Spinnaker connection failed: {exc.reason}")) from exc
         latency_ms = (time.monotonic() - start) * 1000
+        self._log_spinnaker_event(
+            "spinnaker_call_succeeded",
+            request_id,
+            operation,
+            url,
+            outcome="SUCCESS",
+            duration_ms=round(latency_ms, 1),
+            status_code=status_code,
+        )
         self._logger.info(
             "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s",
             method,
@@ -278,6 +324,35 @@ class SpinnakerAdapter:
             return json.loads(payload), status_code, response_headers
         except json.JSONDecodeError:
             return {}, status_code, response_headers
+
+    def _log_spinnaker_event(
+        self,
+        event: str,
+        request_id: str,
+        operation: str,
+        url: str,
+        outcome: Optional[str] = None,
+        duration_ms: Optional[float] = None,
+        error: Optional[str] = None,
+        status_code: Optional[int] = None,
+    ) -> None:
+        fields = {
+            "event": event,
+            "request_id": request_id or "",
+            "engine": "spinnaker",
+            "operation": operation,
+            "target": redact_url(url),
+        }
+        if outcome:
+            fields["outcome"] = outcome
+        if duration_ms is not None:
+            fields["duration_ms"] = duration_ms
+        if status_code is not None:
+            fields["status_code"] = status_code
+        if error:
+            fields["error"] = redact_text(error)
+        parts = [f"{key}={fields[key]}" for key in sorted(fields.keys())]
+        self._obs_logger.info(" ".join(parts))
 
     @staticmethod
     def _safe_snippet(value: str, limit: int = 240) -> str:
