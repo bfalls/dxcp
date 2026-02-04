@@ -174,6 +174,10 @@ Fields:
 - created_by
 - updated_at
 - updated_by
+- last_change_reason
+
+Notes:
+- Update requests may include change_reason (optional). The API stores the most recent value as last_change_reason.
 
 ### DeliveryGroupGuardrails
 
@@ -197,6 +201,10 @@ Fields:
 - created_by
 - updated_at
 - updated_by
+- last_change_reason
+
+Notes:
+- Update requests may include change_reason (optional). The API stores the most recent value as last_change_reason.
 
 ---
 

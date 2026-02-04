@@ -268,6 +268,7 @@ function buildGroupDraft(group) {
     owner: group?.owner || '',
     services: Array.isArray(group?.services) ? [...group.services] : [],
     allowed_recipes: Array.isArray(group?.allowed_recipes) ? [...group.allowed_recipes] : [],
+    change_reason: '',
     guardrails: {
       max_concurrent_deployments:
         guardrails.max_concurrent_deployments !== undefined && guardrails.max_concurrent_deployments !== null
@@ -294,7 +295,8 @@ function buildRecipeDraft(recipe) {
     spinnaker_application: recipe?.spinnaker_application || '',
     deploy_pipeline: recipe?.deploy_pipeline || '',
     rollback_pipeline: recipe?.rollback_pipeline || '',
-    status: recipe?.status || 'active'
+    status: recipe?.status || 'active',
+    change_reason: ''
   }
 }
 
@@ -990,6 +992,10 @@ export default function App() {
       allowed_recipes: adminGroupDraft.allowed_recipes.slice().sort(),
       guardrails: guardrailsPayload
     }
+    const changeReason = adminGroupDraft.change_reason.trim()
+    if (changeReason) {
+      payload.change_reason = changeReason
+    }
     if (!payload.id) return { error: 'Delivery group id is required.' }
     if (!payload.name) return { error: 'Delivery group name is required.' }
     if (adminServiceConflicts.length > 0) {
@@ -1073,6 +1079,10 @@ export default function App() {
       deploy_pipeline: deployPipeline,
       rollback_pipeline: rollbackPipeline,
       status: adminRecipeDraft.status === 'deprecated' ? 'deprecated' : 'active'
+    }
+    const changeReason = adminRecipeDraft.change_reason.trim()
+    if (changeReason) {
+      payload.change_reason = changeReason
     }
     if (!payload.id) return { error: 'Recipe id is required.' }
     if (!payload.name) return { error: 'Recipe name is required.' }
@@ -2554,6 +2564,10 @@ export default function App() {
                             <div>Last updated</div>
                             <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
                           </div>
+                          <div className="list-item admin-detail">
+                            <div>Last change reason</div>
+                            <div>{activeAdminGroup.last_change_reason || 'None'}</div>
+                          </div>
                         </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Services</div>
                         <div className="list">
@@ -2613,8 +2627,23 @@ export default function App() {
                                 <div>Last updated</div>
                                 <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
                               </div>
+                              <div className="list-item admin-detail">
+                                <div>Last change reason</div>
+                                <div>{activeAdminGroup.last_change_reason || 'None'}</div>
+                              </div>
                             </div>
                           </>
+                        )}
+                        {adminGroupMode === 'edit' && (
+                          <div className="field">
+                            <label htmlFor="admin-group-change-reason">Change reason (optional)</label>
+                            <input
+                              id="admin-group-change-reason"
+                              value={adminGroupDraft.change_reason}
+                              onChange={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
+                              onInput={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
+                            />
+                          </div>
                         )}
                         <div className="field">
                           <label htmlFor="admin-group-id">Group id</label>
@@ -2857,6 +2886,10 @@ export default function App() {
                             <div>Last updated</div>
                             <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
                           </div>
+                          <div className="list-item admin-detail">
+                            <div>Last change reason</div>
+                            <div>{activeAdminRecipe.last_change_reason || 'None'}</div>
+                          </div>
                         </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
                         <div className="list">
@@ -2908,8 +2941,23 @@ export default function App() {
                                 <div>Last updated</div>
                                 <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
                               </div>
+                              <div className="list-item admin-detail">
+                                <div>Last change reason</div>
+                                <div>{activeAdminRecipe.last_change_reason || 'None'}</div>
+                              </div>
                             </div>
                           </>
+                        )}
+                        {adminRecipeMode === 'edit' && (
+                          <div className="field">
+                            <label htmlFor="admin-recipe-change-reason">Change reason (optional)</label>
+                            <input
+                              id="admin-recipe-change-reason"
+                              value={adminRecipeDraft.change_reason}
+                              onChange={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
+                              onInput={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
+                            />
+                          </div>
                         )}
                         <div className="field">
                           <label htmlFor="admin-recipe-id">Recipe id</label>

@@ -264,6 +264,7 @@ def _apply_create_audit(payload: dict, actor: Actor) -> None:
     payload["created_by"] = actor.actor_id
     payload["updated_at"] = now
     payload["updated_by"] = actor.actor_id
+    payload["last_change_reason"] = None
 
 
 def _apply_update_audit(payload: dict, actor: Actor, existing: dict) -> None:
@@ -271,6 +272,12 @@ def _apply_update_audit(payload: dict, actor: Actor, existing: dict) -> None:
     payload["created_by"] = existing.get("created_by")
     payload["updated_at"] = utc_now()
     payload["updated_by"] = actor.actor_id
+    change_reason = payload.pop("change_reason", None)
+    if isinstance(change_reason, str):
+        trimmed = change_reason.strip()
+        payload["last_change_reason"] = trimmed if trimmed else existing.get("last_change_reason")
+    else:
+        payload["last_change_reason"] = existing.get("last_change_reason")
 
 
 def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
@@ -738,6 +745,7 @@ def create_delivery_group(
         return role_error
     rate_limiter.check_mutate(actor.actor_id, "delivery_group_create")
     payload = group.dict()
+    payload.pop("change_reason", None)
     if storage.get_delivery_group(payload["id"]):
         return error_response(409, "DELIVERY_GROUP_EXISTS", "Delivery group id already exists")
     validation_error = _validate_delivery_group_payload(payload, None)
@@ -790,6 +798,7 @@ def create_recipe(
         return role_error
     rate_limiter.check_mutate(actor.actor_id, "recipe_create")
     payload = recipe.dict()
+    payload.pop("change_reason", None)
     validation_error = _validate_recipe_payload(payload)
     if validation_error:
         return validation_error

@@ -79,6 +79,7 @@ Fields:
 - created_by
 - updated_at
 - updated_by
+- last_change_reason (optional)
 
 Notes:
 - Only a small, approved set of recipes exist.
@@ -103,6 +104,7 @@ Fields:
 - created_by
 - updated_at
 - updated_by
+- last_change_reason (optional)
 
 Notes:
 - DeliveryGroups do not change deploy semantics in Phase A.

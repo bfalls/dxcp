@@ -82,6 +82,7 @@ class DeliveryGroup(BaseModel):
     created_by: Optional[str] = None
     updated_at: Optional[str] = None
     updated_by: Optional[str] = None
+    last_change_reason: Optional[str] = None
 
 
 class DeliveryGroupUpsert(BaseModel):
@@ -92,6 +93,7 @@ class DeliveryGroupUpsert(BaseModel):
     services: List[str]
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
+    change_reason: Optional[str] = None
 
 
 class Recipe(BaseModel):
@@ -107,6 +109,7 @@ class Recipe(BaseModel):
     created_by: Optional[str] = None
     updated_at: Optional[str] = None
     updated_by: Optional[str] = None
+    last_change_reason: Optional[str] = None
 
 
 class RecipeUpsert(BaseModel):
@@ -118,6 +121,7 @@ class RecipeUpsert(BaseModel):
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
     status: RecipeStatus = RecipeStatus.ACTIVE
+    change_reason: Optional[str] = None
 
 
 class Actor(BaseModel):

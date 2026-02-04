@@ -215,6 +215,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert created["updated_by"] == "admin-1"
     assert created["created_at"]
     assert created["updated_at"]
+    assert created.get("last_change_reason") in (None, "")
 
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
@@ -230,6 +231,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
                 "deploy_pipeline": "deploy-a",
                 "rollback_pipeline": "rollback-a",
                 "status": "active",
+                "change_reason": "Refine metadata",
             },
         )
     assert response.status_code == 200
@@ -238,3 +240,4 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert updated["updated_by"] == "admin-2"
     assert updated["created_at"] == created["created_at"]
     assert updated["updated_at"] != created["updated_at"]
+    assert updated["last_change_reason"] == "Refine metadata"

@@ -121,6 +121,7 @@ async def test_delivery_group_audit_fields_on_create_and_update(tmp_path: Path, 
     assert created["updated_by"] == "admin-1"
     assert created["created_at"]
     assert created["updated_at"]
+    assert created.get("last_change_reason") in (None, "")
 
     async with _client(tmp_path, monkeypatch) as (client, _):
         update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
@@ -135,6 +136,7 @@ async def test_delivery_group_audit_fields_on_create_and_update(tmp_path: Path, 
                 "services": ["demo-service"],
                 "allowed_recipes": ["default"],
                 "guardrails": None,
+                "change_reason": "Updating audit fields",
             },
         )
     assert response.status_code == 200
@@ -143,3 +145,4 @@ async def test_delivery_group_audit_fields_on_create_and_update(tmp_path: Path, 
     assert updated["updated_by"] == "admin-2"
     assert updated["created_at"] == created["created_at"]
     assert updated["updated_at"] != created["updated_at"]
+    assert updated["last_change_reason"] == "Updating audit fields"

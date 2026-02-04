@@ -153,7 +153,8 @@ class Storage:
                 created_at TEXT,
                 created_by TEXT,
                 updated_at TEXT,
-                updated_by TEXT
+                updated_by TEXT,
+                last_change_reason TEXT
             )
             """
         )
@@ -161,6 +162,7 @@ class Storage:
         self._ensure_column(cur, "delivery_groups", "created_by", "TEXT")
         self._ensure_column(cur, "delivery_groups", "updated_at", "TEXT")
         self._ensure_column(cur, "delivery_groups", "updated_by", "TEXT")
+        self._ensure_column(cur, "delivery_groups", "last_change_reason", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS recipes (
@@ -175,7 +177,8 @@ class Storage:
                 created_at TEXT,
                 created_by TEXT,
                 updated_at TEXT,
-                updated_by TEXT
+                updated_by TEXT,
+                last_change_reason TEXT
             )
             """
         )
@@ -184,6 +187,7 @@ class Storage:
         self._ensure_column(cur, "recipes", "created_by", "TEXT")
         self._ensure_column(cur, "recipes", "updated_at", "TEXT")
         self._ensure_column(cur, "recipes", "updated_by", "TEXT")
+        self._ensure_column(cur, "recipes", "last_change_reason", "TEXT")
         conn.commit()
         conn.close()
 
@@ -287,8 +291,8 @@ class Storage:
             """
             INSERT INTO delivery_groups (
                 id, name, description, owner, services, allowed_recipes, guardrails,
-                created_at, created_by, updated_at, updated_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, created_by, updated_at, updated_by, last_change_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group["id"],
@@ -302,6 +306,7 @@ class Storage:
                 group.get("created_by"),
                 group.get("updated_at"),
                 group.get("updated_by"),
+                group.get("last_change_reason"),
             ),
         )
         conn.commit()
@@ -315,7 +320,7 @@ class Storage:
             """
             UPDATE delivery_groups
             SET name = ?, description = ?, owner = ?, services = ?, allowed_recipes = ?, guardrails = ?,
-                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?
+                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
             """,
             (
@@ -329,6 +334,7 @@ class Storage:
                 group.get("created_by"),
                 group.get("updated_at"),
                 group.get("updated_by"),
+                group.get("last_change_reason"),
                 group["id"],
             ),
         )
@@ -352,8 +358,8 @@ class Storage:
             INSERT INTO recipes (
                 id, name, description, allowed_parameters,
                 spinnaker_application, deploy_pipeline, rollback_pipeline, status,
-                created_at, created_by, updated_at, updated_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, created_by, updated_at, updated_by, last_change_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recipe["id"],
@@ -368,6 +374,7 @@ class Storage:
                 recipe.get("created_by"),
                 recipe.get("updated_at"),
                 recipe.get("updated_by"),
+                recipe.get("last_change_reason"),
             ),
         )
         conn.commit()
@@ -382,7 +389,7 @@ class Storage:
             UPDATE recipes
             SET name = ?, description = ?, allowed_parameters = ?,
                 spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, status = ?,
-                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?
+                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
             """,
             (
@@ -397,6 +404,7 @@ class Storage:
                 recipe.get("created_by"),
                 recipe.get("updated_at"),
                 recipe.get("updated_by"),
+                recipe.get("last_change_reason"),
                 recipe["id"],
             ),
         )
@@ -418,6 +426,7 @@ class Storage:
             "created_by": row["created_by"],
             "updated_at": row["updated_at"],
             "updated_by": row["updated_by"],
+            "last_change_reason": row["last_change_reason"],
         }
 
     def list_recipes(self) -> List[dict]:
@@ -451,6 +460,7 @@ class Storage:
             "created_by": row["created_by"],
             "updated_at": row["updated_at"],
             "updated_by": row["updated_by"],
+            "last_change_reason": row["last_change_reason"],
         }
 
     def list_delivery_groups(self) -> List[dict]:
@@ -914,6 +924,7 @@ class DynamoStorage:
                     "created_by": item.get("created_by"),
                     "updated_at": item.get("updated_at"),
                     "updated_by": item.get("updated_by"),
+                    "last_change_reason": item.get("last_change_reason"),
                 }
             )
         groups.sort(key=lambda g: g.get("name", ""))
@@ -936,6 +947,7 @@ class DynamoStorage:
             "created_by": item.get("created_by"),
             "updated_at": item.get("updated_at"),
             "updated_by": item.get("updated_by"),
+            "last_change_reason": item.get("last_change_reason"),
         }
 
     def get_delivery_group_for_service(self, service_name: str) -> Optional[dict]:
@@ -960,6 +972,7 @@ class DynamoStorage:
             "created_by": group.get("created_by"),
             "updated_at": group.get("updated_at"),
             "updated_by": group.get("updated_by"),
+            "last_change_reason": group.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
         return group
@@ -979,6 +992,7 @@ class DynamoStorage:
             "created_by": group.get("created_by"),
             "updated_at": group.get("updated_at"),
             "updated_by": group.get("updated_by"),
+            "last_change_reason": group.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
         return group
@@ -1010,6 +1024,7 @@ class DynamoStorage:
                     "created_by": item.get("created_by"),
                     "updated_at": item.get("updated_at"),
                     "updated_by": item.get("updated_by"),
+                    "last_change_reason": item.get("last_change_reason"),
                 }
             )
         recipes.sort(key=lambda r: r.get("name", ""))
@@ -1033,6 +1048,7 @@ class DynamoStorage:
             "created_by": item.get("created_by"),
             "updated_at": item.get("updated_at"),
             "updated_by": item.get("updated_by"),
+            "last_change_reason": item.get("last_change_reason"),
         }
 
     def insert_recipe(self, recipe: dict) -> dict:
@@ -1051,6 +1067,7 @@ class DynamoStorage:
             "created_by": recipe.get("created_by"),
             "updated_at": recipe.get("updated_at"),
             "updated_by": recipe.get("updated_by"),
+            "last_change_reason": recipe.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
         return recipe
@@ -1071,6 +1088,7 @@ class DynamoStorage:
             "created_by": recipe.get("created_by"),
             "updated_at": recipe.get("updated_at"),
             "updated_by": recipe.get("updated_by"),
+            "last_change_reason": recipe.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
         return recipe
