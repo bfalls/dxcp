@@ -148,6 +148,7 @@ class Storage:
                 description TEXT,
                 owner TEXT,
                 services TEXT NOT NULL,
+                allowed_environments TEXT,
                 allowed_recipes TEXT NOT NULL,
                 guardrails TEXT,
                 created_at TEXT,
@@ -163,6 +164,7 @@ class Storage:
         self._ensure_column(cur, "delivery_groups", "updated_at", "TEXT")
         self._ensure_column(cur, "delivery_groups", "updated_by", "TEXT")
         self._ensure_column(cur, "delivery_groups", "last_change_reason", "TEXT")
+        self._ensure_column(cur, "delivery_groups", "allowed_environments", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS recipes (
@@ -309,9 +311,9 @@ class Storage:
         cur.execute(
             """
             INSERT INTO delivery_groups (
-                id, name, description, owner, services, allowed_recipes, guardrails,
+                id, name, description, owner, services, allowed_environments, allowed_recipes, guardrails,
                 created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group["id"],
@@ -319,6 +321,7 @@ class Storage:
                 group.get("description"),
                 group.get("owner"),
                 self._serialize_json(group.get("services", [])),
+                self._serialize_json(group.get("allowed_environments")),
                 self._serialize_json(group.get("allowed_recipes", [])),
                 self._serialize_json(group.get("guardrails")),
                 group.get("created_at"),
@@ -338,7 +341,7 @@ class Storage:
         cur.execute(
             """
             UPDATE delivery_groups
-            SET name = ?, description = ?, owner = ?, services = ?, allowed_recipes = ?, guardrails = ?,
+            SET name = ?, description = ?, owner = ?, services = ?, allowed_environments = ?, allowed_recipes = ?, guardrails = ?,
                 created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
             """,
@@ -347,6 +350,7 @@ class Storage:
                 group.get("description"),
                 group.get("owner"),
                 self._serialize_json(group.get("services", [])),
+                self._serialize_json(group.get("allowed_environments")),
                 self._serialize_json(group.get("allowed_recipes", [])),
                 self._serialize_json(group.get("guardrails")),
                 group.get("created_at"),
@@ -534,6 +538,7 @@ class Storage:
             "description": row["description"],
             "owner": row["owner"],
             "services": self._deserialize_json(row["services"], []),
+            "allowed_environments": self._deserialize_json(row["allowed_environments"], None),
             "allowed_recipes": self._deserialize_json(row["allowed_recipes"], []),
             "guardrails": self._deserialize_json(row["guardrails"], None),
             "created_at": row["created_at"],
@@ -579,6 +584,7 @@ class Storage:
             "description": "Default group for allowlisted services",
             "owner": None,
             "services": services,
+            "allowed_environments": None,
             "allowed_recipes": ["default"],
             "guardrails": None,
             "created_at": now,
@@ -998,6 +1004,7 @@ class DynamoStorage:
                     "description": item.get("description"),
                     "owner": item.get("owner"),
                     "services": item.get("services", []),
+                    "allowed_environments": item.get("allowed_environments"),
                     "allowed_recipes": item.get("allowed_recipes", []),
                     "guardrails": item.get("guardrails"),
                     "created_at": item.get("created_at"),
@@ -1021,6 +1028,7 @@ class DynamoStorage:
             "description": item.get("description"),
             "owner": item.get("owner"),
             "services": item.get("services", []),
+            "allowed_environments": item.get("allowed_environments"),
             "allowed_recipes": item.get("allowed_recipes", []),
             "guardrails": item.get("guardrails"),
             "created_at": item.get("created_at"),
@@ -1046,6 +1054,7 @@ class DynamoStorage:
             "description": group.get("description"),
             "owner": group.get("owner"),
             "services": group.get("services", []),
+            "allowed_environments": group.get("allowed_environments"),
             "allowed_recipes": group.get("allowed_recipes", []),
             "guardrails": group.get("guardrails"),
             "created_at": group.get("created_at"),
@@ -1066,6 +1075,7 @@ class DynamoStorage:
             "description": group.get("description"),
             "owner": group.get("owner"),
             "services": group.get("services", []),
+            "allowed_environments": group.get("allowed_environments"),
             "allowed_recipes": group.get("allowed_recipes", []),
             "guardrails": group.get("guardrails"),
             "created_at": group.get("created_at"),
@@ -1230,6 +1240,7 @@ class DynamoStorage:
             "description": "Default group for allowlisted services",
             "owner": None,
             "services": services,
+            "allowed_environments": None,
             "allowed_recipes": ["default"],
             "guardrails": None,
             "created_at": now,

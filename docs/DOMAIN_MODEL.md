@@ -95,6 +95,7 @@ Fields:
 - description (optional): short summary of the group
 - owner (optional): team or user identifier
 - services: list of allowlisted service names
+- allowed_environments (optional): policy allowlist of environments
 - allowed_recipes: list of recipe ids or names (can be empty)
 - guardrails (optional): policy limits scoped to the group
   - max_concurrent_deployments

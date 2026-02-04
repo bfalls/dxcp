@@ -116,6 +116,25 @@ Tradeoff:
 
 ---
 
+## Decision 7: Policy vs capability separation
+
+DeliveryGroup is the policy boundary. Services and recipes define compatibility only.
+
+We do:
+- Enforce DeliveryGroup policy before compatibility checks.
+- Reject policy violations with 403 and a clear policy error code.
+- Reject compatibility failures with 400 and an incompatibility error code.
+
+We do not:
+- Treat service capabilities as permission grants.
+- Allow UI overrides of policy checks.
+
+Tradeoff:
+- Slightly stricter validation ordering
+- Clearer auditability and user feedback
+
+---
+
 ## Reinforced non-goals
 
 - CI system ownership

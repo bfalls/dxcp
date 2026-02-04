@@ -23,6 +23,7 @@ Fields:
 - description (optional)
 - owner (optional)
 - services (list of allowlisted services)
+- allowed_environments (optional)
 - allowed_recipes (list of recipe ids)
 - guardrails:
   - max_concurrent_deployments

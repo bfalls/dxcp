@@ -168,6 +168,7 @@ Fields:
 - description (optional)
 - owner (optional)
 - services (list of allowlisted service names)
+- allowed_environments (optional)
 - allowed_recipes (list of recipe ids or names)
 - guardrails (optional, DeliveryGroupGuardrails)
 - created_at
@@ -371,16 +372,22 @@ Notes:
 - 403 SERVICE_NOT_IN_DELIVERY_GROUP
 - 403 ROLE_FORBIDDEN
 - 403 RECIPE_NOT_ALLOWED
+- 403 ENVIRONMENT_NOT_ALLOWED
 - 404 RECIPE_NOT_FOUND
 - 409 DEPLOYMENT_LOCKED
 - 429 RATE_LIMITED
 - 503 MUTATIONS_DISABLED
+- 400 RECIPE_INCOMPATIBLE
 
 Engine error codes:
 - ENGINE_CALL_FAILED
 - ENGINE_UNAVAILABLE
 - ENGINE_UNAUTHORIZED
 - ENGINE_TIMEOUT
+
+Enforcement order:
+1) DeliveryGroup policy checks (service, environment, recipe) -> 403
+2) Service/recipe compatibility checks -> 400
 
 ---
 

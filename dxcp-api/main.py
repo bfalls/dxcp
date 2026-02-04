@@ -147,18 +147,32 @@ def can_view(actor: Actor) -> bool:
     return actor.role in {Role.OBSERVER, Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
 
 
-def resolve_delivery_group(service: str):
+def _policy_denied(code: str, detail: str, actor: Optional[Actor] = None) -> JSONResponse:
+    operator_hint = None
+    if actor and _include_operator_hint(actor):
+        operator_hint = redact_text(detail)
+    return error_response(403, code, "Action not permitted by DeliveryGroup policy", operator_hint=operator_hint)
+
+
+def _capability_error(code: str, detail: str, actor: Optional[Actor] = None) -> JSONResponse:
+    operator_hint = None
+    if actor and _include_operator_hint(actor):
+        operator_hint = redact_text(detail)
+    return error_response(400, code, "Service or recipe is incompatible with this request", operator_hint=operator_hint)
+
+
+def resolve_delivery_group(service: str, actor: Optional[Actor] = None):
     group = storage.get_delivery_group_for_service(service)
     if not group:
-        return None, error_response(
-            403,
+        return None, _policy_denied(
             "SERVICE_NOT_IN_DELIVERY_GROUP",
             f"Service {service} is not assigned to a delivery group",
+            actor,
         )
     return group, None
 
 
-def resolve_recipe(recipe_id: Optional[str], group: dict):
+def resolve_recipe(recipe_id: Optional[str], actor: Optional[Actor] = None):
     if not recipe_id:
         return None, error_response(400, "RECIPE_ID_REQUIRED", "recipeId is required")
     resolved_id = recipe_id
@@ -166,15 +180,45 @@ def resolve_recipe(recipe_id: Optional[str], group: dict):
     if not recipe:
         return None, error_response(404, "RECIPE_NOT_FOUND", f"Recipe {resolved_id} not found")
     if recipe.get("status") == "deprecated":
-        return None, error_response(403, "RECIPE_DEPRECATED", f"Recipe {resolved_id} is deprecated")
-    allowed = group.get("allowed_recipes", [])
-    if resolved_id not in allowed:
-        return None, error_response(
-            403,
-            "RECIPE_NOT_ALLOWED",
-            f"Recipe {resolved_id} not allowed for delivery group {group.get('id')}",
-        )
+        return None, _policy_denied("RECIPE_DEPRECATED", f"Recipe {resolved_id} is deprecated", actor)
     return recipe, None
+
+
+def _policy_check_environment(group: dict, environment: str, actor: Optional[Actor] = None) -> Optional[JSONResponse]:
+    allowed = group.get("allowed_environments")
+    if allowed is None:
+        return None
+    if environment not in allowed:
+        return _policy_denied(
+            "ENVIRONMENT_NOT_ALLOWED",
+            f"Environment {environment} not allowed for delivery group {group.get('id')}",
+            actor,
+        )
+    return None
+
+
+def _policy_check_recipe_allowed(group: dict, recipe_id: str, actor: Optional[Actor] = None) -> Optional[JSONResponse]:
+    allowed = group.get("allowed_recipes", [])
+    if recipe_id not in allowed:
+        return _policy_denied(
+            "RECIPE_NOT_ALLOWED",
+            f"Recipe {recipe_id} not allowed for delivery group {group.get('id')}",
+            actor,
+        )
+    return None
+
+
+def _capability_check_recipe_service(service_entry: dict, recipe_id: str, actor: Optional[Actor] = None) -> Optional[JSONResponse]:
+    allowed = service_entry.get("allowed_recipes")
+    if not isinstance(allowed, list):
+        allowed = []
+    if not allowed or recipe_id not in allowed:
+        return _capability_error(
+            "RECIPE_INCOMPATIBLE",
+            f"Recipe {recipe_id} not allowed for service {service_entry.get('service_name')}",
+            actor,
+        )
+    return None
 
 
 def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
@@ -259,8 +303,15 @@ def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None
         return error_response(400, "MISSING_NAME", "Delivery group name is required")
     services = group.get("services") or []
     recipes = group.get("allowed_recipes") or []
+    allowed_envs = group.get("allowed_environments")
     if not isinstance(services, list):
         return error_response(400, "INVALID_SERVICES", "services must be a list")
+    if allowed_envs is not None:
+        if not isinstance(allowed_envs, list):
+            return error_response(400, "INVALID_ENVIRONMENTS", "allowed_environments must be a list")
+        for env in allowed_envs:
+            if not isinstance(env, str) or not env.strip():
+                return error_response(400, "INVALID_ENVIRONMENTS", "allowed_environments must be a list of strings")
     if not isinstance(recipes, list):
         return error_response(400, "INVALID_RECIPES", "allowed_recipes must be a list")
     allowlisted_services = {entry.get("service_name") for entry in storage.list_services()}
@@ -734,20 +785,34 @@ def create_deployment(
     try:
         guardrails.require_mutations_enabled()
         guardrails.require_idempotency_key(idempotency_key)
+    except PolicyError as exc:
+        _record_deploy_denied(actor, intent, exc.code)
+        raise
+    group, group_error = resolve_delivery_group(intent.service, actor)
+    if group_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(group_error))
+        return group_error
+    policy_env_error = _policy_check_environment(group, intent.environment, actor)
+    if policy_env_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(policy_env_error), group.get("id"))
+        return policy_env_error
+    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
+    if recipe_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(recipe_error), group.get("id"))
+        return recipe_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    if policy_recipe_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(policy_recipe_error), group.get("id"))
+        return policy_recipe_error
+    try:
         service_entry = guardrails.validate_service(intent.service)
         guardrails.validate_environment(intent.environment, service_entry)
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
-        _record_deploy_denied(actor, intent, exc.code)
-        raise
-    group, group_error = resolve_delivery_group(intent.service)
-    if group_error:
-        _record_deploy_denied(actor, intent, _error_code_from_response(group_error))
-        return group_error
-    recipe, recipe_error = resolve_recipe(intent.recipeId, group)
-    if recipe_error:
-        _record_deploy_denied(actor, intent, _error_code_from_response(recipe_error), group.get("id"))
-        return recipe_error
+        return _capability_error(exc.code, exc.message, actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    if recipe_capability_error:
+        return recipe_capability_error
     max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
     daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
     try:
@@ -926,6 +991,8 @@ def update_delivery_group(
     if not existing:
         return error_response(404, "NOT_FOUND", "Delivery group not found")
     payload["id"] = group_id
+    if payload.get("allowed_environments") is None:
+        payload["allowed_environments"] = existing.get("allowed_environments")
     validation_error = _validate_delivery_group_payload(payload, group_id)
     if validation_error:
         return validation_error
@@ -1395,11 +1462,24 @@ def rollback_deployment(
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
 
-    service_entry = guardrails.validate_service(deployment["service"])
-    guardrails.validate_environment(deployment["environment"], service_entry)
-    group, group_error = resolve_delivery_group(deployment["service"])
+    group, group_error = resolve_delivery_group(deployment["service"], actor)
     if group_error:
         return group_error
+    policy_env_error = _policy_check_environment(group, deployment["environment"], actor)
+    if policy_env_error:
+        return policy_env_error
+    recipe_id = deployment.get("recipeId") or "default"
+    policy_recipe_error = _policy_check_recipe_allowed(group, recipe_id, actor)
+    if policy_recipe_error:
+        return policy_recipe_error
+    try:
+        service_entry = guardrails.validate_service(deployment["service"])
+        guardrails.validate_environment(deployment["environment"], service_entry)
+    except PolicyError as exc:
+        return _capability_error(exc.code, exc.message, actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe_id, actor)
+    if recipe_capability_error:
+        return recipe_capability_error
     max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
     daily_rollback_quota = _group_guardrail_value(group, "daily_rollback_quota", SETTINGS.daily_quota_rollback)
     rate_limiter.check_mutate(actor.actor_id, "rollback", quota_scope=group["id"], quota_limit=daily_rollback_quota)

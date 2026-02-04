@@ -76,6 +76,7 @@ class DeliveryGroup(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
+    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     created_at: Optional[str] = None
@@ -91,6 +92,7 @@ class DeliveryGroupUpsert(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
+    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     change_reason: Optional[str] = None
