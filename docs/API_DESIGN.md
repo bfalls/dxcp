@@ -170,6 +170,10 @@ Fields:
 - services (list of allowlisted service names)
 - allowed_recipes (list of recipe ids or names)
 - guardrails (optional, DeliveryGroupGuardrails)
+- created_at
+- created_by
+- updated_at
+- updated_by
 
 ### DeliveryGroupGuardrails
 
@@ -188,6 +192,11 @@ Fields:
 - spinnaker_application
 - deploy_pipeline
 - rollback_pipeline
+- status
+- created_at
+- created_by
+- updated_at
+- updated_by
 
 ---
 

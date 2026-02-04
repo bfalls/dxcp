@@ -78,6 +78,10 @@ class DeliveryGroup(BaseModel):
     services: List[str]
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
+    created_at: Optional[str] = None
+    created_by: Optional[str] = None
+    updated_at: Optional[str] = None
+    updated_by: Optional[str] = None
 
 
 class DeliveryGroupUpsert(BaseModel):
@@ -99,6 +103,10 @@ class Recipe(BaseModel):
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
     status: RecipeStatus = RecipeStatus.ACTIVE
+    created_at: Optional[str] = None
+    created_by: Optional[str] = None
+    updated_at: Optional[str] = None
+    updated_by: Optional[str] = None
 
 
 class RecipeUpsert(BaseModel):

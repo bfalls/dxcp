@@ -298,6 +298,12 @@ function buildRecipeDraft(recipe) {
   }
 }
 
+function formatAuditValue(by, at) {
+  const who = by || 'Unknown'
+  const when = at || 'Unknown'
+  return `${who} at ${when}`
+}
+
 function parseAllowedParameters(value) {
   if (!value) return []
   const parts = String(value)
@@ -2538,6 +2544,17 @@ export default function App() {
                             <div>{activeAdminGroup.description || 'No description'}</div>
                           </div>
                         </div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
+                        <div className="list">
+                          <div className="list-item admin-detail">
+                            <div>Created</div>
+                            <div>{formatAuditValue(activeAdminGroup.created_by, activeAdminGroup.created_at)}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Last updated</div>
+                            <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
+                          </div>
+                        </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Services</div>
                         <div className="list">
                           {(activeAdminGroup.services || []).length === 0 && <div className="helper">No services assigned.</div>}
@@ -2584,6 +2601,21 @@ export default function App() {
                     {(adminGroupMode === 'create' || adminGroupMode === 'edit') && (
                       <>
                         <h2>{adminGroupMode === 'create' ? 'Create delivery group' : 'Edit delivery group'}</h2>
+                        {adminGroupMode === 'edit' && activeAdminGroup && (
+                          <>
+                            <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
+                            <div className="list" style={{ marginTop: '12px' }}>
+                              <div className="list-item admin-detail">
+                                <div>Created</div>
+                                <div>{formatAuditValue(activeAdminGroup.created_by, activeAdminGroup.created_at)}</div>
+                              </div>
+                              <div className="list-item admin-detail">
+                                <div>Last updated</div>
+                                <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
+                              </div>
+                            </div>
+                          </>
+                        )}
                         <div className="field">
                           <label htmlFor="admin-group-id">Group id</label>
                           <input
@@ -2815,6 +2847,17 @@ export default function App() {
                             <div>{activeAdminRecipeUsage} delivery groups</div>
                           </div>
                         </div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
+                        <div className="list">
+                          <div className="list-item admin-detail">
+                            <div>Created</div>
+                            <div>{formatAuditValue(activeAdminRecipe.created_by, activeAdminRecipe.created_at)}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Last updated</div>
+                            <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
+                          </div>
+                        </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
                         <div className="list">
                           <div className="list-item admin-detail">
@@ -2853,6 +2896,21 @@ export default function App() {
                     {(adminRecipeMode === 'create' || adminRecipeMode === 'edit') && (
                       <>
                         <h2>{adminRecipeMode === 'create' ? 'Create recipe' : 'Edit recipe'}</h2>
+                        {adminRecipeMode === 'edit' && activeAdminRecipe && (
+                          <>
+                            <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
+                            <div className="list" style={{ marginTop: '12px' }}>
+                              <div className="list-item admin-detail">
+                                <div>Created</div>
+                                <div>{formatAuditValue(activeAdminRecipe.created_by, activeAdminRecipe.created_at)}</div>
+                              </div>
+                              <div className="list-item admin-detail">
+                                <div>Last updated</div>
+                                <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
+                              </div>
+                            </div>
+                          </>
+                        )}
                         <div className="field">
                           <label htmlFor="admin-recipe-id">Recipe id</label>
                           <input

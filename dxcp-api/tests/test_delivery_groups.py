@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header, build_token, configure_auth_env, mock_jwks
 
 
 def _write_service_registry(path: Path) -> None:
@@ -54,11 +54,11 @@ async def _client(tmp_path: Path, monkeypatch):
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://testserver",
     ) as client:
-        yield client
+        yield client, main
 
 
 async def test_delivery_groups_list_returns_default(tmp_path: Path, monkeypatch):
-    async with _client(tmp_path, monkeypatch) as client:
+    async with _client(tmp_path, monkeypatch) as (client, _):
         response = await client.get(
             "/v1/delivery-groups",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -73,7 +73,7 @@ async def test_delivery_groups_list_returns_default(tmp_path: Path, monkeypatch)
 
 
 async def test_delivery_groups_get_by_id(tmp_path: Path, monkeypatch):
-    async with _client(tmp_path, monkeypatch) as client:
+    async with _client(tmp_path, monkeypatch) as (client, _):
         response = await client.get(
             "/v1/delivery-groups/default",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -85,7 +85,7 @@ async def test_delivery_groups_get_by_id(tmp_path: Path, monkeypatch):
 
 
 async def test_delivery_groups_unknown_returns_404(tmp_path: Path, monkeypatch):
-    async with _client(tmp_path, monkeypatch) as client:
+    async with _client(tmp_path, monkeypatch) as (client, _):
         response = await client.get(
             "/v1/delivery-groups/unknown",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -93,3 +93,53 @@ async def test_delivery_groups_unknown_returns_404(tmp_path: Path, monkeypatch):
     assert response.status_code == 404
     body = response.json()
     assert body["code"] == "NOT_FOUND"
+
+
+async def test_delivery_group_audit_fields_on_create_and_update(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch) as (client, main):
+        default_group = main.storage.get_delivery_group("default")
+        if default_group:
+            default_group["services"] = []
+            main.storage.update_delivery_group(default_group)
+        create_token = build_token(["dxcp-platform-admins"], subject="admin-1")
+        response = await client.post(
+            "/v1/delivery-groups",
+            headers={"Authorization": f"Bearer {create_token}"},
+            json={
+                "id": "audit-group",
+                "name": "Audit Group",
+                "description": "Audit test",
+                "owner": "team-1",
+                "services": ["demo-service"],
+                "allowed_recipes": ["default"],
+                "guardrails": None,
+            },
+        )
+    assert response.status_code == 201
+    created = response.json()
+    assert created["created_by"] == "admin-1"
+    assert created["updated_by"] == "admin-1"
+    assert created["created_at"]
+    assert created["updated_at"]
+
+    async with _client(tmp_path, monkeypatch) as (client, _):
+        update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
+        response = await client.put(
+            "/v1/delivery-groups/audit-group",
+            headers={"Authorization": f"Bearer {update_token}"},
+            json={
+                "id": "audit-group",
+                "name": "Audit Group Updated",
+                "description": "Audit test",
+                "owner": "team-1",
+                "services": ["demo-service"],
+                "allowed_recipes": ["default"],
+                "guardrails": None,
+            },
+        )
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["created_by"] == "admin-1"
+    assert updated["updated_by"] == "admin-2"
+    assert updated["created_at"] == created["created_at"]
+    assert updated["updated_at"] != created["updated_at"]

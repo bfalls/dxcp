@@ -149,10 +149,18 @@ class Storage:
                 owner TEXT,
                 services TEXT NOT NULL,
                 allowed_recipes TEXT NOT NULL,
-                guardrails TEXT
+                guardrails TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                updated_at TEXT,
+                updated_by TEXT
             )
             """
         )
+        self._ensure_column(cur, "delivery_groups", "created_at", "TEXT")
+        self._ensure_column(cur, "delivery_groups", "created_by", "TEXT")
+        self._ensure_column(cur, "delivery_groups", "updated_at", "TEXT")
+        self._ensure_column(cur, "delivery_groups", "updated_by", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS recipes (
@@ -163,11 +171,19 @@ class Storage:
                 spinnaker_application TEXT,
                 deploy_pipeline TEXT,
                 rollback_pipeline TEXT,
-                status TEXT
+                status TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                updated_at TEXT,
+                updated_by TEXT
             )
             """
         )
         self._ensure_column(cur, "recipes", "status", "TEXT")
+        self._ensure_column(cur, "recipes", "created_at", "TEXT")
+        self._ensure_column(cur, "recipes", "created_by", "TEXT")
+        self._ensure_column(cur, "recipes", "updated_at", "TEXT")
+        self._ensure_column(cur, "recipes", "updated_by", "TEXT")
         conn.commit()
         conn.close()
 
@@ -270,8 +286,9 @@ class Storage:
         cur.execute(
             """
             INSERT INTO delivery_groups (
-                id, name, description, owner, services, allowed_recipes, guardrails
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, name, description, owner, services, allowed_recipes, guardrails,
+                created_at, created_by, updated_at, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group["id"],
@@ -281,6 +298,10 @@ class Storage:
                 self._serialize_json(group.get("services", [])),
                 self._serialize_json(group.get("allowed_recipes", [])),
                 self._serialize_json(group.get("guardrails")),
+                group.get("created_at"),
+                group.get("created_by"),
+                group.get("updated_at"),
+                group.get("updated_by"),
             ),
         )
         conn.commit()
@@ -293,7 +314,8 @@ class Storage:
         cur.execute(
             """
             UPDATE delivery_groups
-            SET name = ?, description = ?, owner = ?, services = ?, allowed_recipes = ?, guardrails = ?
+            SET name = ?, description = ?, owner = ?, services = ?, allowed_recipes = ?, guardrails = ?,
+                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?
             WHERE id = ?
             """,
             (
@@ -303,6 +325,10 @@ class Storage:
                 self._serialize_json(group.get("services", [])),
                 self._serialize_json(group.get("allowed_recipes", [])),
                 self._serialize_json(group.get("guardrails")),
+                group.get("created_at"),
+                group.get("created_by"),
+                group.get("updated_at"),
+                group.get("updated_by"),
                 group["id"],
             ),
         )
@@ -325,8 +351,9 @@ class Storage:
             """
             INSERT INTO recipes (
                 id, name, description, allowed_parameters,
-                spinnaker_application, deploy_pipeline, rollback_pipeline, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                spinnaker_application, deploy_pipeline, rollback_pipeline, status,
+                created_at, created_by, updated_at, updated_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recipe["id"],
@@ -337,6 +364,10 @@ class Storage:
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
                 recipe.get("status", "active"),
+                recipe.get("created_at"),
+                recipe.get("created_by"),
+                recipe.get("updated_at"),
+                recipe.get("updated_by"),
             ),
         )
         conn.commit()
@@ -350,7 +381,8 @@ class Storage:
             """
             UPDATE recipes
             SET name = ?, description = ?, allowed_parameters = ?,
-                spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, status = ?
+                spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, status = ?,
+                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?
             WHERE id = ?
             """,
             (
@@ -361,6 +393,10 @@ class Storage:
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
                 recipe.get("status", "active"),
+                recipe.get("created_at"),
+                recipe.get("created_by"),
+                recipe.get("updated_at"),
+                recipe.get("updated_by"),
                 recipe["id"],
             ),
         )
@@ -378,6 +414,10 @@ class Storage:
             "deploy_pipeline": row["deploy_pipeline"],
             "rollback_pipeline": row["rollback_pipeline"],
             "status": row["status"] or "active",
+            "created_at": row["created_at"],
+            "created_by": row["created_by"],
+            "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"],
         }
 
     def list_recipes(self) -> List[dict]:
@@ -407,6 +447,10 @@ class Storage:
             "services": self._deserialize_json(row["services"], []),
             "allowed_recipes": self._deserialize_json(row["allowed_recipes"], []),
             "guardrails": self._deserialize_json(row["guardrails"], None),
+            "created_at": row["created_at"],
+            "created_by": row["created_by"],
+            "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"],
         }
 
     def list_delivery_groups(self) -> List[dict]:
@@ -437,6 +481,7 @@ class Storage:
     def ensure_default_delivery_group(self) -> Optional[dict]:
         if self._has_delivery_groups():
             return None
+        now = utc_now()
         services = [entry["service_name"] for entry in self.list_services() if entry.get("service_name")]
         group = {
             "id": "default",
@@ -446,12 +491,17 @@ class Storage:
             "services": services,
             "allowed_recipes": ["default"],
             "guardrails": None,
+            "created_at": now,
+            "created_by": "system",
+            "updated_at": now,
+            "updated_by": "system",
         }
         return self.insert_delivery_group(group)
 
     def ensure_default_recipe(self) -> Optional[dict]:
         if self._has_recipes():
             return None
+        now = utc_now()
         recipe = {
             "id": "default",
             "name": "Default Deploy",
@@ -461,6 +511,10 @@ class Storage:
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
             "status": "active",
+            "created_at": now,
+            "created_by": "system",
+            "updated_at": now,
+            "updated_by": "system",
         }
         return self.insert_recipe(recipe)
 
@@ -856,6 +910,10 @@ class DynamoStorage:
                     "services": item.get("services", []),
                     "allowed_recipes": item.get("allowed_recipes", []),
                     "guardrails": item.get("guardrails"),
+                    "created_at": item.get("created_at"),
+                    "created_by": item.get("created_by"),
+                    "updated_at": item.get("updated_at"),
+                    "updated_by": item.get("updated_by"),
                 }
             )
         groups.sort(key=lambda g: g.get("name", ""))
@@ -874,6 +932,10 @@ class DynamoStorage:
             "services": item.get("services", []),
             "allowed_recipes": item.get("allowed_recipes", []),
             "guardrails": item.get("guardrails"),
+            "created_at": item.get("created_at"),
+            "created_by": item.get("created_by"),
+            "updated_at": item.get("updated_at"),
+            "updated_by": item.get("updated_by"),
         }
 
     def get_delivery_group_for_service(self, service_name: str) -> Optional[dict]:
@@ -894,6 +956,10 @@ class DynamoStorage:
             "services": group.get("services", []),
             "allowed_recipes": group.get("allowed_recipes", []),
             "guardrails": group.get("guardrails"),
+            "created_at": group.get("created_at"),
+            "created_by": group.get("created_by"),
+            "updated_at": group.get("updated_at"),
+            "updated_by": group.get("updated_by"),
         }
         self.table.put_item(Item=item)
         return group
@@ -909,6 +975,10 @@ class DynamoStorage:
             "services": group.get("services", []),
             "allowed_recipes": group.get("allowed_recipes", []),
             "guardrails": group.get("guardrails"),
+            "created_at": group.get("created_at"),
+            "created_by": group.get("created_by"),
+            "updated_at": group.get("updated_at"),
+            "updated_by": group.get("updated_by"),
         }
         self.table.put_item(Item=item)
         return group
@@ -936,6 +1006,10 @@ class DynamoStorage:
                     "deploy_pipeline": item.get("deploy_pipeline"),
                     "rollback_pipeline": item.get("rollback_pipeline"),
                     "status": item.get("status") or "active",
+                    "created_at": item.get("created_at"),
+                    "created_by": item.get("created_by"),
+                    "updated_at": item.get("updated_at"),
+                    "updated_by": item.get("updated_by"),
                 }
             )
         recipes.sort(key=lambda r: r.get("name", ""))
@@ -955,6 +1029,10 @@ class DynamoStorage:
             "deploy_pipeline": item.get("deploy_pipeline"),
             "rollback_pipeline": item.get("rollback_pipeline"),
             "status": item.get("status") or "active",
+            "created_at": item.get("created_at"),
+            "created_by": item.get("created_by"),
+            "updated_at": item.get("updated_at"),
+            "updated_by": item.get("updated_by"),
         }
 
     def insert_recipe(self, recipe: dict) -> dict:
@@ -969,6 +1047,10 @@ class DynamoStorage:
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
             "status": recipe.get("status", "active"),
+            "created_at": recipe.get("created_at"),
+            "created_by": recipe.get("created_by"),
+            "updated_at": recipe.get("updated_at"),
+            "updated_by": recipe.get("updated_by"),
         }
         self.table.put_item(Item=item)
         return recipe
@@ -985,6 +1067,10 @@ class DynamoStorage:
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
             "status": recipe.get("status", "active"),
+            "created_at": recipe.get("created_at"),
+            "created_by": recipe.get("created_by"),
+            "updated_at": recipe.get("updated_at"),
+            "updated_by": recipe.get("updated_by"),
         }
         self.table.put_item(Item=item)
         return recipe
@@ -993,6 +1079,7 @@ class DynamoStorage:
         existing = self._scan_delivery_groups(limit=1)
         if existing:
             return None
+        now = utc_now()
         services = [entry["service_name"] for entry in self.list_services() if entry.get("service_name")]
         group = {
             "id": "default",
@@ -1002,6 +1089,10 @@ class DynamoStorage:
             "services": services,
             "allowed_recipes": ["default"],
             "guardrails": None,
+            "created_at": now,
+            "created_by": "system",
+            "updated_at": now,
+            "updated_by": "system",
         }
         return self.insert_delivery_group(group)
 
@@ -1009,6 +1100,7 @@ class DynamoStorage:
         existing = self._scan_recipes(limit=1)
         if existing:
             return None
+        now = utc_now()
         recipe = {
             "id": "default",
             "name": "Default Deploy",
@@ -1018,6 +1110,10 @@ class DynamoStorage:
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
             "status": "active",
+            "created_at": now,
+            "created_by": "system",
+            "updated_at": now,
+            "updated_by": "system",
         }
         return self.insert_recipe(recipe)
 

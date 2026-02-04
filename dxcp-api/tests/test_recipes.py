@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header, build_token, configure_auth_env, mock_jwks
 
 
 pytestmark = pytest.mark.anyio
@@ -73,7 +73,8 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
-    if not main.storage.get_delivery_group("default"):
+    default_group = main.storage.get_delivery_group("default")
+    if not default_group:
         main.storage.insert_delivery_group(
             {
                 "id": "default",
@@ -85,41 +86,49 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
                 "guardrails": None,
             }
         )
-    main.storage.insert_recipe(
-        {
-            "id": "extra",
-            "name": "Extra Recipe",
-            "description": "Extra recipe for tests",
-            "allowed_parameters": [],
-            "spinnaker_application": None,
-            "deploy_pipeline": "demo-deploy",
-            "rollback_pipeline": "rollback-demo-service",
-            "status": "active",
-        }
-    )
-    main.storage.insert_recipe(
-        {
-            "id": "deprecated",
-            "name": "Deprecated Recipe",
-            "description": "Deprecated recipe for tests",
-            "allowed_parameters": [],
-            "spinnaker_application": None,
-            "deploy_pipeline": "demo-deploy",
-            "rollback_pipeline": "rollback-demo-service",
-            "status": "deprecated",
-        }
-    )
-    main.storage.update_delivery_group(
-        {
-            "id": "default",
-            "name": "Default Delivery Group",
-            "description": "Default group for allowlisted services",
-            "owner": None,
-            "services": ["demo-service"],
-            "allowed_recipes": ["default", "deprecated"],
-            "guardrails": None,
-        }
-    )
+    extra_recipe = {
+        "id": "extra",
+        "name": "Extra Recipe",
+        "description": "Extra recipe for tests",
+        "allowed_parameters": [],
+        "spinnaker_application": None,
+        "deploy_pipeline": "demo-deploy",
+        "rollback_pipeline": "rollback-demo-service",
+        "status": "active",
+    }
+    if main.storage.get_recipe("extra"):
+        main.storage.update_recipe(extra_recipe)
+    else:
+        main.storage.insert_recipe(extra_recipe)
+    deprecated_recipe = {
+        "id": "deprecated",
+        "name": "Deprecated Recipe",
+        "description": "Deprecated recipe for tests",
+        "allowed_parameters": [],
+        "spinnaker_application": None,
+        "deploy_pipeline": "demo-deploy",
+        "rollback_pipeline": "rollback-demo-service",
+        "status": "deprecated",
+    }
+    if main.storage.get_recipe("deprecated"):
+        main.storage.update_recipe(deprecated_recipe)
+    else:
+        main.storage.insert_recipe(deprecated_recipe)
+    updated_default = main.storage.get_delivery_group("default") or {
+        "id": "default",
+        "name": "Default Delivery Group",
+        "description": "Default group for allowlisted services",
+        "owner": None,
+        "services": ["demo-service"],
+        "allowed_recipes": ["default"],
+        "guardrails": None,
+    }
+    updated_default["services"] = ["demo-service"]
+    updated_default["allowed_recipes"] = ["default", "deprecated"]
+    if hasattr(main.storage, "update_delivery_group"):
+        main.storage.update_delivery_group(updated_default)
+    else:
+        main.storage.insert_delivery_group(updated_default)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://testserver",
@@ -181,3 +190,51 @@ async def test_deploy_rejects_deprecated_recipe(tmp_path: Path, monkeypatch):
         )
     assert response.status_code == 403
     assert response.json()["code"] == "RECIPE_DEPRECATED"
+
+
+async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        create_token = build_token(["dxcp-platform-admins"], subject="admin-1")
+        response = await client.post(
+            "/v1/recipes",
+            headers={"Authorization": f"Bearer {create_token}"},
+            json={
+                "id": "audit-recipe",
+                "name": "Audit Recipe",
+                "description": "Audit test",
+                "allowed_parameters": [],
+                "spinnaker_application": "app-a",
+                "deploy_pipeline": "deploy-a",
+                "rollback_pipeline": "rollback-a",
+                "status": "active",
+            },
+        )
+    assert response.status_code == 200
+    created = response.json()
+    assert created["created_by"] == "admin-1"
+    assert created["updated_by"] == "admin-1"
+    assert created["created_at"]
+    assert created["updated_at"]
+
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
+        response = await client.put(
+            "/v1/recipes/audit-recipe",
+            headers={"Authorization": f"Bearer {update_token}"},
+            json={
+                "id": "audit-recipe",
+                "name": "Audit Recipe Updated",
+                "description": "Audit test",
+                "allowed_parameters": [],
+                "spinnaker_application": "app-a",
+                "deploy_pipeline": "deploy-a",
+                "rollback_pipeline": "rollback-a",
+                "status": "active",
+            },
+        )
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["created_by"] == "admin-1"
+    assert updated["updated_by"] == "admin-2"
+    assert updated["created_at"] == created["created_at"]
+    assert updated["updated_at"] != created["updated_at"]

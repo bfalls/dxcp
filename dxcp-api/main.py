@@ -258,6 +258,21 @@ def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None
     return None
 
 
+def _apply_create_audit(payload: dict, actor: Actor) -> None:
+    now = utc_now()
+    payload["created_at"] = now
+    payload["created_by"] = actor.actor_id
+    payload["updated_at"] = now
+    payload["updated_by"] = actor.actor_id
+
+
+def _apply_update_audit(payload: dict, actor: Actor, existing: dict) -> None:
+    payload["created_at"] = existing.get("created_at")
+    payload["created_by"] = existing.get("created_by")
+    payload["updated_at"] = utc_now()
+    payload["updated_by"] = actor.actor_id
+
+
 def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
     if not payload.get("id"):
         return error_response(400, "RECIPE_ID_REQUIRED", "Recipe id is required")
@@ -728,6 +743,7 @@ def create_delivery_group(
     validation_error = _validate_delivery_group_payload(payload, None)
     if validation_error:
         return validation_error
+    _apply_create_audit(payload, actor)
     storage.insert_delivery_group(payload)
     return DeliveryGroup(**payload).dict()
 
@@ -754,6 +770,7 @@ def update_delivery_group(
     validation_error = _validate_delivery_group_payload(payload, group_id)
     if validation_error:
         return validation_error
+    _apply_update_audit(payload, actor, existing)
     if hasattr(storage, "update_delivery_group"):
         storage.update_delivery_group(payload)
     else:
@@ -778,6 +795,7 @@ def create_recipe(
         return validation_error
     if storage.get_recipe(payload["id"]):
         return error_response(409, "RECIPE_EXISTS", "Recipe already exists")
+    _apply_create_audit(payload, actor)
     storage.insert_recipe(payload)
     return Recipe(**payload).dict()
 
@@ -798,9 +816,11 @@ def update_recipe(
     validation_error = _validate_recipe_payload(payload, recipe_id)
     if validation_error:
         return validation_error
-    if not storage.get_recipe(recipe_id):
+    existing = storage.get_recipe(recipe_id)
+    if not existing:
         return error_response(404, "NOT_FOUND", "Recipe not found")
     payload["id"] = recipe_id
+    _apply_update_audit(payload, actor, existing)
     if hasattr(storage, "update_recipe"):
         storage.update_recipe(payload)
     else:

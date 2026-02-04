@@ -67,13 +67,18 @@ Notes:
 Engine-mapped delivery patterns with a stable DXCP-facing contract.
 
 Fields:
-- recipe_id: unique identifier
+- id: unique identifier
 - name: human readable name
 - description: short purpose statement
 - allowed_parameters: explicit allowlist of parameters DXCP will pass to the adapter
 - spinnaker_application: engine application identifier
 - deploy_pipeline: engine pipeline identifier for deploy
 - rollback_pipeline: engine pipeline identifier for rollback
+- status: active or deprecated
+- created_at
+- created_by
+- updated_at
+- updated_by
 
 Notes:
 - Only a small, approved set of recipes exist.
@@ -94,6 +99,10 @@ Fields:
   - max_concurrent_deployments
   - daily_deploy_quota
   - daily_rollback_quota
+- created_at
+- created_by
+- updated_at
+- updated_by
 
 Notes:
 - DeliveryGroups do not change deploy semantics in Phase A.
