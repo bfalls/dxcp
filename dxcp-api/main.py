@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -17,6 +18,7 @@ from config import SETTINGS
 from idempotency import IdempotencyStore
 from models import (
     Actor,
+    AuditOutcome,
     BuildRegisterExistingRequest,
     BuildRegistration,
     BuildUploadCapability,
@@ -278,6 +280,60 @@ def _apply_update_audit(payload: dict, actor: Actor, existing: dict) -> None:
         payload["last_change_reason"] = trimmed if trimmed else existing.get("last_change_reason")
     else:
         payload["last_change_reason"] = existing.get("last_change_reason")
+
+
+def _record_audit_event(
+    actor: Actor,
+    event_type: str,
+    target_type: str,
+    target_id: str,
+    outcome: AuditOutcome,
+    summary: str,
+    delivery_group_id: Optional[str] = None,
+    service_name: Optional[str] = None,
+    environment: Optional[str] = None,
+) -> None:
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "actor_id": actor.actor_id,
+        "actor_role": actor.role.value,
+        "target_type": target_type,
+        "target_id": target_id,
+        "timestamp": utc_now(),
+        "outcome": outcome.value,
+        "summary": summary,
+        "delivery_group_id": delivery_group_id,
+        "service_name": service_name,
+        "environment": environment,
+    }
+    if hasattr(storage, "insert_audit_event"):
+        storage.insert_audit_event(event)
+
+
+def _record_deploy_denied(actor: Actor, intent: DeploymentIntent, code: str, group_id: Optional[str] = None) -> None:
+    summary = f"Deploy rejected ({code}) for {intent.service}"
+    _record_audit_event(
+        actor,
+        "DEPLOY_DENIED",
+        "Deployment",
+        intent.service,
+        AuditOutcome.DENIED,
+        summary,
+        delivery_group_id=group_id,
+        service_name=intent.service,
+        environment=intent.environment,
+    )
+
+
+def _error_code_from_response(response: JSONResponse) -> str:
+    try:
+        payload = json.loads(response.body.decode("utf-8"))
+        if isinstance(payload, dict) and payload.get("code"):
+            return payload["code"]
+    except Exception:
+        return "UNKNOWN"
+    return "UNKNOWN"
 
 
 def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
@@ -611,24 +667,34 @@ def create_deployment(
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
     if role_error:
         return role_error
-    guardrails.require_mutations_enabled()
-    guardrails.require_idempotency_key(idempotency_key)
-    service_entry = guardrails.validate_service(intent.service)
-    guardrails.validate_environment(intent.environment, service_entry)
-    guardrails.validate_version(intent.version)
+    try:
+        guardrails.require_mutations_enabled()
+        guardrails.require_idempotency_key(idempotency_key)
+        service_entry = guardrails.validate_service(intent.service)
+        guardrails.validate_environment(intent.environment, service_entry)
+        guardrails.validate_version(intent.version)
+    except PolicyError as exc:
+        _record_deploy_denied(actor, intent, exc.code)
+        raise
     group, group_error = resolve_delivery_group(intent.service)
     if group_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(group_error))
         return group_error
     recipe, recipe_error = resolve_recipe(intent.recipeId, group)
     if recipe_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(recipe_error), group.get("id"))
         return recipe_error
     max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
     daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
-    rate_limiter.check_mutate(actor.actor_id, "deploy", quota_scope=group["id"], quota_limit=daily_deploy_quota)
+    try:
+        rate_limiter.check_mutate(actor.actor_id, "deploy", quota_scope=group["id"], quota_limit=daily_deploy_quota)
+        guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
+    except PolicyError as exc:
+        _record_deploy_denied(actor, intent, exc.code, group.get("id"))
+        raise
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
-    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
 
     payload = intent.dict()
     payload.pop("spinnakerApplication", None)
@@ -637,6 +703,7 @@ def create_deployment(
     _apply_recipe_mapping(payload, recipe)
     if spinnaker.mode == "http":
         if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
+            _record_deploy_denied(actor, intent, "INVALID_REQUEST", group.get("id"))
             return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for deploy")
         build = storage.find_latest_build(intent.service, intent.version)
         if not build:
@@ -651,6 +718,7 @@ def create_deployment(
                     auto_key,
                 )
             except ValueError as exc:
+                _record_deploy_denied(actor, intent, "MISSING_BUILD", group.get("id"))
                 return error_response(400, "MISSING_BUILD", f"No build registered; expected s3://{SETTINGS.runtime_artifact_bucket}/{auto_key} ({exc})")
             except RuntimeError as exc:
                 return error_response(500, "INTERNAL_ERROR", str(exc))
@@ -688,6 +756,17 @@ def create_deployment(
         idempotency_key,
     )
     store_idempotency(request, idempotency_key, record, 201)
+    _record_audit_event(
+        actor,
+        "DEPLOY_SUBMIT",
+        "Deployment",
+        record["id"],
+        AuditOutcome.SUCCESS,
+        f"Deploy submitted for {intent.service}",
+        delivery_group_id=group.get("id"),
+        service_name=intent.service,
+        environment=intent.environment,
+    )
     return record
 
 
@@ -753,6 +832,15 @@ def create_delivery_group(
         return validation_error
     _apply_create_audit(payload, actor)
     storage.insert_delivery_group(payload)
+    _record_audit_event(
+        actor,
+        "ADMIN_CREATE",
+        "DeliveryGroup",
+        payload["id"],
+        AuditOutcome.SUCCESS,
+        f"Delivery group {payload['id']} created",
+        delivery_group_id=payload["id"],
+    )
     return DeliveryGroup(**payload).dict()
 
 
@@ -783,6 +871,15 @@ def update_delivery_group(
         storage.update_delivery_group(payload)
     else:
         storage.insert_delivery_group(payload)
+    _record_audit_event(
+        actor,
+        "ADMIN_UPDATE",
+        "DeliveryGroup",
+        payload["id"],
+        AuditOutcome.SUCCESS,
+        f"Delivery group {payload['id']} updated",
+        delivery_group_id=payload["id"],
+    )
     return DeliveryGroup(**payload).dict()
 
 
@@ -806,6 +903,14 @@ def create_recipe(
         return error_response(409, "RECIPE_EXISTS", "Recipe already exists")
     _apply_create_audit(payload, actor)
     storage.insert_recipe(payload)
+    _record_audit_event(
+        actor,
+        "ADMIN_CREATE",
+        "Recipe",
+        payload["id"],
+        AuditOutcome.SUCCESS,
+        f"Recipe {payload['id']} created",
+    )
     return Recipe(**payload).dict()
 
 
@@ -834,6 +939,14 @@ def update_recipe(
         storage.update_recipe(payload)
     else:
         storage.insert_recipe(payload)
+    _record_audit_event(
+        actor,
+        "ADMIN_UPDATE",
+        "Recipe",
+        payload["id"],
+        AuditOutcome.SUCCESS,
+        f"Recipe {payload['id']} updated",
+    )
     return Recipe(**payload).dict()
 
 
@@ -1016,6 +1129,33 @@ def get_admin_settings(request: Request, authorization: Optional[str] = Header(N
     if role_error:
         return role_error
     return _ui_refresh_settings()
+
+
+@app.get("/v1/audit/events")
+def list_audit_events(
+    request: Request,
+    event_type: Optional[str] = Query(None),
+    delivery_group_id: Optional[str] = Query(None),
+    start_time: Optional[str] = Query(None),
+    end_time: Optional[str] = Query(None),
+    limit: Optional[int] = Query(200),
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view audit events")
+    if role_error:
+        return role_error
+    if limit is None or limit < 1 or limit > 500:
+        return error_response(400, "INVALID_REQUEST", "limit must be between 1 and 500")
+    events = storage.list_audit_events(
+        event_type=event_type,
+        delivery_group_id=delivery_group_id,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
+    return events
 
 
 @app.get("/v1/config/sanity")
@@ -1254,6 +1394,17 @@ def rollback_deployment(
     }
     storage.insert_deployment(record, [])
     store_idempotency(request, idempotency_key, record, 201)
+    _record_audit_event(
+        actor,
+        "ROLLBACK_SUBMIT",
+        "Deployment",
+        record["id"],
+        AuditOutcome.SUCCESS,
+        f"Rollback submitted for {deployment['service']}",
+        delivery_group_id=group.get("id"),
+        service_name=deployment["service"],
+        environment=deployment["environment"],
+    )
     return record
 
 

@@ -109,3 +109,24 @@ Fields:
 Notes:
 - DeliveryGroups do not change deploy semantics in Phase A.
 - Service membership must align with the service allowlist.
+
+## AuditEvent
+
+Append-only record of admin and delivery actions.
+
+Fields:
+- event_id: unique identifier
+- event_type: action category (for example ADMIN_UPDATE, DEPLOY_SUBMIT)
+- actor_id: authenticated user identifier
+- actor_role: DXCP role at time of action
+- target_type: DeliveryGroup, Recipe, Deployment
+- target_id: resource identifier
+- timestamp: ISO8601
+- outcome: SUCCESS, DENIED, FAILED
+- summary: short human-readable summary
+- delivery_group_id (optional)
+- service_name (optional)
+- environment (optional)
+
+Notes:
+- Audit events are immutable and retained as the system of record for actions.

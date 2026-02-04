@@ -206,6 +206,22 @@ Fields:
 Notes:
 - Update requests may include change_reason (optional). The API stores the most recent value as last_change_reason.
 
+### AuditEvent
+
+Fields:
+- event_id
+- event_type
+- actor_id
+- actor_role
+- target_type
+- target_id
+- timestamp
+- outcome (SUCCESS, DENIED, FAILED)
+- summary
+- delivery_group_id (optional)
+- service_name (optional)
+- environment (optional)
+
 ---
 
 ## Endpoints
@@ -292,6 +308,13 @@ Notes:
 
 - GET /v1/spinnaker/status
   - Spinnaker health check
+  - Authz: PLATFORM_ADMIN only
+
+### Audit (admin-only)
+
+- GET /v1/audit/events
+  - List audit events (append-only)
+  - Filters: event_type, delivery_group_id, start_time, end_time, limit
   - Authz: PLATFORM_ADMIN only
 
 ### Build Publish Flow

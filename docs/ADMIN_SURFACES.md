@@ -40,7 +40,7 @@ Lifecycle:
 
 Audit expectations:
 - Required fields: updatedAt, updatedBy.
-- Minimal audit log for create and edit actions.
+- Append-only audit events for create and edit actions.
 
 ## Recipe management
 
@@ -116,3 +116,4 @@ Current:
 - Admin UI supports Recipe create, edit, and deprecation.
 - Admin CRUD endpoints exist for Recipe create and update.
 - Recipes and delivery groups are seeded in storage by the platform.
+- Admin UI exposes read-only audit events for PLATFORM_ADMIN.

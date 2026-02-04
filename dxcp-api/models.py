@@ -124,6 +124,27 @@ class RecipeUpsert(BaseModel):
     change_reason: Optional[str] = None
 
 
+class AuditOutcome(str, Enum):
+    SUCCESS = "SUCCESS"
+    DENIED = "DENIED"
+    FAILED = "FAILED"
+
+
+class AuditEvent(BaseModel):
+    event_id: str
+    event_type: str
+    actor_id: str
+    actor_role: str
+    target_type: str
+    target_id: str
+    timestamp: str
+    outcome: AuditOutcome
+    summary: str
+    delivery_group_id: Optional[str] = None
+    service_name: Optional[str] = None
+    environment: Optional[str] = None
+
+
 class Actor(BaseModel):
     actor_id: str
     role: Role

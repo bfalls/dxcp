@@ -453,6 +453,9 @@ export default function App() {
   const [adminRecipeError, setAdminRecipeError] = useState('')
   const [adminRecipeNote, setAdminRecipeNote] = useState('')
   const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
+  const [auditEvents, setAuditEvents] = useState([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const contextService = selected?.service || service
@@ -775,6 +778,20 @@ export default function App() {
       setDeliveryGroups([])
     }
     return []
+  }
+
+  async function loadAuditEvents() {
+    setAuditError('')
+    setAuditLoading(true)
+    try {
+      const data = await api.get('/audit/events')
+      setAuditEvents(Array.isArray(data) ? data : [])
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAuditError('Failed to load audit events.')
+    } finally {
+      setAuditLoading(false)
+    }
   }
 
   async function loadServicesList() {
@@ -1356,6 +1373,18 @@ export default function App() {
     loadRecipes()
     loadDeliveryGroups()
   }, [authReady, isAuthenticated])
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !isPlatformAdmin) {
+      setAuditEvents([])
+      setAuditError('')
+      setAuditLoading(false)
+      return
+    }
+    if (view === 'admin' && adminTab === 'audit') {
+      loadAuditEvents()
+    }
+  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
@@ -2491,6 +2520,12 @@ export default function App() {
                   >
                     Recipes
                   </button>
+                  <button
+                    className={adminTab === 'audit' ? 'active' : ''}
+                    onClick={() => setAdminTab('audit')}
+                  >
+                    Audit
+                  </button>
                 </div>
               </div>
               {adminTab === 'delivery-groups' && (
@@ -3073,6 +3108,36 @@ export default function App() {
                     )}
                   </div>
                 </>
+              )}
+              {adminTab === 'audit' && (
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2>Audit events</h2>
+                    <button className="button secondary" onClick={loadAuditEvents} disabled={auditLoading}>
+                      {auditLoading ? 'Loading...' : 'Refresh'}
+                    </button>
+                  </div>
+                  {auditError && <div className="helper" style={{ marginTop: '8px' }}>{auditError}</div>}
+                  {!auditError && auditEvents.length === 0 && (
+                    <div className="helper" style={{ marginTop: '8px' }}>No audit events found.</div>
+                  )}
+                  {auditEvents.length > 0 && (
+                    <div className="list" style={{ marginTop: '12px' }}>
+                      {auditEvents.map((event) => (
+                        <div className="list-item admin-group" key={event.event_id}>
+                          <div>
+                            <strong>{event.event_type}</strong>
+                            <div className="helper">{event.timestamp}</div>
+                          </div>
+                          <div>{event.actor_id}</div>
+                          <div>{event.outcome}</div>
+                          <div>{event.target_type}: {event.target_id}</div>
+                          <div>{event.summary}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}

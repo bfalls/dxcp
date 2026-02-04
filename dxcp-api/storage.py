@@ -188,6 +188,25 @@ class Storage:
         self._ensure_column(cur, "recipes", "updated_at", "TEXT")
         self._ensure_column(cur, "recipes", "updated_by", "TEXT")
         self._ensure_column(cur, "recipes", "last_change_reason", "TEXT")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_events (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_role TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                delivery_group_id TEXT,
+                service_name TEXT,
+                environment TEXT
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp)")
         conn.commit()
         conn.close()
 
@@ -380,6 +399,67 @@ class Storage:
         conn.commit()
         conn.close()
         return recipe
+
+    def insert_audit_event(self, event: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO audit_events (
+                event_id, event_type, actor_id, actor_role, target_type, target_id,
+                timestamp, outcome, summary, delivery_group_id, service_name, environment
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event["event_id"],
+                event["event_type"],
+                event["actor_id"],
+                event["actor_role"],
+                event["target_type"],
+                event["target_id"],
+                event["timestamp"],
+                event["outcome"],
+                event["summary"],
+                event.get("delivery_group_id"),
+                event.get("service_name"),
+                event.get("environment"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return event
+
+    def list_audit_events(
+        self,
+        event_type: Optional[str] = None,
+        delivery_group_id: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict]:
+        clauses = []
+        params = []
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if delivery_group_id:
+            clauses.append("delivery_group_id = ?")
+            params.append(delivery_group_id)
+        if start_time:
+            clauses.append("timestamp >= ?")
+            params.append(start_time)
+        if end_time:
+            clauses.append("timestamp <= ?")
+            params.append(end_time)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT * FROM audit_events {where} ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def update_recipe(self, recipe: dict) -> dict:
         conn = self._connect()
@@ -1092,6 +1172,51 @@ class DynamoStorage:
         }
         self.table.put_item(Item=item)
         return recipe
+
+    def insert_audit_event(self, event: dict) -> dict:
+        item = {
+            "pk": "AUDIT_EVENT",
+            "sk": f"{event['timestamp']}#{event['event_id']}",
+            "event_id": event["event_id"],
+            "event_type": event["event_type"],
+            "actor_id": event["actor_id"],
+            "actor_role": event["actor_role"],
+            "target_type": event["target_type"],
+            "target_id": event["target_id"],
+            "timestamp": event["timestamp"],
+            "outcome": event["outcome"],
+            "summary": event["summary"],
+            "delivery_group_id": event.get("delivery_group_id"),
+            "service_name": event.get("service_name"),
+            "environment": event.get("environment"),
+        }
+        self.table.put_item(Item=item)
+        return event
+
+    def list_audit_events(
+        self,
+        event_type: Optional[str] = None,
+        delivery_group_id: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict]:
+        response = self.table.scan(FilterExpression=Attr("pk").eq("AUDIT_EVENT"))
+        items = response.get("Items", [])
+        filtered = []
+        for item in items:
+            if event_type and item.get("event_type") != event_type:
+                continue
+            if delivery_group_id and item.get("delivery_group_id") != delivery_group_id:
+                continue
+            ts = item.get("timestamp")
+            if start_time and ts and ts < start_time:
+                continue
+            if end_time and ts and ts > end_time:
+                continue
+            filtered.append(item)
+        filtered.sort(key=lambda entry: entry.get("timestamp", ""), reverse=True)
+        return filtered[:limit]
 
     def ensure_default_delivery_group(self) -> Optional[dict]:
         existing = self._scan_delivery_groups(limit=1)
