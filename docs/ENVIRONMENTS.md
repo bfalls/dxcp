@@ -92,5 +92,18 @@ Examples:
 - `ui_max_refresh_seconds`
 - `runtime/artifact_bucket`
 - `api/cors_origins`
+- `spinnaker/gate_url`
 
 UI env vars are still set at build time (Vite).
+
+---
+
+## Check config sanity
+
+Use the API to confirm runtime configuration:
+- `GET /v1/config/sanity`
+
+Returns booleans only:
+- `oidc_configured`
+- `spinnaker_configured`
+- `artifact_discovery_configured`

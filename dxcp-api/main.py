@@ -928,6 +928,19 @@ def get_admin_settings(request: Request, authorization: Optional[str] = Header(N
     return _ui_refresh_settings()
 
 
+@app.get("/v1/config/sanity")
+def get_config_sanity(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    oidc_ready = bool(SETTINGS.oidc_issuer and SETTINGS.oidc_audience and SETTINGS.oidc_roles_claim)
+    jwks_ready = bool(SETTINGS.oidc_jwks_url or SETTINGS.oidc_issuer)
+    return {
+        "oidc_configured": bool(oidc_ready and jwks_ready),
+        "spinnaker_configured": bool(SETTINGS.spinnaker_base_url),
+        "artifact_discovery_configured": bool(SETTINGS.runtime_artifact_bucket),
+    }
+
+
 @app.get("/v1/insights/failures")
 def get_failure_insights(
     request: Request,
