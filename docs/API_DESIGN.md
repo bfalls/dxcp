@@ -30,6 +30,11 @@ Roles (demo):
 - DELIVERY_OWNER: deploy and rollback only
 - OBSERVER: read-only
 
+Spinnaker discovery endpoints:
+- /v1/spinnaker/* requires authentication.
+- PLATFORM_ADMIN only.
+- Non-admin requests return 403.
+
 Idempotency:
 - Mutating endpoints require Idempotency-Key header
 - Idempotency-Key must be a unique, client-generated string
@@ -257,10 +262,20 @@ Fields:
   - List Spinnaker applications (Gate)
   - Optional query: tagName, tagValue (filter applications by tag)
   - Response: list of { name }
+  - Authz:
+    - PLATFORM_ADMIN: full discovery
+    - DELIVERY_OWNER, OBSERVER: filtered to delivery group scope (owner-matched groups only)
 
 - GET /v1/spinnaker/applications/{application}/pipelines
   - List Spinnaker pipeline configs for an application
   - Response: list of { id, name }
+  - Authz:
+    - PLATFORM_ADMIN: full discovery
+    - DELIVERY_OWNER, OBSERVER: filtered to delivery group scope (owner-matched groups only)
+
+- GET /v1/spinnaker/status
+  - Spinnaker health check
+  - Authz: PLATFORM_ADMIN only
 
 ### Build Publish Flow
 

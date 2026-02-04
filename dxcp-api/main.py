@@ -170,6 +170,62 @@ def _validate_guardrails(guardrails: Optional[dict]) -> Optional[JSONResponse]:
     return None
 
 
+def _delivery_groups_for_actor(actor: Actor) -> list[dict]:
+    if actor.role == Role.PLATFORM_ADMIN:
+        return storage.list_delivery_groups()
+    actor_id = actor.actor_id
+    if not actor_id:
+        return []
+    return [group for group in storage.list_delivery_groups() if group.get("owner") == actor_id]
+
+
+def _spinnaker_scope_for_actor(actor: Actor) -> tuple[Optional[dict], Optional[JSONResponse]]:
+    groups = _delivery_groups_for_actor(actor)
+    if not groups:
+        return None, error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "No delivery groups assigned to actor",
+        )
+    allowed_recipes: set[str] = set()
+    for group in groups:
+        group_recipes = set(group.get("allowed_recipes") or [])
+        for service_name in group.get("services") or []:
+            service_entry = storage.get_service(service_name)
+            if not service_entry:
+                continue
+            service_recipes = set(service_entry.get("allowed_recipes") or [])
+            if service_recipes:
+                allowed_recipes.update(group_recipes & service_recipes)
+    if not allowed_recipes:
+        return None, error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "No allowed recipes in delivery group scope",
+        )
+    allowed_apps: set[str] = set()
+    pipelines_by_app: dict[str, set[str]] = {}
+    for recipe_id in allowed_recipes:
+        recipe = storage.get_recipe(recipe_id)
+        if not recipe or recipe.get("status") == "deprecated":
+            continue
+        application = recipe.get("spinnaker_application")
+        if not application:
+            continue
+        allowed_apps.add(application)
+        for pipeline_key in ("deploy_pipeline", "rollback_pipeline"):
+            pipeline = recipe.get(pipeline_key)
+            if pipeline:
+                pipelines_by_app.setdefault(application, set()).add(pipeline)
+    if not allowed_apps:
+        return None, error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "No spinnaker applications in delivery group scope",
+        )
+    return {"apps": allowed_apps, "pipelines": pipelines_by_app}, None
+
+
 def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None) -> Optional[JSONResponse]:
     if not group.get("id"):
         return error_response(400, "MISSING_ID", "Delivery group id is required")
@@ -854,7 +910,12 @@ def health():
 
 
 @app.get("/v1/spinnaker/status")
-def spinnaker_status():
+def spinnaker_status(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view spinnaker status")
+    if role_error:
+        return role_error
     if spinnaker.mode != "http":
         return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
     try:
@@ -1004,13 +1065,28 @@ def get_failure_insights(
 
 
 @app.get("/v1/spinnaker/applications")
-def list_spinnaker_applications(tagName: Optional[str] = Query(None), tagValue: Optional[str] = Query(None)):
+def list_spinnaker_applications(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    tagName: Optional[str] = Query(None),
+    tagValue: Optional[str] = Query(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    scope = None
+    if actor.role != Role.PLATFORM_ADMIN:
+        scope, scope_error = _spinnaker_scope_for_actor(actor)
+        if scope_error:
+            return scope_error
     if spinnaker.mode != "http":
         return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
     try:
         apps = spinnaker.list_applications()
     except Exception as exc:
         return {"status": "DOWN", "error": str(exc)[:240]}
+    if scope:
+        allowed_apps = scope["apps"]
+        apps = [app for app in apps if isinstance(app, dict) and app.get("name") in allowed_apps]
     if tagName:
         apps = [app for app in apps if isinstance(app, dict) and _matches_tag(app, tagName, tagValue)]
     return {
@@ -1023,13 +1099,38 @@ def list_spinnaker_applications(tagName: Optional[str] = Query(None), tagValue: 
 
 
 @app.get("/v1/spinnaker/applications/{application}/pipelines")
-def list_spinnaker_pipelines(application: str):
+def list_spinnaker_pipelines(
+    application: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    scope = None
+    if actor.role != Role.PLATFORM_ADMIN:
+        scope, scope_error = _spinnaker_scope_for_actor(actor)
+        if scope_error:
+            return scope_error
+        allowed_apps = scope["apps"]
+        if application not in allowed_apps:
+            return error_response(
+                403,
+                "SPINNAKER_SCOPE_FORBIDDEN",
+                f"Application {application} is not in delivery group scope",
+            )
     if spinnaker.mode != "http":
         return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
     try:
         pipelines = spinnaker.list_pipeline_configs(application)
     except Exception as exc:
         return {"status": "DOWN", "error": str(exc)[:240]}
+    if scope:
+        allowed_pipelines = scope["pipelines"].get(application, set())
+        pipelines = [
+            pipeline
+            for pipeline in pipelines
+            if isinstance(pipeline, dict) and pipeline.get("name") in allowed_pipelines
+        ]
     return {
         "pipelines": [
             {
