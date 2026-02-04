@@ -1,4 +1,5 @@
 import hashlib
+import contextvars
 import json
 import logging
 import os
@@ -48,6 +49,7 @@ for candidate in SPINNAKER_CANDIDATES:
 
 from artifacts import build_artifact_source, semver_sort_key
 from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
+from spinnaker_adapter.redaction import redact_text
 
 
 app = FastAPI(title="DXCP API", version="1.0.0")
@@ -74,6 +76,7 @@ spinnaker = SpinnakerAdapter(
 logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
 artifact_source = None
+request_id_ctx = contextvars.ContextVar("request_id", default="")
 
 logger.info(
     "config.engine loaded engine_url=%s engine_token=%s",
@@ -90,8 +93,12 @@ if os.getenv("DXCP_LAMBDA", "") == "1":
         handler = None
 
 
-def error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"code": code, "message": message})
+def error_response(status_code: int, code: str, message: str, operator_hint: Optional[str] = None) -> JSONResponse:
+    request_id = request_id_ctx.get() or str(uuid.uuid4())
+    payload = {"code": code, "message": message, "request_id": request_id}
+    if operator_hint:
+        payload["operator_hint"] = operator_hint
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 @app.exception_handler(PolicyError)
@@ -101,8 +108,25 @@ async def policy_error_handler(request: Request, exc: PolicyError):
 @app.exception_handler(FastAPIHTTPException)
 async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
     if isinstance(exc.detail, dict) and "code" in exc.detail:
-        return JSONResponse(status_code=exc.status_code, content=exc.detail)
-    return JSONResponse(status_code=exc.status_code, content={"code": "HTTP_ERROR", "message": str(exc.detail)})
+        payload = dict(exc.detail)
+        payload["request_id"] = request_id_ctx.get() or str(uuid.uuid4())
+        return JSONResponse(status_code=exc.status_code, content=payload)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": "HTTP_ERROR", "message": str(exc.detail), "request_id": request_id_ctx.get() or str(uuid.uuid4())},
+    )
+
+
+@app.middleware("http")
+async def attach_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    token = request_id_ctx.set(request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_ctx.reset(token)
+    response.headers["X-Request-Id"] = request_id
+    return response
 
 
 def require_role(actor: Actor, allowed: set[Role], action: str):
@@ -336,6 +360,42 @@ def _error_code_from_response(response: JSONResponse) -> str:
     return "UNKNOWN"
 
 
+def _include_operator_hint(actor: Actor) -> bool:
+    return actor.role == Role.PLATFORM_ADMIN or SETTINGS.demo_mode
+
+
+def _classify_engine_error(message: str) -> tuple[str, int]:
+    lowered = (message or "").lower()
+    if "timeout" in lowered or "timed out" in lowered:
+        return "ENGINE_TIMEOUT", 504
+    if "http 401" in lowered or "http 403" in lowered:
+        return "ENGINE_UNAUTHORIZED", 502
+    if "connection failed" in lowered or "base url is required" in lowered or "stub mode" in lowered:
+        return "ENGINE_UNAVAILABLE", 503
+    return "ENGINE_CALL_FAILED", 502
+
+
+def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> JSONResponse:
+    raw_message = str(exc) if exc else ""
+    redacted = redact_text(raw_message)
+    code, status = _classify_engine_error(raw_message)
+    operator_hint = None
+    if _include_operator_hint(actor) and redacted:
+        operator_hint = redacted
+    logger.warning(
+        "engine.error request_id=%s code=%s status=%s hint=%s",
+        request_id_ctx.get(),
+        code,
+        status,
+        redacted or "none",
+    )
+    request_id = request_id_ctx.get() or str(uuid.uuid4())
+    payload = {"code": code, "message": user_message, "request_id": request_id}
+    if operator_hint:
+        payload["operator_hint"] = operator_hint
+    return JSONResponse(status_code=status, content=payload)
+
+
 def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
     if not payload.get("id"):
         return error_response(400, "RECIPE_ID_REQUIRED", "Recipe id is required")
@@ -414,7 +474,11 @@ def _versions_from_cache(builds: list) -> list:
 
 
 def refresh_from_spinnaker(deployment: dict) -> dict:
-    execution = spinnaker.get_execution(deployment["spinnakerExecutionId"])
+    try:
+        execution = spinnaker.get_execution(deployment["spinnakerExecutionId"])
+    except Exception as exc:
+        logger.warning("engine.refresh_failed deployment_id=%s error=%s", deployment.get("id"), redact_text(str(exc)))
+        return deployment
     state = execution.get("state")
     if state in ["PENDING", "ACTIVE", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]:
         failures = normalize_failures(execution.get("failures"))
@@ -727,8 +791,7 @@ def create_deployment(
     try:
         execution = spinnaker.trigger_deploy(payload, idempotency_key)
     except Exception as exc:
-        message = f"Spinnaker trigger failed: {exc}"
-        return error_response(502, "SPINNAKER_TRIGGER_FAILED", message[:240])
+        return _engine_error_response(actor, "Unable to start deployment", exc)
     record = {
         "id": str(uuid.uuid4()),
         "service": intent.service,
@@ -1064,9 +1127,12 @@ def spinnaker_status(request: Request, authorization: Optional[str] = Header(Non
         spinnaker.check_health()
         return {"status": "UP"}
     except Exception as exc:
-        message = str(exc)
-        logger.warning("Spinnaker health check failed: %s", message)
-        return {"status": "DOWN", "error": message[:240]}
+        logger.warning(
+            "spinnaker.health_failed request_id=%s error=%s",
+            request_id_ctx.get(),
+            redact_text(str(exc)),
+        )
+        return {"status": "DOWN", "error": "Spinnaker health check failed"}
 
 
 @app.get("/v1/deployments/{deployment_id}")
@@ -1248,11 +1314,11 @@ def list_spinnaker_applications(
         if scope_error:
             return scope_error
     if spinnaker.mode != "http":
-        return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
+        return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
         apps = spinnaker.list_applications()
     except Exception as exc:
-        return {"status": "DOWN", "error": str(exc)[:240]}
+        return _engine_error_response(actor, "Unable to retrieve Spinnaker applications", exc)
     if scope:
         allowed_apps = scope["apps"]
         apps = [app for app in apps if isinstance(app, dict) and app.get("name") in allowed_apps]
@@ -1288,11 +1354,11 @@ def list_spinnaker_pipelines(
                 f"Application {application} is not in delivery group scope",
             )
     if spinnaker.mode != "http":
-        return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
+        return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
         pipelines = spinnaker.list_pipeline_configs(application)
     except Exception as exc:
-        return {"status": "DOWN", "error": str(exc)[:240]}
+        return _engine_error_response(actor, "Unable to retrieve Spinnaker pipelines", exc)
     if scope:
         allowed_pipelines = scope["pipelines"].get(application, set())
         pipelines = [
@@ -1374,8 +1440,7 @@ def rollback_deployment(
     try:
         execution = spinnaker.trigger_rollback(payload, idempotency_key)
     except Exception as exc:
-        message = f"Spinnaker trigger failed: {exc}"
-        return error_response(502, "SPINNAKER_TRIGGER_FAILED", message[:240])
+        return _engine_error_response(actor, "Unable to start rollback", exc)
     record = {
         "id": str(uuid.uuid4()),
         "service": deployment["service"],

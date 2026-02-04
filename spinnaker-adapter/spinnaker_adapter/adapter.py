@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from spinnaker_adapter.redaction import redact_text, redact_url
+
 
 class SpinnakerAdapter:
     def __init__(
@@ -239,32 +241,33 @@ class SpinnakerAdapter:
             message = f"Spinnaker HTTP {exc.code}: {snippet}" if snippet else f"Spinnaker HTTP {exc.code}"
             if correlation_id:
                 message = f"{message}; requestId={correlation_id}"
+            redacted_message = redact_text(message)
             self._logger.warning(
                 "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s error=%s",
                 method,
-                url,
+                redact_url(url),
                 exc.code,
                 latency_ms,
                 "configured" if header_configured else "none",
-                message,
+                redacted_message,
             )
-            raise RuntimeError(message) from exc
+            raise RuntimeError(redacted_message) from exc
         except URLError as exc:
             latency_ms = (time.monotonic() - start) * 1000
             self._logger.warning(
                 "spinnaker.request method=%s url=%s status=error latency_ms=%.1f custom_header=%s error=%s",
                 method,
-                url,
+                redact_url(url),
                 latency_ms,
                 "configured" if header_configured else "none",
-                exc.reason,
+                redact_text(str(exc.reason)),
             )
-            raise RuntimeError(f"Spinnaker connection failed: {exc.reason}") from exc
+            raise RuntimeError(redact_text(f"Spinnaker connection failed: {exc.reason}")) from exc
         latency_ms = (time.monotonic() - start) * 1000
         self._logger.info(
             "spinnaker.request method=%s url=%s status=%s latency_ms=%.1f custom_header=%s",
             method,
-            url,
+            redact_url(url),
             status_code,
             latency_ms,
             "configured" if header_configured else "none",

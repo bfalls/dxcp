@@ -345,6 +345,21 @@ Fields:
 
 ## Errors (common)
 
+Error response schema:
+```
+{
+  "code": "ENGINE_CALL_FAILED",
+  "message": "Unable to retrieve Spinnaker applications.",
+  "operator_hint": "Spinnaker HTTP 403 (redacted).",
+  "request_id": "<uuid>"
+}
+```
+
+Notes:
+- message is safe for end users and never includes secrets.
+- operator_hint is only included for PLATFORM_ADMIN (or demo mode) and is redacted.
+- request_id is always present for correlation.
+
 - 400 INVALID_REQUEST
 - 400 INVALID_ENVIRONMENT
 - 400 IDMP_KEY_REQUIRED
@@ -360,6 +375,12 @@ Fields:
 - 409 DEPLOYMENT_LOCKED
 - 429 RATE_LIMITED
 - 503 MUTATIONS_DISABLED
+
+Engine error codes:
+- ENGINE_CALL_FAILED
+- ENGINE_UNAVAILABLE
+- ENGINE_UNAUTHORIZED
+- ENGINE_TIMEOUT
 
 ---
 

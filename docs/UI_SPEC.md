@@ -150,6 +150,7 @@ Policy side panel:
 Blocked-action UX:
 - Show API error codes and messages in the UI shell when blocked.
 - Examples: RECIPE_ID_REQUIRED, RECIPE_NOT_ALLOWED, DEPLOYMENT_LOCKED.
+- If operator_hint is present and the user is PLATFORM_ADMIN, show it in admin diagnostics only.
 
 ### Deployments list
 
