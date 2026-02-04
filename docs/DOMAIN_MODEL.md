@@ -3,21 +3,23 @@
 This document defines the core domain objects used by DXCP. These models are
 engine-agnostic and are owned by DXCP.
 
+## Responsibility split
+
+- Services define what is deployable and how (technical constraints).
+- DeliveryGroups define who can deploy and when (governance).
+
 ## DeploymentIntent
 
 Represents what a user wants to deploy and how.
 
 Fields (required unless noted):
-- intent_id: unique identifier for the intent
 - service: allowlisted service name
 - version: artifact version or build ID
 - environment: single allowed environment (sandbox)
-- recipe: Recipe reference (see Recipe)
-- recipeId: selects a Recipe by id
-- requested_by: user identifier or actor
-- requested_at: timestamp
-- idempotency_key: stable key for retries and duplicate submits
-- metadata (optional): small set of key/value pairs for traceability
+- changeSummary: required change summary
+- recipeId (optional): selects a Recipe by id
+- spinnakerApplication (optional): engine application name (resolved by recipe)
+- spinnakerPipeline (optional): engine pipeline name (resolved by recipe)
 
 Notes:
 - Intent is validated by guardrails before any engine call.
@@ -28,18 +30,18 @@ Notes:
 Normalized record of an attempted deployment, stored by DXCP.
 
 Fields:
-- record_id: unique identifier for this record
-- intent_id: link to DeploymentIntent
-- status: one of queued, running, succeeded, failed, canceled
+- id: unique identifier for this record
+- service: allowlisted service name
 - environment: resolved environment
-- recipe: Recipe reference used
-- engine_execution_id: reference to Spinnaker execution
-- started_at: timestamp
-- finished_at (optional): timestamp
-- status_timeline: ordered list of normalized stage status entries
+- version: artifact version
+- recipeId (optional): recipe id used
+- state: one of PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK
+- createdAt: timestamp
+- updatedAt: timestamp
+- spinnakerExecutionId: reference to engine execution
+- spinnakerExecutionUrl: deep link to engine execution
+- rollbackOf (optional): original deployment id
 - failures: list of FailureModel entries (can be empty)
-- artifact: resolved artifact reference
-- links: URLs for UI or deep debug (engine execution, logs)
 
 Notes:
 - Record is the primary status source for the UI.
@@ -50,14 +52,11 @@ Notes:
 Normalized representation of a failure, regardless of engine source.
 
 Fields:
-- failure_id: unique identifier
-- category: one of validation, policy, artifact, infrastructure, timeout, rollback, unknown
+- category: one of VALIDATION, POLICY, ARTIFACT, INFRASTRUCTURE, TIMEOUT, ROLLBACK, UNKNOWN
 - summary: one line description of what failed
-- details (optional): short explanation
-- suggested_actions: list of next steps
-- evidence_links (optional): list of URLs to logs or engine execution
-- occurred_at: timestamp
-- stage (optional): normalized stage name
+- detail (optional): short explanation
+- actionHint (optional): suggested next step
+- observedAt: timestamp
 
 Notes:
 - Multiple failures can be associated with a single record.
@@ -65,7 +64,7 @@ Notes:
 
 ## Recipe
 
-DXCP abstraction that selects an approved deployment path.
+Engine-mapped delivery patterns with a stable DXCP-facing contract.
 
 Fields:
 - recipe_id: unique identifier
