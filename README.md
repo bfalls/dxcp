@@ -22,6 +22,18 @@ Guardrails are first-class product features: DXCP is an intent-based control pla
 
 ---
 
+## Project Status
+
+DXCP is an actively developed delivery experience control plane designed for enterprise-scale internal platforms.
+
+The project implements a complete, end-to-end model for governed deployments, including role-based access control, policy enforcement, reusable delivery patterns, and integration with established delivery engines such as Spinnaker.
+
+DXCP is suitable for teams and organizations interested in evaluating or piloting a policy-driven delivery platform. Ongoing work focuses on production hardening, operational maturity, and expanded ecosystem integration.
+
+Feedback, experimentation, and early adoption are welcome.
+
+---
+
 ## What this repository contains
 
 This repository contains:
@@ -51,6 +63,8 @@ This repository contains:
   - docs/EVAL_SCORECARD.md
 - Environments
   - docs/ENVIRONMENTS.md
+- CI
+  - GitHub Actions runs lint and tests on every push and PR.
 
 ---
 
@@ -80,11 +94,29 @@ Secrets are never passed as pipeline parameters; Spinnaker resolves controller t
 
 ---
 
-## Non-goals
+## Non-Goals
 
-- CI system
-- Infrastructure provisioning
-- Pipeline authoring tool
+DXCP is intentionally opinionated. The following are explicitly out of scope:
+
+- Building or replacing a CI system
+  (DXCP assumes artifacts already exist.)
+
+- Acting as a general-purpose pipeline engine
+  (Spinnaker remains the execution engine.)
+
+- Abstracting Kubernetes or cloud infrastructure
+  (DXCP operates at the delivery intent layer.)
+
+- Providing a generic workflow DSL
+  (Recipes are curated, productized patterns.)
+
+- Supporting ad-hoc or manual bypasses of guardrails
+  (Policy enforcement is a core feature, not optional.)
+
+- Solving every release strategy
+  (DXCP focuses on paved-road, repeatable delivery.)
+
+These constraints are intentional. They keep DXCP focused on governed delivery, not undifferentiated orchestration.
 
 ---
 
