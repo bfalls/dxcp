@@ -29,10 +29,10 @@ Role handling is enforced by the API. The UI should surface allowed actions and 
 
 Current:
 - Primary navigation: Services, Deploy, Deployments, Detail, Insights.
-- Admin appears for PLATFORM_ADMIN only.
+- Admin appears for all authenticated roles (read-only for non-admins).
 - Global scope is a single environment (sandbox).
 - Admin section includes Delivery Groups and Recipes.
-- Role-based visibility in navigation (admin screens only for PLATFORM_ADMIN).
+- Role-based access is enforced by the API; non-admins see admin screens as read-only.
 
 Planned:
 - Dashboard as landing view.
@@ -238,7 +238,7 @@ Defaults and bounds:
 Status: Current (Delivery Groups and Recipes)
 
 Entry visibility:
-- Visible to PLATFORM_ADMIN only.
+- Visible to all authenticated roles; controls are disabled unless PLATFORM_ADMIN.
 
 Subsections:
 - Delivery Groups
@@ -257,9 +257,12 @@ Key data:
 Primary actions:
 - Create and edit groups.
 - Update service membership with impact preview before save.
+- Preview guardrail validation before saving changes.
 
 Blocked-action UX:
 - If a service is already assigned to another group, show a clear validation error.
+- If validation returns warnings, require explicit confirmation before saving.
+- If validation returns errors, block save.
 
 #### Recipes
 
@@ -275,7 +278,10 @@ Key data:
 Primary actions:
 - Create, edit, deprecate recipes.
 - View engine mapping and usage before changes.
+- Preview mapping validation before saving changes.
 
 Blocked-action UX:
 - If a recipe is deprecated or not allowed for a group, block deploy and explain why.
 - Engine mapping is read-only while the recipe is in use.
+- If validation returns warnings, require explicit confirmation before saving.
+- If validation returns errors, block save.

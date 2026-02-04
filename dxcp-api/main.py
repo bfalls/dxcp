@@ -241,6 +241,105 @@ def _validate_guardrails(guardrails: Optional[dict]) -> Optional[JSONResponse]:
     return None
 
 
+def _validate_guardrails_preview(group: dict) -> dict:
+    messages = []
+    status = "OK"
+    guardrails = group.get("guardrails") or {}
+    max_concurrent = guardrails.get("max_concurrent_deployments")
+    daily_deploy = guardrails.get("daily_deploy_quota")
+    daily_rollback = guardrails.get("daily_rollback_quota")
+
+    for key, value in [
+        ("max_concurrent_deployments", max_concurrent),
+        ("daily_deploy_quota", daily_deploy),
+        ("daily_rollback_quota", daily_rollback),
+    ]:
+        if value is None:
+            continue
+        if not isinstance(value, int) or value <= 0:
+            messages.append({"type": "ERROR", "field": key, "message": "Must be a positive integer."})
+            status = "ERROR"
+
+    if max_concurrent is None:
+        messages.append({"type": "WARNING", "field": "max_concurrent_deployments", "message": "Defaults to 1 if unset."})
+        if status != "ERROR":
+            status = "WARNING"
+    if daily_deploy is None:
+        messages.append({"type": "WARNING", "field": "daily_deploy_quota", "message": "Defaults to system quota if unset."})
+        if status != "ERROR":
+            status = "WARNING"
+    if daily_rollback is None:
+        messages.append({"type": "WARNING", "field": "daily_rollback_quota", "message": "Defaults to system quota if unset."})
+        if status != "ERROR":
+            status = "WARNING"
+
+    services = group.get("services") or []
+    recipes = group.get("allowed_recipes") or []
+    environments = group.get("allowed_environments")
+    if not services:
+        messages.append({"type": "WARNING", "field": "services", "message": "No services selected; this group will be inert."})
+        if status != "ERROR":
+            status = "WARNING"
+    if not recipes:
+        messages.append({"type": "WARNING", "field": "allowed_recipes", "message": "No recipes allowed; deployments will be blocked."})
+        if status != "ERROR":
+            status = "WARNING"
+    if environments is not None and not environments:
+        messages.append({"type": "WARNING", "field": "allowed_environments", "message": "No environments allowed; deployments will be blocked."})
+        if status != "ERROR":
+            status = "WARNING"
+    return {"validation_status": status, "messages": messages}
+
+
+def _validate_recipe_preview(recipe: dict) -> dict:
+    messages = []
+    status = "OK"
+    recipe_id = recipe.get("id")
+    name = recipe.get("name")
+    spinnaker_application = recipe.get("spinnaker_application")
+    deploy_pipeline = recipe.get("deploy_pipeline")
+    rollback_pipeline = recipe.get("rollback_pipeline")
+
+    if not recipe_id:
+        messages.append({"type": "ERROR", "field": "id", "message": "Recipe id is required."})
+        status = "ERROR"
+    if not name:
+        messages.append({"type": "ERROR", "field": "name", "message": "Recipe name is required."})
+        status = "ERROR"
+
+    has_pipeline = bool(deploy_pipeline) or bool(rollback_pipeline)
+    if has_pipeline and not spinnaker_application:
+        messages.append(
+            {
+                "type": "ERROR",
+                "field": "spinnaker_application",
+                "message": "Spinnaker application is required when pipelines are set.",
+            }
+        )
+        status = "ERROR"
+    if spinnaker_application and (not deploy_pipeline or not rollback_pipeline):
+        messages.append(
+            {
+                "type": "ERROR",
+                "field": "deploy_pipeline",
+                "message": "Deploy and rollback pipelines are required when application is set.",
+            }
+        )
+        status = "ERROR"
+
+    if not spinnaker_application and not has_pipeline:
+        messages.append(
+            {
+                "type": "WARNING",
+                "field": "spinnaker_application",
+                "message": "No engine mapping configured; deployments will be blocked.",
+            }
+        )
+        if status != "ERROR":
+            status = "WARNING"
+    return {"validation_status": status, "messages": messages}
+
+
 def _delivery_groups_for_actor(actor: Actor) -> list[dict]:
     if actor.role == Role.PLATFORM_ADMIN:
         return storage.list_delivery_groups()
@@ -1280,7 +1379,10 @@ def get_admin_settings(request: Request, authorization: Optional[str] = Header(N
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view admin settings")
     if role_error:
         return role_error
-    return _ui_refresh_settings()
+    payload = _ui_refresh_settings()
+    payload["daily_deploy_quota"] = SETTINGS.daily_quota_deploy
+    payload["daily_rollback_quota"] = SETTINGS.daily_quota_rollback
+    return payload
 
 
 @app.get("/v1/audit/events")
@@ -1308,6 +1410,39 @@ def list_audit_events(
         limit=limit,
     )
     return events
+
+
+@app.post("/v1/admin/guardrails/validate")
+def validate_guardrails(
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "validate guardrails")
+    if role_error:
+        return role_error
+    if not isinstance(payload, dict):
+        return error_response(400, "INVALID_REQUEST", "Payload must be an object")
+    if (
+        "guardrails" in payload
+        or "allowed_recipes" in payload
+        or "services" in payload
+        or "allowed_environments" in payload
+    ):
+        return _validate_guardrails_preview(payload)
+    if (
+        "spinnaker_application" in payload
+        or "deploy_pipeline" in payload
+        or "rollback_pipeline" in payload
+        or "allowed_parameters" in payload
+        or "status" in payload
+        or "id" in payload
+        or "name" in payload
+    ):
+        return _validate_recipe_preview(payload)
+    return error_response(400, "INVALID_REQUEST", "Payload must be a delivery group or recipe object")
 
 
 @app.get("/v1/config/sanity")

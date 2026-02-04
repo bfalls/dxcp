@@ -18,7 +18,8 @@ const buildFetchMock = ({
   failures,
   deliveryGroups,
   recipes,
-  servicesList
+  servicesList,
+  guardrailValidation
 }) => {
   let groups = deliveryGroups || [
     {
@@ -73,6 +74,14 @@ const buildFetchMock = ({
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
       })
+    }
+    if (pathname === '/v1/admin/guardrails/validate') {
+      return ok(
+        guardrailValidation || {
+          validation_status: 'OK',
+          messages: []
+        }
+      )
     }
     if (pathname === '/v1/insights/failures') {
       const service = parsed.searchParams.get('service') || ''
@@ -282,7 +291,7 @@ async function runTest(name, fn) {
 }
 
 export async function runAllTests() {
-  await runTest('OBSERVER cannot see Admin nav', async () => {
+  await runTest('OBSERVER sees Admin nav but read-only', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'observer@example.com' }),
@@ -295,7 +304,11 @@ export async function runAllTests() {
     const view = render(<App />)
 
     await view.findByText('OBSERVER')
-    assert.equal(view.queryByRole('button', { name: 'Admin' }), null)
+    const adminButton = view.getByRole('button', { name: 'Admin' })
+    fireEvent.click(adminButton)
+    await view.findByText('Only Platform Admins can modify this.')
+    const createButton = view.getByRole('button', { name: 'Create group' })
+    assert.equal(createButton.disabled, true)
   })
 
   await runTest('OBSERVER cannot deploy', async () => {
@@ -638,6 +651,72 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('button', { name: 'Save group' }))
     await waitForCondition(() => view.queryAllByText('Payments Core').length > 0)
     assert.ok(view.getAllByText('Payments Core').length > 0)
+  })
+
+  await runTest('Admin must confirm guardrail warnings before saving', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      guardrailValidation: {
+        validation_status: 'WARNING',
+        messages: [{ type: 'WARNING', field: 'services', message: 'No services selected; this group will be inert.' }]
+      }
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'Create group' }))
+    fireEvent.input(await view.findByLabelText('Group id'), { target: { value: 'warn-group' } })
+    fireEvent.input(view.getByLabelText('Name'), { target: { value: 'Warn Group' } })
+    fireEvent.click(view.getByRole('button', { name: 'Preview changes' }))
+    await view.findByText('Validation: WARNING')
+    fireEvent.click(view.getByRole('button', { name: 'Save group' }))
+    await view.findByText('Warnings require confirmation before saving.')
+    fireEvent.click(view.getByLabelText('Confirm warnings and proceed to save.'))
+    fireEvent.click(view.getByRole('button', { name: 'Save group' }))
+    await waitForCondition(() => view.queryAllByText('Warn Group').length > 0)
+    assert.ok(view.getAllByText('Warn Group').length > 0)
+  })
+
+  await runTest('Admin cannot save when validation has errors', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      guardrailValidation: {
+        validation_status: 'ERROR',
+        messages: [{ type: 'ERROR', field: 'guardrails', message: 'Invalid guardrail.' }]
+      }
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'Create group' }))
+    fireEvent.input(await view.findByLabelText('Group id'), { target: { value: 'error-group' } })
+    fireEvent.input(view.getByLabelText('Name'), { target: { value: 'Error Group' } })
+    fireEvent.click(view.getByRole('button', { name: 'Preview changes' }))
+    await view.findByText('Validation: ERROR')
+    const saveButton = view.getByRole('button', { name: 'Save group' })
+    assert.equal(saveButton.disabled, true)
   })
 
   await runTest('Delivery group validation errors shown', async () => {

@@ -34,6 +34,7 @@ Constraints:
 - A service belongs to exactly one DeliveryGroup.
 - Services must be allowlisted.
 - Guardrails must be positive integers when provided.
+- Use the guardrail preview endpoint before saving changes.
 
 Lifecycle:
 - Create and edit are supported by admin surfaces.
@@ -63,6 +64,7 @@ Fields:
 Validation expectations:
 - spinnaker_application must exist in the engine.
 - deploy_pipeline and rollback_pipeline must exist under the application.
+- Use the guardrail preview endpoint to validate mapping consistency.
 
 Lifecycle:
 - Create and edit are supported by admin surfaces.
@@ -72,6 +74,14 @@ Lifecycle:
 
 Role enforcement:
 - PLATFORM_ADMIN only for create, edit, and deprecate actions.
+
+## Admin safety principles
+
+Required:
+- Validate proposed changes before saving.
+- Block save on validation errors.
+- Require explicit confirmation for warnings.
+- Keep admin controls disabled for non-admin roles.
 
 ## Admin settings (refresh defaults)
 
@@ -105,7 +115,8 @@ Recipe admin endpoints (current):
 - Deprecation is handled by setting status=deprecated via PUT.
 
 Validation endpoints (planned):
-- GET /v1/recipes/validate?spinnakerApplication=...&deployPipeline=...&rollbackPipeline=...
+Current:
+- POST /v1/admin/guardrails/validate
 
 ---
 

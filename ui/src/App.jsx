@@ -259,29 +259,33 @@ function buildBackstageUrl(ref, explicitUrl, baseUrl) {
   return `${trimmedBase}/catalog/${parsed.namespace}/${parsed.kind}/${parsed.name}`
 }
 
-function buildGroupDraft(group) {
+function buildGroupDraft(group, guardrailDefaults) {
   const guardrails = group?.guardrails || {}
+  const defaults = guardrailDefaults || {}
+  const defaultDeployQuota = defaults.daily_deploy_quota ?? 25
+  const defaultRollbackQuota = defaults.daily_rollback_quota ?? 10
   return {
     id: group?.id || '',
     name: group?.name || '',
     description: group?.description || '',
     owner: group?.owner || '',
     services: Array.isArray(group?.services) ? [...group.services] : [],
+    allowed_environments: Array.isArray(group?.allowed_environments) ? [...group.allowed_environments] : ['sandbox'],
     allowed_recipes: Array.isArray(group?.allowed_recipes) ? [...group.allowed_recipes] : [],
     change_reason: '',
     guardrails: {
       max_concurrent_deployments:
         guardrails.max_concurrent_deployments !== undefined && guardrails.max_concurrent_deployments !== null
           ? String(guardrails.max_concurrent_deployments)
-          : '',
+          : '1',
       daily_deploy_quota:
         guardrails.daily_deploy_quota !== undefined && guardrails.daily_deploy_quota !== null
           ? String(guardrails.daily_deploy_quota)
-          : '',
+          : String(defaultDeployQuota),
       daily_rollback_quota:
         guardrails.daily_rollback_quota !== undefined && guardrails.daily_rollback_quota !== null
           ? String(guardrails.daily_rollback_quota)
-          : ''
+          : String(defaultRollbackQuota)
     }
   }
 }
@@ -447,12 +451,16 @@ export default function App() {
   const [adminGroupError, setAdminGroupError] = useState('')
   const [adminGroupNote, setAdminGroupNote] = useState('')
   const [adminGroupSaving, setAdminGroupSaving] = useState(false)
+  const [adminGroupValidation, setAdminGroupValidation] = useState(null)
+  const [adminGroupConfirmWarning, setAdminGroupConfirmWarning] = useState(false)
   const [adminRecipeId, setAdminRecipeId] = useState('')
   const [adminRecipeMode, setAdminRecipeMode] = useState('view')
   const [adminRecipeDraft, setAdminRecipeDraft] = useState(buildRecipeDraft(null))
   const [adminRecipeError, setAdminRecipeError] = useState('')
   const [adminRecipeNote, setAdminRecipeNote] = useState('')
   const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
+  const [adminRecipeValidation, setAdminRecipeValidation] = useState(null)
+  const [adminRecipeConfirmWarning, setAdminRecipeConfirmWarning] = useState(false)
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
@@ -509,6 +517,14 @@ export default function App() {
   const minRefreshSeconds = publicSettings.min_refresh_interval_seconds || 60
   const maxRefreshSeconds = publicSettings.max_refresh_interval_seconds || 3600
   const defaultRefreshSeconds = publicSettings.default_refresh_interval_seconds || 300
+  const adminGuardrailDefaults = useMemo(
+    () => ({
+      daily_deploy_quota: adminSettings?.daily_deploy_quota ?? 25,
+      daily_rollback_quota: adminSettings?.daily_rollback_quota ?? 10
+    }),
+    [adminSettings]
+  )
+  const adminReadOnly = !isPlatformAdmin
   const rawRefreshSeconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
   const { value: refreshIntervalSeconds } = useMemo(
     () => clampRefreshIntervalSeconds(rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds),
@@ -880,7 +896,9 @@ export default function App() {
       setAdminSettings({
         default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
         min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
-        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600
+        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600,
+        daily_deploy_quota: data.daily_deploy_quota ?? 25,
+        daily_rollback_quota: data.daily_rollback_quota ?? 10
       })
     } catch (err) {
       if (isLoginRequiredError(err)) return
@@ -934,18 +952,22 @@ export default function App() {
   function startAdminGroupCreate() {
     setAdminGroupMode('create')
     setAdminGroupId('')
-    setAdminGroupDraft(buildGroupDraft(null))
+    setAdminGroupDraft(buildGroupDraft(null, adminGuardrailDefaults))
     setAdminGroupError('')
     setAdminGroupNote('')
+    setAdminGroupValidation(null)
+    setAdminGroupConfirmWarning(false)
   }
 
   function startAdminGroupEdit(group) {
     if (!group) return
     setAdminGroupMode('edit')
     setAdminGroupId(group.id)
-    setAdminGroupDraft(buildGroupDraft(group))
+    setAdminGroupDraft(buildGroupDraft(group, adminGuardrailDefaults))
     setAdminGroupError('')
     setAdminGroupNote('')
+    setAdminGroupValidation(null)
+    setAdminGroupConfirmWarning(false)
   }
 
   function handleAdminGroupDraftChange(field, value) {
@@ -1006,6 +1028,7 @@ export default function App() {
       description: adminGroupDraft.description.trim() || null,
       owner: adminGroupDraft.owner.trim() || null,
       services: adminGroupDraft.services.slice().sort(),
+      allowed_environments: adminGroupDraft.allowed_environments.slice().sort(),
       allowed_recipes: adminGroupDraft.allowed_recipes.slice().sort(),
       guardrails: guardrailsPayload
     }
@@ -1023,9 +1046,47 @@ export default function App() {
     return { payload }
   }
 
+  async function validateAdminGroupDraft() {
+    if (adminReadOnly) {
+      setAdminGroupError('Only Platform Admins can modify this.')
+      return
+    }
+    setAdminGroupError('')
+    setAdminGroupValidation(null)
+    setAdminGroupConfirmWarning(false)
+    const { payload, error } = buildAdminGroupPayload()
+    if (error) {
+      setAdminGroupError(error)
+      return
+    }
+    try {
+      const result = await api.post('/admin/guardrails/validate', payload)
+      if (result && result.code) {
+        setAdminGroupError(`${result.code}: ${result.message}`)
+        return
+      }
+      setAdminGroupValidation(result)
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAdminGroupError('Failed to validate guardrails.')
+    }
+  }
+
   async function saveAdminGroup() {
+    if (adminReadOnly) {
+      setAdminGroupError('Only Platform Admins can modify this.')
+      return
+    }
     setAdminGroupError('')
     setAdminGroupNote('')
+    if (adminGroupValidation?.validation_status === 'ERROR') {
+      setAdminGroupError('Fix validation errors before saving.')
+      return
+    }
+    if (adminGroupValidation?.validation_status === 'WARNING' && !adminGroupConfirmWarning) {
+      setAdminGroupError('Warnings require confirmation before saving.')
+      return
+    }
     const { payload, error } = buildAdminGroupPayload()
     if (error) {
       setAdminGroupError(error)
@@ -1045,8 +1106,10 @@ export default function App() {
       await loadDeliveryGroups()
       setAdminGroupId(result.id || payload.id)
       setAdminGroupMode('view')
-      setAdminGroupDraft(buildGroupDraft(result || payload))
+      setAdminGroupDraft(buildGroupDraft(result || payload, adminGuardrailDefaults))
       setAdminGroupNote('Delivery group saved.')
+      setAdminGroupValidation(null)
+      setAdminGroupConfirmWarning(false)
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setAdminGroupError('Failed to save delivery group.')
@@ -1061,6 +1124,8 @@ export default function App() {
     setAdminRecipeDraft(buildRecipeDraft(null))
     setAdminRecipeError('')
     setAdminRecipeNote('')
+    setAdminRecipeValidation(null)
+    setAdminRecipeConfirmWarning(false)
   }
 
   function startAdminRecipeEdit(recipe) {
@@ -1070,6 +1135,8 @@ export default function App() {
     setAdminRecipeDraft(buildRecipeDraft(recipe))
     setAdminRecipeError('')
     setAdminRecipeNote('')
+    setAdminRecipeValidation(null)
+    setAdminRecipeConfirmWarning(false)
   }
 
   function handleAdminRecipeDraftChange(field, value) {
@@ -1113,9 +1180,47 @@ export default function App() {
     return { payload }
   }
 
+  async function validateAdminRecipeDraft() {
+    if (adminReadOnly) {
+      setAdminRecipeError('Only Platform Admins can modify this.')
+      return
+    }
+    setAdminRecipeError('')
+    setAdminRecipeValidation(null)
+    setAdminRecipeConfirmWarning(false)
+    const { payload, error } = buildAdminRecipePayload()
+    if (error) {
+      setAdminRecipeError(error)
+      return
+    }
+    try {
+      const result = await api.post('/admin/guardrails/validate', payload)
+      if (result && result.code) {
+        setAdminRecipeError(`${result.code}: ${result.message}`)
+        return
+      }
+      setAdminRecipeValidation(result)
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAdminRecipeError('Failed to validate recipe.')
+    }
+  }
+
   async function saveAdminRecipe() {
+    if (adminReadOnly) {
+      setAdminRecipeError('Only Platform Admins can modify this.')
+      return
+    }
     setAdminRecipeError('')
     setAdminRecipeNote('')
+    if (adminRecipeValidation?.validation_status === 'ERROR') {
+      setAdminRecipeError('Fix validation errors before saving.')
+      return
+    }
+    if (adminRecipeValidation?.validation_status === 'WARNING' && !adminRecipeConfirmWarning) {
+      setAdminRecipeError('Warnings require confirmation before saving.')
+      return
+    }
     const { payload, error } = buildAdminRecipePayload()
     if (error) {
       setAdminRecipeError(error)
@@ -1137,6 +1242,8 @@ export default function App() {
       setAdminRecipeMode('view')
       setAdminRecipeDraft(buildRecipeDraft(result || payload))
       setAdminRecipeNote('Recipe saved.')
+      setAdminRecipeValidation(null)
+      setAdminRecipeConfirmWarning(false)
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setAdminRecipeError('Failed to save recipe.')
@@ -1397,6 +1504,19 @@ export default function App() {
   }, [authReady, isAuthenticated, isPlatformAdmin])
 
   useEffect(() => {
+    if (isPlatformAdmin) return
+    if (adminTab === 'audit') {
+      setAdminTab('delivery-groups')
+    }
+    setAdminGroupMode('view')
+    setAdminRecipeMode('view')
+    setAdminGroupValidation(null)
+    setAdminRecipeValidation(null)
+    setAdminGroupConfirmWarning(false)
+    setAdminRecipeConfirmWarning(false)
+  }, [isPlatformAdmin, adminTab])
+
+  useEffect(() => {
     if (!isAuthenticated) {
       setUserSettingsKey('')
       setUserSettings(null)
@@ -1523,9 +1643,9 @@ export default function App() {
     if (!isPlatformAdmin) return
     if (adminGroupMode === 'create') return
     if (activeAdminGroup) {
-      setAdminGroupDraft(buildGroupDraft(activeAdminGroup))
+      setAdminGroupDraft(buildGroupDraft(activeAdminGroup, adminGuardrailDefaults))
     } else if (!adminGroupId) {
-      setAdminGroupDraft(buildGroupDraft(null))
+      setAdminGroupDraft(buildGroupDraft(null, adminGuardrailDefaults))
     }
   }, [isPlatformAdmin, activeAdminGroup, adminGroupId, adminGroupMode])
 
@@ -1731,11 +1851,9 @@ export default function App() {
             <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
               Settings
             </button>
-            {isPlatformAdmin && (
-              <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-                Admin
-              </button>
-            )}
+            <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
+              Admin
+            </button>
         </nav>
       </header>
 
@@ -2492,48 +2610,40 @@ export default function App() {
 
       {authReady && isAuthenticated && view === 'admin' && (
         <div className="shell">
-          {!isPlatformAdmin && (
-            <div className="card forbidden">
-              <h2>403 - Access denied</h2>
-              <div className="helper">Your role does not allow access to Admin.</div>
-              <button className="button secondary" style={{ marginTop: '12px' }} onClick={() => setView('deploy')}>
-                Return to Deploy
-              </button>
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>Admin</h2>
+              {adminReadOnly && <div className="helper">Only Platform Admins can modify this.</div>}
             </div>
-          )}
-          {isPlatformAdmin && (
+            <div className="tabs" style={{ marginTop: '12px' }}>
+              <button
+                className={adminTab === 'delivery-groups' ? 'active' : ''}
+                onClick={() => setAdminTab('delivery-groups')}
+              >
+                Delivery Groups
+              </button>
+              <button
+                className={adminTab === 'recipes' ? 'active' : ''}
+                onClick={() => setAdminTab('recipes')}
+              >
+                Recipes
+              </button>
+              {isPlatformAdmin && (
+                <button
+                  className={adminTab === 'audit' ? 'active' : ''}
+                  onClick={() => setAdminTab('audit')}
+                >
+                  Audit
+                </button>
+              )}
+            </div>
+          </div>
+          {adminTab === 'delivery-groups' && (
             <>
-              <div className="card" style={{ gridColumn: '1 / -1' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h2>Admin</h2>
-                </div>
-                <div className="tabs" style={{ marginTop: '12px' }}>
-                  <button
-                    className={adminTab === 'delivery-groups' ? 'active' : ''}
-                    onClick={() => setAdminTab('delivery-groups')}
-                  >
-                    Delivery Groups
-                  </button>
-                  <button
-                    className={adminTab === 'recipes' ? 'active' : ''}
-                    onClick={() => setAdminTab('recipes')}
-                  >
-                    Recipes
-                  </button>
-                  <button
-                    className={adminTab === 'audit' ? 'active' : ''}
-                    onClick={() => setAdminTab('audit')}
-                  >
-                    Audit
-                  </button>
-                </div>
-              </div>
-              {adminTab === 'delivery-groups' && (
-                <>
-                  <div className="card">
+              <div className="card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <h2>Delivery groups</h2>
-                      <button className="button secondary" onClick={startAdminGroupCreate}>
+                      <button className="button secondary" onClick={startAdminGroupCreate} disabled={adminReadOnly}>
                         Create group
                       </button>
                     </div>
@@ -2550,20 +2660,20 @@ export default function App() {
                             <div>{Array.isArray(group.services) ? `${group.services.length} services` : '0 services'}</div>
                             <div>{summarizeGuardrails(group.guardrails)}</div>
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                              <button
-                                className="button secondary"
-                                onClick={() => {
-                                  setAdminGroupMode('view')
-                                  setAdminGroupId(group.id)
-                                  setAdminGroupError('')
-                                  setAdminGroupNote('')
-                                }}
-                              >
-                                View
-                              </button>
-                              <button className="button secondary" onClick={() => startAdminGroupEdit(group)}>
-                                Edit
-                              </button>
+                                <button
+                                  className="button secondary"
+                                  onClick={() => {
+                                    setAdminGroupMode('view')
+                                    setAdminGroupId(group.id)
+                                    setAdminGroupError('')
+                                    setAdminGroupNote('')
+                                  }}
+                                >
+                                  View
+                                </button>
+                                <button className="button secondary" onClick={() => startAdminGroupEdit(group)} disabled={adminReadOnly}>
+                                  Edit
+                                </button>
                             </div>
                           </div>
                         ))}
@@ -2642,6 +2752,7 @@ export default function App() {
                           className="button secondary"
                           style={{ marginTop: '12px' }}
                           onClick={() => startAdminGroupEdit(activeAdminGroup)}
+                          disabled={adminReadOnly}
                         >
                           Edit group
                         </button>
@@ -2677,8 +2788,44 @@ export default function App() {
                               value={adminGroupDraft.change_reason}
                               onChange={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
                               onInput={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
+                              disabled={adminReadOnly}
                             />
                           </div>
+                        )}
+                        <button
+                          className="button secondary"
+                          style={{ marginTop: '12px' }}
+                          onClick={validateAdminGroupDraft}
+                          disabled={adminGroupSaving || adminReadOnly}
+                        >
+                          Preview changes
+                        </button>
+                        {adminGroupValidation && (
+                          <div className="helper" style={{ marginTop: '8px' }}>
+                            Validation: {adminGroupValidation.validation_status}
+                          </div>
+                        )}
+                        {adminGroupValidation?.messages?.length > 0 && (
+                          <div className="list" style={{ marginTop: '8px' }}>
+                            {adminGroupValidation.messages.map((item, idx) => (
+                              <div className="list-item admin-detail" key={`group-validate-${idx}`}>
+                                <div>{item.type}</div>
+                                <div>{item.field || 'general'}</div>
+                                <div>{item.message}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {adminGroupValidation?.validation_status === 'WARNING' && (
+                          <label className="check-item" style={{ marginTop: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={adminGroupConfirmWarning}
+                              onChange={(e) => setAdminGroupConfirmWarning(e.target.checked)}
+                              disabled={adminReadOnly}
+                            />
+                            <span>Confirm warnings and proceed to save.</span>
+                          </label>
                         )}
                         <div className="field">
                           <label htmlFor="admin-group-id">Group id</label>
@@ -2687,7 +2834,7 @@ export default function App() {
                             value={adminGroupDraft.id}
                             onChange={(e) => handleAdminGroupDraftChange('id', e.target.value)}
                             onInput={(e) => handleAdminGroupDraftChange('id', e.target.value)}
-                            disabled={adminGroupMode === 'edit'}
+                            disabled={adminGroupMode === 'edit' || adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -2697,6 +2844,7 @@ export default function App() {
                             value={adminGroupDraft.name}
                             onChange={(e) => handleAdminGroupDraftChange('name', e.target.value)}
                             onInput={(e) => handleAdminGroupDraftChange('name', e.target.value)}
+                            disabled={adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -2706,6 +2854,7 @@ export default function App() {
                             value={adminGroupDraft.description}
                             onChange={(e) => handleAdminGroupDraftChange('description', e.target.value)}
                             onInput={(e) => handleAdminGroupDraftChange('description', e.target.value)}
+                            disabled={adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -2715,7 +2864,31 @@ export default function App() {
                             value={adminGroupDraft.owner}
                             onChange={(e) => handleAdminGroupDraftChange('owner', e.target.value)}
                             onInput={(e) => handleAdminGroupDraftChange('owner', e.target.value)}
+                            disabled={adminReadOnly}
                           />
+                        </div>
+                        <div className="helper">Admin-only configuration. Affects Delivery Owners and Observers.</div>
+                        <div className="helper" style={{ marginTop: '12px' }}>Allowed environments</div>
+                        <div className="checklist">
+                          {['sandbox'].map((env) => (
+                            <label key={env} className="check-item">
+                              <input
+                                type="checkbox"
+                                checked={adminGroupDraft.allowed_environments.includes(env)}
+                                onChange={() => {
+                                  const set = new Set(adminGroupDraft.allowed_environments)
+                                  if (set.has(env)) {
+                                    set.delete(env)
+                                  } else {
+                                    set.add(env)
+                                  }
+                                  handleAdminGroupDraftChange('allowed_environments', Array.from(set))
+                                }}
+                                disabled={adminReadOnly}
+                              />
+                              <span>{env}</span>
+                            </label>
+                          ))}
                         </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Services</div>
                         <div className="checklist">
@@ -2726,6 +2899,7 @@ export default function App() {
                                 type="checkbox"
                                 checked={adminGroupDraft.services.includes(svc)}
                                 onChange={() => toggleAdminGroupService(svc)}
+                                disabled={adminReadOnly}
                               />
                               <span>{svc}</span>
                             </label>
@@ -2740,6 +2914,7 @@ export default function App() {
                                 type="checkbox"
                                 checked={adminGroupDraft.allowed_recipes.includes(recipe.id)}
                                 onChange={() => toggleAdminGroupRecipe(recipe.id)}
+                                disabled={adminReadOnly}
                               />
                               <span>{recipe.name || recipe.id}</span>
                               <span className="helper">{recipe.id}</span>
@@ -2757,7 +2932,9 @@ export default function App() {
                               value={adminGroupDraft.guardrails.max_concurrent_deployments}
                               onChange={(e) => handleAdminGuardrailChange('max_concurrent_deployments', e.target.value)}
                               onInput={(e) => handleAdminGuardrailChange('max_concurrent_deployments', e.target.value)}
+                              disabled={adminReadOnly}
                             />
+                            <div className="helper">Minimum 1. Default 1.</div>
                           </div>
                           <div className="field">
                             <label htmlFor="admin-group-daily-deploy">Daily deploy quota</label>
@@ -2768,7 +2945,9 @@ export default function App() {
                               value={adminGroupDraft.guardrails.daily_deploy_quota}
                               onChange={(e) => handleAdminGuardrailChange('daily_deploy_quota', e.target.value)}
                               onInput={(e) => handleAdminGuardrailChange('daily_deploy_quota', e.target.value)}
+                              disabled={adminReadOnly}
                             />
+                            <div className="helper">Minimum 1. Default {adminSettings?.daily_deploy_quota ?? 'system'}.</div>
                           </div>
                           <div className="field">
                             <label htmlFor="admin-group-daily-rollback">Daily rollback quota</label>
@@ -2779,7 +2958,9 @@ export default function App() {
                               value={adminGroupDraft.guardrails.daily_rollback_quota}
                               onChange={(e) => handleAdminGuardrailChange('daily_rollback_quota', e.target.value)}
                               onInput={(e) => handleAdminGuardrailChange('daily_rollback_quota', e.target.value)}
+                              disabled={adminReadOnly}
                             />
+                            <div className="helper">Minimum 1. Default {adminSettings?.daily_rollback_quota ?? 'system'}.</div>
                           </div>
                         </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Impact preview</div>
@@ -2811,7 +2992,11 @@ export default function App() {
                         {adminGroupError && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupError}</div>}
                         {adminGroupNote && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupNote}</div>}
                         <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                          <button className="button" onClick={saveAdminGroup} disabled={adminGroupSaving}>
+                          <button
+                            className="button"
+                            onClick={saveAdminGroup}
+                            disabled={adminGroupSaving || adminReadOnly || adminGroupValidation?.validation_status === 'ERROR'}
+                          >
                             {adminGroupSaving ? 'Saving...' : 'Save group'}
                           </button>
                           <button
@@ -2821,9 +3006,9 @@ export default function App() {
                               setAdminGroupError('')
                               setAdminGroupNote('')
                               if (activeAdminGroup) {
-                                setAdminGroupDraft(buildGroupDraft(activeAdminGroup))
+                                setAdminGroupDraft(buildGroupDraft(activeAdminGroup, adminGuardrailDefaults))
                               } else {
-                                setAdminGroupDraft(buildGroupDraft(null))
+                                setAdminGroupDraft(buildGroupDraft(null, adminGuardrailDefaults))
                               }
                             }}
                           >
@@ -2843,7 +3028,7 @@ export default function App() {
                   <div className="card">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <h2>Recipes</h2>
-                      <button className="button secondary" onClick={startAdminRecipeCreate}>
+                      <button className="button secondary" onClick={startAdminRecipeCreate} disabled={adminReadOnly}>
                         Create recipe
                       </button>
                     </div>
@@ -2878,7 +3063,7 @@ export default function App() {
                                 >
                                   View
                                 </button>
-                                <button className="button secondary" onClick={() => startAdminRecipeEdit(recipe)}>
+                                <button className="button secondary" onClick={() => startAdminRecipeEdit(recipe)} disabled={adminReadOnly}>
                                   Edit
                                 </button>
                               </div>
@@ -2956,6 +3141,7 @@ export default function App() {
                           className="button secondary"
                           style={{ marginTop: '12px' }}
                           onClick={() => startAdminRecipeEdit(activeAdminRecipe)}
+                          disabled={adminReadOnly}
                         >
                           Edit recipe
                         </button>
@@ -2991,9 +3177,48 @@ export default function App() {
                               value={adminRecipeDraft.change_reason}
                               onChange={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
                               onInput={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
+                              disabled={adminReadOnly}
                             />
                           </div>
                         )}
+                        <button
+                          className="button secondary"
+                          style={{ marginTop: '12px' }}
+                          onClick={validateAdminRecipeDraft}
+                          disabled={adminRecipeSaving || adminReadOnly}
+                        >
+                          Preview changes
+                        </button>
+                        {adminRecipeValidation && (
+                          <div className="helper" style={{ marginTop: '8px' }}>
+                            Validation: {adminRecipeValidation.validation_status}
+                          </div>
+                        )}
+                        {adminRecipeValidation?.messages?.length > 0 && (
+                          <div className="list" style={{ marginTop: '8px' }}>
+                            {adminRecipeValidation.messages.map((item, idx) => (
+                              <div className="list-item admin-detail" key={`recipe-validate-${idx}`}>
+                                <div>{item.type}</div>
+                                <div>{item.field || 'general'}</div>
+                                <div>{item.message}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {adminRecipeValidation?.validation_status === 'WARNING' && (
+                          <label className="check-item" style={{ marginTop: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={adminRecipeConfirmWarning}
+                              onChange={(e) => setAdminRecipeConfirmWarning(e.target.checked)}
+                              disabled={adminReadOnly}
+                            />
+                            <span>Confirm warnings and proceed to save.</span>
+                          </label>
+                        )}
+                        <div className="helper" style={{ marginTop: '12px' }}>
+                          Admin-only configuration. Affects Delivery Owners and Observers.
+                        </div>
                         <div className="field">
                           <label htmlFor="admin-recipe-id">Recipe id</label>
                           <input
@@ -3001,7 +3226,7 @@ export default function App() {
                             value={adminRecipeDraft.id}
                             onChange={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
-                            disabled={adminRecipeMode === 'edit'}
+                            disabled={adminRecipeMode === 'edit' || adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -3011,6 +3236,7 @@ export default function App() {
                             value={adminRecipeDraft.name}
                             onChange={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
+                            disabled={adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -3020,6 +3246,7 @@ export default function App() {
                             value={adminRecipeDraft.description}
                             onChange={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
+                            disabled={adminReadOnly}
                           />
                         </div>
                         <div className="field">
@@ -3029,6 +3256,7 @@ export default function App() {
                             value={adminRecipeDraft.allowed_parameters}
                             onChange={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
+                            disabled={adminReadOnly}
                           />
                         </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
@@ -3042,7 +3270,7 @@ export default function App() {
                             value={adminRecipeDraft.spinnaker_application}
                             onChange={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
-                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
                           />
                         </div>
                         <div className="field">
@@ -3052,7 +3280,7 @@ export default function App() {
                             value={adminRecipeDraft.deploy_pipeline}
                             onChange={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
-                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
                           />
                         </div>
                         <div className="field">
@@ -3062,7 +3290,7 @@ export default function App() {
                             value={adminRecipeDraft.rollback_pipeline}
                             onChange={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
                             onInput={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
-                            disabled={adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0}
+                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
                           />
                         </div>
                         <div className="field">
@@ -3074,6 +3302,7 @@ export default function App() {
                             onChange={(e) =>
                               handleAdminRecipeDraftChange('status', e.target.checked ? 'deprecated' : 'active')
                             }
+                            disabled={adminReadOnly}
                           />
                           {adminRecipeDraft.status === 'deprecated' && (
                             <div className="helper">Deprecated recipes cannot be used for new deployments.</div>
@@ -3082,7 +3311,11 @@ export default function App() {
                         {adminRecipeError && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeError}</div>}
                         {adminRecipeNote && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeNote}</div>}
                         <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                          <button className="button" onClick={saveAdminRecipe} disabled={adminRecipeSaving}>
+                          <button
+                            className="button"
+                            onClick={saveAdminRecipe}
+                            disabled={adminRecipeSaving || adminReadOnly || adminRecipeValidation?.validation_status === 'ERROR'}
+                          >
                             {adminRecipeSaving ? 'Saving...' : 'Save recipe'}
                           </button>
                           <button
@@ -3109,7 +3342,7 @@ export default function App() {
                   </div>
                 </>
               )}
-              {adminTab === 'audit' && (
+              {adminTab === 'audit' && isPlatformAdmin && (
                 <div className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h2>Audit events</h2>
@@ -3139,7 +3372,6 @@ export default function App() {
                   )}
                 </div>
               )}
-            </>
           )}
         </div>
       )}
