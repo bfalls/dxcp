@@ -82,6 +82,17 @@ Outputs from adapter to DXCP:
 
 The adapter is the only component that understands raw engine schemas.
 
+## Extensibility seams (Phase 4)
+
+Engine-agnostic in DXCP means the user-facing contract is stable and intent-shaped, not that the engine is interchangeable today.
+The adapter boundary is the seam for future engines, but DXCP v1 is intentionally Spinnaker-only.
+
+ArtifactSource is the seam for artifact discovery and validation.
+Today it is constrained to AWS S3 semantics and S3-backed artifactRef formats.
+
+Future engines or artifact stores would be added by implementing new adapters or sources and mapping recipes to them.
+Engine selection is not supported in v1 and would require a deliberate contract change.
+
 ## Guardrails mapped to system boundaries
 
 DXCP API boundary:

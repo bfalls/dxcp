@@ -135,6 +135,73 @@ Tradeoff:
 
 ---
 
+## Decision 8: DXCP v1 is single-engine and AWS-scoped
+
+DXCP v1 integrates only with Spinnaker and assumes AWS S3 for artifact storage.
+
+We do:
+- Treat Spinnaker as the sole execution engine in v1.
+- Treat S3-backed artifact references as the only supported artifact store.
+
+We do not:
+- Support multiple execution engines.
+- Support non-S3 artifact stores.
+
+Tradeoff:
+- Simpler contract and safer defaults
+- Reduced portability
+
+---
+
+## Decision 9: Cloud-agnostic and multi-engine are deferred
+
+DXCP does not pursue cloud-agnostic or multi-engine designs without a forcing function.
+
+We do:
+- Preserve seams that can evolve later.
+- Avoid premature abstraction that would complicate the v1 contract.
+
+We do not:
+- Promise a timeline for multi-cloud or multi-engine support.
+
+Tradeoff:
+- Fewer near-term options
+- Clearer focus and delivery
+
+---
+
+## Decision 10: Single environment in v1
+
+DXCP supports a single environment ("sandbox") in v1.
+
+We do:
+- Enforce a single environment in the API and policy layer.
+
+We do not:
+- Support multi-environment rollouts in v1.
+
+Tradeoff:
+- Simplified governance and UI
+- Environment expansion becomes a breaking change
+
+---
+
+## Decision 11: Engine identity is informational only
+
+Engine identity is explicit in records and recipes, but not selectable by users.
+
+We do:
+- Record engine identity for diagnostics and future compatibility.
+
+We do not:
+- Allow engine selection or routing in v1.
+
+Tradeoff:
+- Clearer audit trail
+- No multi-engine flexibility
+
+---
+
 ## Reinforced non-goals
 
 - CI system ownership

@@ -34,6 +34,7 @@ Fields:
 - environment: resolved environment
 - version: artifact version
 - recipeId: recipe id used
+- engine_type: execution engine identity (informational; SPINNAKER in v1)
 - state: one of PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK
 - deploymentKind: one of ROLL_FORWARD, ROLLBACK
 - outcome (optional): one of SUCCEEDED, FAILED, ROLLED_BACK, CANCELED, SUPERSEDED
@@ -125,6 +126,7 @@ Fields:
 - id: unique identifier
 - name: human readable name
 - description: short purpose statement
+- engine_type: execution engine identity (informational; SPINNAKER in v1)
 - spinnaker_application: engine application identifier
 - deploy_pipeline: engine pipeline identifier for deploy
 - rollback_pipeline: engine pipeline identifier for rollback
@@ -191,3 +193,4 @@ Notes:
 - CurrentRunningState is computed from DeploymentRecord history stored by DXCP.
 - Deployment state is refreshed from the engine only when specific deployment records are fetched; list endpoints do not poll the engine.
 - DXCP exposes a single environment ("sandbox") and does not model traffic splits or multi-environment rollouts in Phase 3.
+- ArtifactRef is AWS S3-scoped today (s3://bucket/key) and validated against allowlisted sources.
