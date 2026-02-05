@@ -19,6 +19,19 @@ class DeploymentState(str, Enum):
     ROLLED_BACK = "ROLLED_BACK"
 
 
+class DeploymentOutcome(str, Enum):
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    ROLLED_BACK = "ROLLED_BACK"
+    CANCELED = "CANCELED"
+    SUPERSEDED = "SUPERSEDED"
+
+
+class DeploymentKind(str, Enum):
+    ROLL_FORWARD = "ROLL_FORWARD"
+    ROLLBACK = "ROLLBACK"
+
+
 class RecipeStatus(str, Enum):
     ACTIVE = "active"
     DEPRECATED = "deprecated"
@@ -47,6 +60,8 @@ class DeploymentRecord(BaseModel):
     version: str
     recipeId: str
     state: DeploymentState
+    deploymentKind: Optional[DeploymentKind] = None
+    outcome: Optional[DeploymentOutcome] = None
     changeSummary: str
     createdAt: str
     updatedAt: str

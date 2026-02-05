@@ -729,7 +729,7 @@ class Storage:
             params.append(state)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY created_at DESC"
+        query += " ORDER BY created_at DESC, id DESC"
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
         deployments = []
@@ -1373,7 +1373,10 @@ class DynamoStorage:
                     "failures": item.get("failures", []),
                 }
             )
-        deployments.sort(key=lambda d: d.get("createdAt", ""), reverse=True)
+        deployments.sort(
+            key=lambda d: (d.get("createdAt", ""), d.get("id", "")),
+            reverse=True,
+        )
         return deployments
 
     def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:

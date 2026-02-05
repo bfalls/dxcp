@@ -605,12 +605,68 @@ def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
         payload["spinnakerPipeline"] = recipe.get("deploy_pipeline")
 
 
-def _deployment_public_view(actor: Actor, deployment: dict) -> dict:
+def _deployment_kind(deployment: dict) -> str:
+    return "ROLLBACK" if deployment.get("rollbackOf") else "ROLL_FORWARD"
+
+
+def _deployment_outcome(deployment: dict, latest_success_id: Optional[str]) -> Optional[str]:
+    state = deployment.get("state")
+    if state in {"PENDING", "ACTIVE", "IN_PROGRESS"}:
+        return None
+    if state == "SUCCEEDED":
+        if latest_success_id and deployment.get("id") != latest_success_id:
+            return "SUPERSEDED"
+        return "SUCCEEDED"
+    if state == "FAILED":
+        return "FAILED"
+    if state == "CANCELED":
+        return "CANCELED"
+    if state == "ROLLED_BACK":
+        return "ROLLED_BACK"
+    return None
+
+
+def _latest_success_by_service(deployments: list[dict]) -> dict[str, dict]:
+    latest: dict[str, dict] = {}
+    for deployment in deployments:
+        if deployment.get("state") != "SUCCEEDED":
+            continue
+        service = deployment.get("service")
+        if service and service not in latest:
+            latest[service] = deployment
+    return latest
+
+
+def _current_running_state(service: str, deployments: list[dict]) -> Optional[dict]:
+    for deployment in deployments:
+        if deployment.get("state") == "SUCCEEDED":
+            return {
+                "service": service,
+                "environment": deployment.get("environment") or "sandbox",
+                "scope": "service",
+                "version": deployment.get("version"),
+                "deploymentId": deployment.get("id"),
+                "deploymentKind": _deployment_kind(deployment),
+                "derivedAt": utc_now(),
+            }
+    return None
+
+
+def _deployment_public_view(
+    actor: Actor,
+    deployment: dict,
+    latest_success_by_service: Optional[dict[str, dict]] = None,
+) -> dict:
     delivery_group_id = deployment.get("deliveryGroupId")
     if not delivery_group_id and deployment.get("service"):
         group = storage.get_delivery_group_for_service(deployment["service"])
         if group:
             delivery_group_id = group.get("id")
+    latest_success_id = None
+    if latest_success_by_service is not None:
+        latest = latest_success_by_service.get(deployment.get("service"))
+        if latest:
+            latest_success_id = latest.get("id")
     payload = {
         "id": deployment.get("id"),
         "service": deployment.get("service"),
@@ -618,6 +674,8 @@ def _deployment_public_view(actor: Actor, deployment: dict) -> dict:
         "version": deployment.get("version"),
         "recipeId": deployment.get("recipeId"),
         "state": deployment.get("state"),
+        "deploymentKind": _deployment_kind(deployment),
+        "outcome": _deployment_outcome(deployment, latest_success_id),
         "changeSummary": deployment.get("changeSummary"),
         "createdAt": deployment.get("createdAt"),
         "updatedAt": deployment.get("updatedAt"),
@@ -1121,7 +1179,11 @@ def list_deployments(
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployments = storage.list_deployments(service, state)
-    return [_deployment_public_view(actor, deployment) for deployment in deployments]
+    latest_success_by_service = _latest_success_by_service(deployments)
+    return [
+        _deployment_public_view(actor, deployment, latest_success_by_service)
+        for deployment in deployments
+    ]
 
 
 @app.get("/v1/services")
@@ -1351,8 +1413,10 @@ def get_service_delivery_status(
             "service": service,
             "hasDeployments": False,
             "latest": None,
+            "currentRunning": None,
         }
     latest = deployments[0]
+    latest_success_by_service = _latest_success_by_service(deployments)
     payload = {
         "service": service,
         "hasDeployments": True,
@@ -1364,7 +1428,13 @@ def get_service_delivery_status(
             "createdAt": latest.get("createdAt"),
             "updatedAt": latest.get("updatedAt"),
             "rollbackOf": latest.get("rollbackOf"),
+            "deploymentKind": _deployment_kind(latest),
+            "outcome": _deployment_outcome(
+                latest,
+                latest_success_by_service.get(service, {}).get("id"),
+            ),
         },
+        "currentRunning": _current_running_state(service, deployments),
     }
     if actor.role == Role.PLATFORM_ADMIN:
         payload["latest"]["engineExecutionId"] = latest.get("spinnakerExecutionId")
@@ -1426,7 +1496,9 @@ def get_deployment(
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
-    return _deployment_public_view(actor, deployment)
+    deployments = storage.list_deployments(deployment.get("service"), None)
+    latest_success_by_service = _latest_success_by_service(deployments)
+    return _deployment_public_view(actor, deployment, latest_success_by_service)
 
 
 @app.get("/v1/deployments/{deployment_id}/failures")

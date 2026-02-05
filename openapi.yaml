@@ -144,6 +144,28 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /services/{service}/delivery-status:
+    get:
+      summary: Latest deployment status and current running version
+      operationId: getServiceDeliveryStatus
+      parameters:
+        - name: service
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Delivery status for a service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceDeliveryStatus'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /deployments/{deploymentId}/rollback:
     post:
       summary: Trigger rollback
@@ -276,6 +298,8 @@ components:
         - version
         - recipeId
         - state
+        - deploymentKind
+        - outcome
         - changeSummary
         - createdAt
         - updatedAt
@@ -294,6 +318,12 @@ components:
           type: string
         state:
           $ref: '#/components/schemas/DeploymentState'
+        deploymentKind:
+          $ref: '#/components/schemas/DeploymentKind'
+        outcome:
+          allOf:
+            - $ref: '#/components/schemas/DeploymentOutcome'
+          nullable: true
         changeSummary:
           type: string
         createdAt:
@@ -368,6 +398,103 @@ components:
     DeploymentState:
       type: string
       enum: [PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK]
+    DeploymentOutcome:
+      type: string
+      enum: [SUCCEEDED, FAILED, ROLLED_BACK, CANCELED, SUPERSEDED]
+    DeploymentKind:
+      type: string
+      enum: [ROLL_FORWARD, ROLLBACK]
+    CurrentRunningState:
+      type: object
+      required:
+        - service
+        - environment
+        - scope
+        - version
+        - deploymentId
+        - deploymentKind
+        - derivedAt
+      properties:
+        service:
+          type: string
+        environment:
+          type: string
+          enum: [sandbox]
+        scope:
+          type: string
+          enum: [service]
+        version:
+          type: string
+        deploymentId:
+          type: string
+        deploymentKind:
+          $ref: '#/components/schemas/DeploymentKind'
+        derivedAt:
+          type: string
+          format: date-time
+    DeploymentSummary:
+      type: object
+      required:
+        - id
+        - state
+        - version
+        - recipeId
+        - createdAt
+        - updatedAt
+        - rollbackOf
+        - deploymentKind
+        - outcome
+      properties:
+        id:
+          type: string
+        state:
+          $ref: '#/components/schemas/DeploymentState'
+        version:
+          type: string
+        recipeId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        rollbackOf:
+          type: string
+          nullable: true
+        deploymentKind:
+          $ref: '#/components/schemas/DeploymentKind'
+        outcome:
+          allOf:
+            - $ref: '#/components/schemas/DeploymentOutcome'
+          nullable: true
+        engineExecutionId:
+          type: string
+          description: Admin-only engine execution identifier.
+        engineExecutionUrl:
+          type: string
+          format: uri
+          description: Admin-only engine execution link.
+    ServiceDeliveryStatus:
+      type: object
+      required:
+        - service
+        - hasDeployments
+        - latest
+        - currentRunning
+      properties:
+        service:
+          type: string
+        hasDeployments:
+          type: boolean
+        latest:
+          allOf:
+            - $ref: '#/components/schemas/DeploymentSummary'
+          nullable: true
+        currentRunning:
+          allOf:
+            - $ref: '#/components/schemas/CurrentRunningState'
+          nullable: true
     NormalizedFailure:
       type: object
       required: [category, summary, observedAt]

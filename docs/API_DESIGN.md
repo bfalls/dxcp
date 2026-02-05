@@ -110,6 +110,8 @@ Fields:
 - version
 - recipeId
 - state (PENDING | IN_PROGRESS | ACTIVE | SUCCEEDED | FAILED | CANCELED | ROLLED_BACK)
+- deploymentKind (ROLL_FORWARD | ROLLBACK)
+- outcome (SUCCEEDED | FAILED | ROLLED_BACK | CANCELED | SUPERSEDED; null while in progress)
 - changeSummary
 - createdAt
 - updatedAt
@@ -282,7 +284,7 @@ Fields:
 
 - GET /v1/services/{service}/delivery-status
   - Latest deployment summary for a service
-  - Response: { service, hasDeployments, latest }
+  - Response: { service, hasDeployments, latest, currentRunning }
 
 - GET /v1/services/{service}/allowed-actions
   - Allowed actions for the service and caller role

@@ -35,6 +35,8 @@ Fields:
 - version: artifact version
 - recipeId: recipe id used
 - state: one of PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK
+- deploymentKind: one of ROLL_FORWARD, ROLLBACK
+- outcome (optional): one of SUCCEEDED, FAILED, ROLLED_BACK, CANCELED, SUPERSEDED
 - changeSummary: user-provided change summary
 - createdAt: timestamp
 - updatedAt: timestamp
@@ -47,6 +49,37 @@ Fields:
 Notes:
 - Record is the primary status source for the UI.
 - Engine details are referenced, not embedded.
+- deploymentKind is derived from rollbackOf (present => ROLLBACK).
+- outcome is a normalized terminal result; in-flight states have no outcome.
+
+## CurrentRunningState
+
+Authoritative "what is running" snapshot for a single service.
+
+Fields:
+- service: allowlisted service name
+- environment: always "sandbox"
+- scope: always "service"
+- version: currently running version (latest successful deployment)
+- deploymentId: deployment record that established the running version
+- deploymentKind: ROLL_FORWARD or ROLLBACK
+- derivedAt: timestamp when DXCP computed the running state
+
+Notes:
+- CurrentRunningState is derived from DeploymentRecord history only.
+- It is not a runtime health check or traffic split indicator.
+- If no successful deployment exists, current running state is null.
+
+## DeploymentOutcome
+
+Normalized outcome for a deployment record.
+
+Values:
+- SUCCEEDED: deployment completed successfully and is the current running version.
+- FAILED: deployment failed and did not change the running version.
+- CANCELED: deployment was canceled before completion.
+- ROLLED_BACK: deployment completed but was later rolled back.
+- SUPERSEDED: deployment succeeded but is no longer the running version.
 
 ## FailureModel
 
@@ -62,6 +95,27 @@ Fields:
 Notes:
 - Multiple failures can be associated with a single record.
 - FailureModel is shown directly in the UI.
+
+## DeploymentHistory Semantics
+
+Ordering:
+- Sorted by createdAt (descending), then id (descending) as a stable tie-breaker.
+
+Dedupe:
+- No dedupe beyond idempotency behavior; each unique intent produces one record.
+
+Correlation:
+- A DeploymentIntent always results in a DeploymentRecord with the same service, version, recipeId, and environment.
+- Idempotency-Key retries return the same DeploymentRecord.
+
+Supersession:
+- The latest successful deployment for a service supersedes earlier successful deployments for "current running" purposes.
+
+## Roll-forward vs Rollback Representation
+
+- deploymentKind = ROLL_FORWARD when rollbackOf is null.
+- deploymentKind = ROLLBACK when rollbackOf references a prior deployment id.
+- rollbackOf captures the lineage for rollback operations.
 
 ## Recipe
 
@@ -131,3 +185,9 @@ Fields:
 
 Notes:
 - Audit events are immutable and retained as the system of record for actions.
+
+## Contract Notes
+
+- CurrentRunningState is computed from DeploymentRecord history stored by DXCP.
+- Deployment state is refreshed from the engine only when specific deployment records are fetched; list endpoints do not poll the engine.
+- DXCP exposes a single environment ("sandbox") and does not model traffic splits or multi-environment rollouts in Phase 3.
