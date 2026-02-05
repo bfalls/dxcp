@@ -542,7 +542,7 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded' },
+      preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded', failure_cause: 'POLICY_CHANGE' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)

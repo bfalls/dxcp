@@ -260,6 +260,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert created.get("last_change_reason") in (None, "")
     assert created["recipe_revision"] == 1
     assert created["effective_behavior_summary"] == "Audit recipe behavior summary."
+    assert created["engine_type"] == "SPINNAKER"
 
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
@@ -287,6 +288,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert updated["last_change_reason"] == "Refine metadata"
     assert updated["recipe_revision"] == 2
     assert updated["effective_behavior_summary"] == "Audit recipe behavior summary v2."
+    assert updated["engine_type"] == "SPINNAKER"
 
 
 async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkeypatch):
@@ -300,6 +302,7 @@ async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkey
         created = response.json()
         assert created["recipeRevision"] == 1
         assert created["effectiveBehaviorSummary"] == "Standard roll-forward deploy with rollback support."
+        assert created["engine_type"] == "SPINNAKER"
 
         update = await client.put(
             "/v1/recipes/default",
@@ -325,3 +328,4 @@ async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkey
         record = detail.json()
         assert record["recipeRevision"] == 1
         assert record["effectiveBehaviorSummary"] == "Standard roll-forward deploy with rollback support."
+        assert record["engine_type"] == "SPINNAKER"

@@ -37,6 +37,11 @@ class RecipeStatus(str, Enum):
     DEPRECATED = "deprecated"
 
 
+class EngineType(str, Enum):
+    # Explicit engine identity even while DXCP is Spinnaker-only.
+    SPINNAKER = "SPINNAKER"
+
+
 class DeploymentIntent(BaseModel):
     service: str
     environment: str
@@ -70,6 +75,7 @@ class DeploymentRecord(BaseModel):
     createdAt: str
     updatedAt: str
     deliveryGroupId: str
+    engine_type: EngineType
     engineExecutionId: Optional[str] = None
     engineExecutionUrl: Optional[str] = None
     rollbackOf: Optional[str] = None
@@ -119,6 +125,7 @@ class Recipe(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    engine_type: EngineType
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None

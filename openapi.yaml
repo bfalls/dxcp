@@ -330,6 +330,7 @@ components:
         - createdAt
         - updatedAt
         - deliveryGroupId
+        - engine_type
       properties:
         id:
           type: string
@@ -368,6 +369,8 @@ components:
           format: date-time
         deliveryGroupId:
           type: string
+        engine_type:
+          $ref: '#/components/schemas/EngineType'
         engineExecutionId:
           type: string
           description: Admin-only engine execution identifier.
@@ -438,6 +441,9 @@ components:
     DeploymentKind:
       type: string
       enum: [ROLL_FORWARD, ROLLBACK]
+    EngineType:
+      type: string
+      enum: [SPINNAKER]
     CurrentRunningState:
       type: object
       required:
@@ -615,7 +621,7 @@ components:
           format: date-time
     Recipe:
       type: object
-      required: [id, name, recipe_revision, effective_behavior_summary, status]
+      required: [id, name, recipe_revision, effective_behavior_summary, status, engine_type]
       properties:
         id:
           type: string
@@ -623,6 +629,8 @@ components:
           type: string
         description:
           type: string
+        engine_type:
+          $ref: '#/components/schemas/EngineType'
         spinnaker_application:
           type: string
         deploy_pipeline:

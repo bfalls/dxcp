@@ -26,6 +26,7 @@ from models import (
     DeliveryGroup,
     DeliveryGroupUpsert,
     DeploymentIntent,
+    EngineType,
     Recipe,
     RecipeUpsert,
     Role,
@@ -756,6 +757,7 @@ def _deployment_public_view(
         "updatedAt": deployment.get("updatedAt"),
         "rollbackOf": deployment.get("rollbackOf"),
         "deliveryGroupId": delivery_group_id,
+        "engine_type": deployment.get("engine_type") or EngineType.SPINNAKER.value,
         "failures": deployment.get("failures") or [],
     }
     if actor.role == Role.PLATFORM_ADMIN:
@@ -1153,6 +1155,7 @@ def create_deployment(
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
+        "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
         "spinnakerExecutionId": execution["executionId"],
         "spinnakerExecutionUrl": execution["executionUrl"],
         "spinnakerApplication": payload.get("spinnakerApplication"),
@@ -1391,6 +1394,7 @@ def create_recipe(
     rate_limiter.check_mutate(actor.actor_id, "recipe_create")
     payload = recipe.dict()
     payload.pop("change_reason", None)
+    payload["engine_type"] = EngineType.SPINNAKER.value
     validation_error = _validate_recipe_payload(payload)
     if validation_error:
         return validation_error
@@ -1423,6 +1427,7 @@ def update_recipe(
         return role_error
     rate_limiter.check_mutate(actor.actor_id, "recipe_update")
     payload = recipe.dict()
+    payload["engine_type"] = EngineType.SPINNAKER.value
     validation_error = _validate_recipe_payload(payload, recipe_id)
     if validation_error:
         return validation_error
@@ -1946,6 +1951,7 @@ def rollback_deployment(
         "rollbackOf": deployment_id,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
+        "engine_type": (recipe.get("engine_type") if recipe else None) or EngineType.SPINNAKER.value,
         "spinnakerExecutionId": execution["executionId"],
         "spinnakerExecutionUrl": execution["executionUrl"],
         "deliveryGroupId": group["id"],

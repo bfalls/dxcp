@@ -49,6 +49,9 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+DEFAULT_ENGINE_TYPE = "SPINNAKER"
+
+
 class Storage:
     def __init__(self, db_path: str, registry_path: str) -> None:
         self.db_path = db_path
@@ -81,6 +84,7 @@ class Storage:
                 change_summary TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                engine_type TEXT,
                 spinnaker_execution_id TEXT NOT NULL,
                 spinnaker_execution_url TEXT NOT NULL,
                 spinnaker_application TEXT,
@@ -101,6 +105,7 @@ class Storage:
         self._ensure_column(cur, "deployments", "recipe_id", "TEXT")
         self._ensure_column(cur, "deployments", "recipe_revision", "INTEGER")
         self._ensure_column(cur, "deployments", "effective_behavior_summary", "TEXT")
+        self._ensure_column(cur, "deployments", "engine_type", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -186,6 +191,7 @@ class Storage:
                 name TEXT NOT NULL,
                 description TEXT,
                 allowed_parameters TEXT NOT NULL,
+                engine_type TEXT,
                 spinnaker_application TEXT,
                 deploy_pipeline TEXT,
                 rollback_pipeline TEXT,
@@ -208,6 +214,7 @@ class Storage:
         self._ensure_column(cur, "recipes", "updated_at", "TEXT")
         self._ensure_column(cur, "recipes", "updated_by", "TEXT")
         self._ensure_column(cur, "recipes", "last_change_reason", "TEXT")
+        self._ensure_column(cur, "recipes", "engine_type", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_events (
@@ -394,21 +401,23 @@ class Storage:
     def insert_recipe(self, recipe: dict) -> dict:
         recipe_revision = recipe.get("recipe_revision") or 1
         effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
+        engine_type = recipe.get("engine_type") or DEFAULT_ENGINE_TYPE
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO recipes (
-                id, name, description, allowed_parameters,
+                id, name, description, allowed_parameters, engine_type,
                 spinnaker_application, deploy_pipeline, rollback_pipeline, recipe_revision, effective_behavior_summary, status,
                 created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recipe["id"],
                 recipe["name"],
                 recipe.get("description"),
                 self._serialize_json(recipe.get("allowed_parameters", [])),
+                engine_type,
                 recipe.get("spinnaker_application"),
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
@@ -426,6 +435,7 @@ class Storage:
         conn.close()
         recipe["recipe_revision"] = recipe_revision
         recipe["effective_behavior_summary"] = effective_behavior_summary
+        recipe["engine_type"] = engine_type
         return recipe
 
     def insert_audit_event(self, event: dict) -> dict:
@@ -492,12 +502,13 @@ class Storage:
     def update_recipe(self, recipe: dict) -> dict:
         recipe_revision = recipe.get("recipe_revision") or 1
         effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
+        engine_type = recipe.get("engine_type") or DEFAULT_ENGINE_TYPE
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
             """
             UPDATE recipes
-            SET name = ?, description = ?, allowed_parameters = ?,
+            SET name = ?, description = ?, allowed_parameters = ?, engine_type = ?,
                 spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, recipe_revision = ?, effective_behavior_summary = ?, status = ?,
                 created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
@@ -506,6 +517,7 @@ class Storage:
                 recipe["name"],
                 recipe.get("description"),
                 self._serialize_json(recipe.get("allowed_parameters", [])),
+                engine_type,
                 recipe.get("spinnaker_application"),
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
@@ -524,6 +536,7 @@ class Storage:
         conn.close()
         recipe["recipe_revision"] = recipe_revision
         recipe["effective_behavior_summary"] = effective_behavior_summary
+        recipe["engine_type"] = engine_type
         return recipe
 
     def _row_to_recipe(self, row: sqlite3.Row) -> dict:
@@ -534,6 +547,7 @@ class Storage:
             "name": row["name"],
             "description": row["description"],
             "allowed_parameters": self._deserialize_json(row["allowed_parameters"], []),
+            "engine_type": row["engine_type"] or DEFAULT_ENGINE_TYPE,
             "spinnaker_application": row["spinnaker_application"],
             "deploy_pipeline": row["deploy_pipeline"],
             "rollback_pipeline": row["rollback_pipeline"],
@@ -637,6 +651,7 @@ class Storage:
             "name": "Default Deploy",
             "description": "Default recipe for demo deployments",
             "allowed_parameters": [],
+            "engine_type": DEFAULT_ENGINE_TYPE,
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
@@ -686,6 +701,7 @@ class Storage:
             outcome = base_outcome_from_state(record.get("state"))
         intent_correlation_id = record.get("intentCorrelationId")
         superseded_by = record.get("supersededBy")
+        engine_type = record.get("engine_type") or DEFAULT_ENGINE_TYPE
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
@@ -693,9 +709,9 @@ class Storage:
             INSERT INTO deployments (
                 id, service, environment, version, recipe_id, recipe_revision, effective_behavior_summary, state, deployment_kind, outcome,
                 intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
-                spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
+                engine_type, spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
                 rollback_of, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -713,6 +729,7 @@ class Storage:
                 record["changeSummary"],
                 record["createdAt"],
                 record["updatedAt"],
+                engine_type,
                 record["spinnakerExecutionId"],
                 record["spinnakerExecutionUrl"],
                 record.get("spinnakerApplication"),
@@ -728,6 +745,7 @@ class Storage:
         record["outcome"] = outcome
         record["intentCorrelationId"] = intent_correlation_id
         record["supersededBy"] = superseded_by
+        record["engine_type"] = engine_type
         if outcome == "SUCCEEDED":
             self.apply_supersession(record)
 
@@ -846,6 +864,7 @@ class Storage:
             "changeSummary": row["change_summary"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
+            "engine_type": row["engine_type"] or DEFAULT_ENGINE_TYPE,
             "spinnakerExecutionId": row["spinnaker_execution_id"],
             "spinnakerExecutionUrl": row["spinnaker_execution_url"],
             "spinnakerApplication": row["spinnaker_application"],
@@ -1223,6 +1242,7 @@ class DynamoStorage:
                     "name": item.get("name"),
                     "description": item.get("description"),
                     "allowed_parameters": item.get("allowed_parameters", []),
+                    "engine_type": item.get("engine_type") or DEFAULT_ENGINE_TYPE,
                     "spinnaker_application": item.get("spinnaker_application"),
                     "deploy_pipeline": item.get("deploy_pipeline"),
                     "rollback_pipeline": item.get("rollback_pipeline"),
@@ -1251,6 +1271,7 @@ class DynamoStorage:
             "name": item.get("name"),
             "description": item.get("description"),
             "allowed_parameters": item.get("allowed_parameters", []),
+            "engine_type": item.get("engine_type") or DEFAULT_ENGINE_TYPE,
             "spinnaker_application": item.get("spinnaker_application"),
             "deploy_pipeline": item.get("deploy_pipeline"),
             "rollback_pipeline": item.get("rollback_pipeline"),
@@ -1267,6 +1288,7 @@ class DynamoStorage:
     def insert_recipe(self, recipe: dict) -> dict:
         recipe_revision = recipe.get("recipe_revision") or 1
         effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
+        engine_type = recipe.get("engine_type") or DEFAULT_ENGINE_TYPE
         item = {
             "pk": "RECIPE",
             "sk": recipe["id"],
@@ -1274,6 +1296,7 @@ class DynamoStorage:
             "name": recipe["name"],
             "description": recipe.get("description"),
             "allowed_parameters": recipe.get("allowed_parameters", []),
+            "engine_type": engine_type,
             "spinnaker_application": recipe.get("spinnaker_application"),
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
@@ -1289,11 +1312,13 @@ class DynamoStorage:
         self.table.put_item(Item=item)
         recipe["recipe_revision"] = recipe_revision
         recipe["effective_behavior_summary"] = effective_behavior_summary
+        recipe["engine_type"] = engine_type
         return recipe
 
     def update_recipe(self, recipe: dict) -> dict:
         recipe_revision = recipe.get("recipe_revision") or 1
         effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
+        engine_type = recipe.get("engine_type") or DEFAULT_ENGINE_TYPE
         item = {
             "pk": "RECIPE",
             "sk": recipe["id"],
@@ -1301,6 +1326,7 @@ class DynamoStorage:
             "name": recipe["name"],
             "description": recipe.get("description"),
             "allowed_parameters": recipe.get("allowed_parameters", []),
+            "engine_type": engine_type,
             "spinnaker_application": recipe.get("spinnaker_application"),
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
@@ -1316,6 +1342,7 @@ class DynamoStorage:
         self.table.put_item(Item=item)
         recipe["recipe_revision"] = recipe_revision
         recipe["effective_behavior_summary"] = effective_behavior_summary
+        recipe["engine_type"] = engine_type
         return recipe
 
     def insert_audit_event(self, event: dict) -> dict:
@@ -1395,6 +1422,7 @@ class DynamoStorage:
             "name": "Default Deploy",
             "description": "Default recipe for demo deployments",
             "allowed_parameters": [],
+            "engine_type": DEFAULT_ENGINE_TYPE,
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
@@ -1433,6 +1461,7 @@ class DynamoStorage:
             outcome = base_outcome_from_state(record.get("state"))
         intent_correlation_id = record.get("intentCorrelationId")
         superseded_by = record.get("supersededBy")
+        engine_type = record.get("engine_type") or DEFAULT_ENGINE_TYPE
         item = {
             "pk": "DEPLOYMENT",
             "sk": record["id"],
@@ -1451,6 +1480,7 @@ class DynamoStorage:
             "changeSummary": record["changeSummary"],
             "createdAt": record["createdAt"],
             "updatedAt": record["updatedAt"],
+            "engine_type": engine_type,
             "spinnakerExecutionId": record["spinnakerExecutionId"],
             "spinnakerExecutionUrl": record["spinnakerExecutionUrl"],
             "spinnakerApplication": record.get("spinnakerApplication"),
@@ -1464,6 +1494,7 @@ class DynamoStorage:
         record["outcome"] = outcome
         record["intentCorrelationId"] = intent_correlation_id
         record["supersededBy"] = superseded_by
+        record["engine_type"] = engine_type
         if outcome == "SUCCEEDED":
             self.apply_supersession(record)
 
@@ -1516,6 +1547,7 @@ class DynamoStorage:
             "changeSummary": item.get("changeSummary"),
             "createdAt": item.get("createdAt"),
             "updatedAt": item.get("updatedAt"),
+            "engine_type": item.get("engine_type") or DEFAULT_ENGINE_TYPE,
             "spinnakerExecutionId": item.get("spinnakerExecutionId"),
             "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
             "spinnakerApplication": item.get("spinnakerApplication"),
@@ -1550,6 +1582,7 @@ class DynamoStorage:
                     "changeSummary": item.get("changeSummary"),
                     "createdAt": item.get("createdAt"),
                     "updatedAt": item.get("updatedAt"),
+                    "engine_type": item.get("engine_type") or DEFAULT_ENGINE_TYPE,
                     "spinnakerExecutionId": item.get("spinnakerExecutionId"),
                     "spinnakerExecutionUrl": item.get("spinnakerExecutionUrl"),
                     "spinnakerApplication": item.get("spinnakerApplication"),
