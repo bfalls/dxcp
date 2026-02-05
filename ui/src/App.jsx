@@ -202,6 +202,57 @@ function statusClass(state) {
   return `status ${state || ''}`
 }
 
+const OUTCOME_LABELS = {
+  SUCCEEDED: 'Succeeded',
+  FAILED: 'Failed',
+  CANCELED: 'Canceled',
+  ROLLED_BACK: 'Rolled back',
+  SUPERSEDED: 'Superseded'
+}
+
+const OUTCOME_TONES = {
+  SUCCEEDED: 'info',
+  FAILED: 'danger',
+  CANCELED: 'warn',
+  ROLLED_BACK: 'neutral',
+  SUPERSEDED: 'warn'
+}
+
+function resolveOutcome(outcome, state) {
+  if (outcome) return outcome
+  if (!state || state === 'PENDING' || state === 'ACTIVE' || state === 'IN_PROGRESS') return null
+  if (OUTCOME_LABELS[state]) return state
+  return null
+}
+
+function outcomeLabel(outcome, state) {
+  const resolved = resolveOutcome(outcome, state)
+  if (!resolved) return 'In progress'
+  return OUTCOME_LABELS[resolved] || resolved
+}
+
+function outcomeTone(outcome, state) {
+  const resolved = resolveOutcome(outcome, state)
+  if (!resolved) return 'neutral'
+  return OUTCOME_TONES[resolved] || 'neutral'
+}
+
+function resolveDeploymentKind(kind, rollbackOf) {
+  if (kind) return kind
+  return rollbackOf ? 'ROLLBACK' : 'ROLL_FORWARD'
+}
+
+function deploymentKindLabel(kind, rollbackOf) {
+  const resolved = resolveDeploymentKind(kind, rollbackOf)
+  return resolved === 'ROLLBACK' ? 'Rollback' : 'Roll-forward'
+}
+
+function findTimelineStep(steps, keys) {
+  if (!Array.isArray(steps)) return null
+  const keySet = new Set(Array.isArray(keys) ? keys : [keys])
+  return steps.find((step) => keySet.has(step.key)) || null
+}
+
 function isSameUtcDay(date, now) {
   return (
     date.getUTCFullYear() === now.getUTCFullYear() &&
@@ -233,6 +284,13 @@ function applyTemplate(value, serviceName) {
   if (!value) return ''
   if (!serviceName) return value
   return String(value).replace('{service}', serviceName)
+}
+
+function shortId(value) {
+  if (!value) return ''
+  const text = String(value)
+  if (text.length <= 12) return text
+  return `${text.slice(0, 8)}…${text.slice(-4)}`
 }
 
 function parseBackstageRef(ref) {
@@ -496,6 +554,7 @@ export default function App() {
     BACKSTAGE_BASE_URL
   )
   const serviceDetailLatest = serviceDetailStatus?.latest || null
+  const serviceDetailRunning = serviceDetailStatus?.currentRunning || null
   // UI-only role display; API permissions are authoritative.
   const derivedRole = Array.isArray(derivedRoles)
     ? derivedRoles.includes('dxcp-platform-admins')
@@ -558,6 +617,14 @@ export default function App() {
     [policyDeployments, currentDeliveryGroup]
   )
   const timelineSteps = useMemo(() => normalizeTimelineSteps(timeline), [timeline])
+  const selectedValidatedAt = useMemo(
+    () => findTimelineStep(timelineSteps, ['validated'])?.occurredAt || '',
+    [timelineSteps]
+  )
+  const selectedExecutionAt = useMemo(
+    () => findTimelineStep(timelineSteps, ['in_progress', 'active'])?.occurredAt || '',
+    [timelineSteps]
+  )
   const sortedServiceNames = useMemo(
     () => services.map((svc) => svc.service_name).filter(Boolean).sort((a, b) => a.localeCompare(b)),
     [services]
@@ -2113,19 +2180,67 @@ export default function App() {
             </div>
           )}
 
-          {!serviceDetailLoading && serviceDetailTab === 'overview' && (
-            <>
-              <div className="card">
-                <h2>Latest delivery status</h2>
-                {serviceDetailLatest ? (
-                  <div>
-                    <div className={statusClass(serviceDetailLatest.state)}>
-                      {serviceDetailLatest.state}
+            {!serviceDetailLoading && serviceDetailTab === 'overview' && (
+              <>
+                <div className="card">
+                  <h2>What is running</h2>
+                  {serviceDetailRunning ? (
+                    <div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className="badge info">Source: Authoritative</span>
+                        <span className="badge neutral">
+                          Operation: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}
+                        </span>
+                      </div>
+                      <p style={{ marginTop: '8px' }}>
+                        Version: <strong>{serviceDetailRunning.version || '-'}</strong>
+                      </p>
+                      <p>Environment: {serviceDetailRunning.environment || 'sandbox'}</p>
+                      <p>
+                        Established by: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}{' '}
+                        {serviceDetailRunning.deploymentId ? (
+                          <>
+                            <span className="helper">deployment {shortId(serviceDetailRunning.deploymentId)}</span>
+                            <button
+                              className="button secondary"
+                              style={{ marginLeft: '8px' }}
+                              onClick={() => openDeployment({ id: serviceDetailRunning.deploymentId })}
+                            >
+                              View deployment
+                            </button>
+                          </>
+                        ) : (
+                          ''
+                        )}
+                      </p>
+                      {serviceDetailRunning.derivedAt && (
+                        <p>Derived: {formatTime(serviceDetailRunning.derivedAt)}</p>
+                      )}
+                      <div className="helper" style={{ marginTop: '8px' }}>
+                        Derived from DXCP deployment records.
+                      </div>
                     </div>
-                    <p>Version: {serviceDetailLatest.version || '-'}</p>
-                    <p>Updated: {formatTime(serviceDetailLatest.updatedAt || serviceDetailLatest.createdAt)}</p>
-                    {serviceDetailLatest.rollbackOf && (
-                      <p>Rollback of: {serviceDetailLatest.rollbackOf}</p>
+                  ) : (
+                    <div className="helper">No running version recorded yet.</div>
+                  )}
+                </div>
+                <div className="card">
+                  <h2>Latest delivery status</h2>
+                  {serviceDetailLatest ? (
+                    <div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className={`badge ${outcomeTone(serviceDetailLatest.outcome, serviceDetailLatest.state)}`}>
+                          Outcome: {outcomeLabel(serviceDetailLatest.outcome, serviceDetailLatest.state)}
+                        </span>
+                        <span className="badge neutral">
+                          Operation: {deploymentKindLabel(serviceDetailLatest.deploymentKind, serviceDetailLatest.rollbackOf)}
+                        </span>
+                        <span className="badge neutral">State: {serviceDetailLatest.state}</span>
+                      </div>
+                      <p>Version: {serviceDetailLatest.version || '-'}</p>
+                      <p>Updated: {formatTime(serviceDetailLatest.updatedAt || serviceDetailLatest.createdAt)}</p>
+                      {serviceDetailLatest.rollbackOf && (
+                        <p>Rollback of: {serviceDetailLatest.rollbackOf}</p>
                     )}
                     <div className="links" style={{ marginTop: '8px' }}>
                       <button
@@ -2232,30 +2347,45 @@ export default function App() {
               <div className="card" style={{ gridColumn: '1 / -1' }}>
                 <h2>Deployment history</h2>
                 {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
-                {serviceDetailHistory.length > 0 && (
-                  <div className="table" style={{ marginTop: '12px' }}>
-                    <div className="table-row header history">
-                      <div>State</div>
-                      <div>Version</div>
-                      <div>Recipe</div>
-                      <div>Rollback</div>
-                      <div>Created</div>
-                      <div>Deployment</div>
-                    </div>
-                    {serviceDetailHistory.map((item) => (
-                      <div className="table-row history" key={item.id}>
-                        <div><span className={statusClass(item.state)}>{item.state}</span></div>
-                        <div>{item.version || '-'}</div>
-                        <div>{getRecipeLabel(item.recipeId)}</div>
-                        <div>{item.rollbackOf ? <span className="badge neutral">Rollback</span> : '-'}</div>
-                        <div>{formatTime(item.createdAt)}</div>
-                        <div>
-                          <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
-                            Open detail
-                          </button>
-                        </div>
+                  {serviceDetailHistory.length > 0 && (
+                    <div className="table" style={{ marginTop: '12px' }}>
+                      <div className="table-row header history">
+                        <div>Outcome</div>
+                        <div>State</div>
+                        <div>Version</div>
+                        <div>Recipe</div>
+                        <div>Operation</div>
+                        <div>Created</div>
+                        <div>Deployment</div>
                       </div>
-                    ))}
+                      {serviceDetailHistory.map((item) => (
+                        <div className="table-row history" key={item.id}>
+                          <div>
+                            <span className={`badge ${outcomeTone(item.outcome, item.state)}`}>
+                              {outcomeLabel(item.outcome, item.state)}
+                            </span>
+                          </div>
+                          <div><span className={statusClass(item.state)}>{item.state}</span></div>
+                          <div>{item.version || '-'}</div>
+                          <div>{getRecipeLabel(item.recipeId)}</div>
+                          <div>
+                            <span className="badge neutral">
+                              {deploymentKindLabel(item.deploymentKind, item.rollbackOf)}
+                            </span>
+                            {item.rollbackOf && (
+                              <div className="helper" style={{ marginTop: '4px' }}>
+                                of {item.rollbackOf}
+                              </div>
+                            )}
+                          </div>
+                          <div>{formatTime(item.createdAt)}</div>
+                          <div>
+                            <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
+                              Open detail
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                   </div>
                 )}
               </div>
@@ -2662,15 +2792,41 @@ export default function App() {
         <div className="shell">
           <div className="card">
             <h2>Deployment detail</h2>
-            {!selected && <div className="helper">Select a deployment from the list.</div>}
-            {selected && (
-              <div>
-                <div className={statusClass(selected.state)}>{selected.state}</div>
-                {statusMessage && <div className="helper" style={{ marginTop: '8px' }}>{statusMessage}</div>}
-                <p>Service: {selected.service}</p>
-                <p>Version: {selected.version}</p>
-                <p>Created: {formatTime(selected.createdAt)}</p>
-                <p>Updated: {formatTime(selected.updatedAt)}</p>
+              {!selected && <div className="helper">Select a deployment from the list.</div>}
+              {selected && (
+                <div>
+                  <div className={statusClass(selected.state)}>{selected.state}</div>
+                  {statusMessage && <div className="helper" style={{ marginTop: '8px' }}>{statusMessage}</div>}
+                  <div className="list" style={{ marginTop: '12px' }}>
+                    <div className="list-item admin-detail">
+                      <div>Intent id</div>
+                      <div>{selected.intentCorrelationId || 'Not captured'}</div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Validated at</div>
+                      <div>{selectedValidatedAt ? formatTime(selectedValidatedAt) : 'Not recorded'}</div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Execution</div>
+                      <div>{selectedExecutionAt ? `Started ${formatTime(selectedExecutionAt)}` : 'Not started yet'}</div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Outcome</div>
+                      <div>
+                        <span className={`badge ${outcomeTone(selected.outcome, selected.state)}`}>
+                          {outcomeLabel(selected.outcome, selected.state)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Operation</div>
+                      <div>{deploymentKindLabel(selected.deploymentKind, selected.rollbackOf)}</div>
+                    </div>
+                  </div>
+                  <p>Service: {selected.service}</p>
+                  <p>Version: {selected.version}</p>
+                  <p>Created: {formatTime(selected.createdAt)}</p>
+                  <p>Updated: {formatTime(selected.updatedAt)}</p>
                 {isPlatformAdmin && selected.engineExecutionId && <p>Execution id: {selected.engineExecutionId}</p>}
                 <div className="links">
                   {isPlatformAdmin && selected.engineExecutionUrl && (
