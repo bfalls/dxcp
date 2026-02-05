@@ -6,6 +6,7 @@
     "api-test": "node scripts/api_test.js",
     "api-test-verbose": "node scripts/api_test.js --verbose",
     "test": "npm run api-test",
+    "lint": "ruff check --select F dxcp-api",
     "api-ping": "bash -lc 'curl -sS ${DXCP_API_BASE:-http://127.0.0.1:8000}/v1/health'",
     "api-smoke": "bash -lc 'curl -sS ${DXCP_API_BASE:-http://127.0.0.1:8000}/v1/health && echo'",
     "ec2-instance-id": "aws ec2 describe-instances --filters 'Name=tag:Name,Values=dxcp-spinnaker' 'Name=instance-state-name,Values=running' --query 'Reservations[0].Instances[0].InstanceId' --output text",

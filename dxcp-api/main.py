@@ -886,7 +886,7 @@ def _register_existing_build_internal(service_entry: dict, service: str, version
         service,
         version,
     )
-    return _deployment_public_view(actor, record)
+    return record
 
 
 def _extract_tags(app: dict) -> list:
