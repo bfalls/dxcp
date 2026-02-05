@@ -7,7 +7,7 @@ def _adapter():
     sys.path.insert(0, str(root))
     from spinnaker_adapter.adapter import SpinnakerAdapter
 
-    return SpinnakerAdapter(base_url="http://spinnaker.local", mode="http")
+    return SpinnakerAdapter(base_url="http://spinnaker.local", mode="http", application="dxcp-demo")
 
 
 def test_trigger_rollback_parameters():
@@ -15,7 +15,7 @@ def test_trigger_rollback_parameters():
     adapter.engine_token = "should-not-be-sent"
     captured = {}
 
-    def fake_request_json(method: str, url: str, body=None):
+    def fake_request_json(method: str, url: str, body=None, **kwargs):
         captured["method"] = method
         captured["url"] = url
         captured["body"] = body

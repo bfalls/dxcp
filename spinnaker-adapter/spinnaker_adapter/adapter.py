@@ -411,15 +411,15 @@ class SpinnakerAdapter:
     def _extract_failures(self, execution: dict, state: str) -> List[dict]:
         if state != "FAILED":
             return []
-        detail = execution.get("statusMessage") or execution.get("message") or execution.get("error")
-        if isinstance(detail, (dict, list)):
-            detail = json.dumps(detail)
+        failures = _classify_execution_failures(execution)
+        if failures:
+            return failures
         return [
             {
                 "category": "UNKNOWN",
-                "summary": "Spinnaker execution failed",
-                "detail": detail,
-                "actionHint": "Check the Spinnaker execution for stage errors.",
+                "summary": "Deployment failed for an unknown reason.",
+                "detail": None,
+                "actionHint": "Retry the deployment or contact the platform team.",
                 "observedAt": self._utc_now(),
             }
         ]
@@ -457,13 +457,332 @@ def normalize_failures(raw_failures: Optional[List[dict]]) -> List[dict]:
         return []
     normalized = []
     for failure in raw_failures:
+        summary = failure.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            summary = "Deployment failed."
+        action_hint = failure.get("actionHint")
+        if not isinstance(action_hint, str) or not action_hint.strip():
+            action_hint = "Retry the deployment or contact the platform team."
         normalized.append(
             {
                 "category": _normalize_failure_category(failure.get("category")),
-                "summary": failure.get("summary", "Unknown failure"),
+                "summary": summary,
                 "detail": failure.get("detail"),
-                "actionHint": failure.get("actionHint"),
+                "actionHint": action_hint,
                 "observedAt": failure.get("observedAt", SpinnakerAdapter._utc_now()),
             }
         )
     return normalized
+
+
+_ERROR_CODE_MAP = {
+    "missing_service": {
+        "category": "VALIDATION",
+        "summary": "Service is not registered for delivery.",
+        "action": "Select an allowlisted service and try again.",
+        "detail": "Service was missing from the request.",
+    },
+    "unknown_service": {
+        "category": "VALIDATION",
+        "summary": "Service is not registered for delivery.",
+        "action": "Select an allowlisted service and try again.",
+        "detail": "Service was not recognized by the delivery system.",
+    },
+    "artifact_bucket_mismatch": {
+        "category": "ARTIFACT",
+        "summary": "Build artifact could not be validated.",
+        "action": "Register the build in the approved artifact store and retry.",
+        "detail": "Artifact storage location did not match expected storage.",
+    },
+    "no_previous_artifact": {
+        "category": "ROLLBACK",
+        "summary": "No prior version is available to roll back.",
+        "action": "Deploy a prior version first or choose a different target.",
+        "detail": "No previous artifact was recorded for rollback.",
+    },
+    "invalid_previous_artifact": {
+        "category": "ROLLBACK",
+        "summary": "Prior version metadata is invalid for rollback.",
+        "action": "Choose a different rollback target or register the build.",
+        "detail": "Previous artifact metadata could not be validated.",
+    },
+    "unauthorized": {
+        "category": "POLICY",
+        "summary": "Deployment was blocked by permissions.",
+        "action": "Confirm your permissions or contact the platform team.",
+        "detail": "Delivery system rejected the request.",
+    },
+    "method_not_allowed": {
+        "category": "VALIDATION",
+        "summary": "Deployment request was not accepted.",
+        "action": "Retry the deployment from DXCP.",
+        "detail": "Delivery system rejected the request method.",
+    },
+    "not_found": {
+        "category": "INFRASTRUCTURE",
+        "summary": "Delivery system is unavailable.",
+        "action": "Retry later or contact the platform team.",
+        "detail": "Delivery system endpoint was not found.",
+    },
+}
+
+_PATTERN_MAP = [
+    {
+        "pattern": "timeout",
+        "category": "TIMEOUT",
+        "summary": "Deployment timed out.",
+        "action": "Retry the deployment or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "timed out",
+        "category": "TIMEOUT",
+        "summary": "Deployment timed out.",
+        "action": "Retry the deployment or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "connection",
+        "category": "INFRASTRUCTURE",
+        "summary": "Delivery system is unavailable.",
+        "action": "Retry later or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "unavailable",
+        "category": "INFRASTRUCTURE",
+        "summary": "Delivery system is unavailable.",
+        "action": "Retry later or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "http 5",
+        "category": "INFRASTRUCTURE",
+        "summary": "Delivery system is unavailable.",
+        "action": "Retry later or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "internal error",
+        "category": "INFRASTRUCTURE",
+        "summary": "Delivery system encountered an internal error.",
+        "action": "Retry later or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "artifact",
+        "category": "ARTIFACT",
+        "summary": "Build artifact could not be validated.",
+        "action": "Register a valid build and retry.",
+        "detail": None,
+    },
+    {
+        "pattern": "checksum",
+        "category": "ARTIFACT",
+        "summary": "Build artifact could not be validated.",
+        "action": "Register a valid build and retry.",
+        "detail": None,
+    },
+    {
+        "pattern": "forbidden",
+        "category": "POLICY",
+        "summary": "Deployment was blocked by policy.",
+        "action": "Review delivery group policy or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "not allowed",
+        "category": "POLICY",
+        "summary": "Deployment was blocked by policy.",
+        "action": "Review delivery group policy or contact the platform team.",
+        "detail": None,
+    },
+    {
+        "pattern": "config",
+        "category": "CONFIG",
+        "summary": "Delivery configuration is missing or invalid.",
+        "action": "Contact the platform team to fix the configuration.",
+        "detail": None,
+    },
+    {
+        "pattern": "pipeline",
+        "category": "CONFIG",
+        "summary": "Delivery configuration is missing or invalid.",
+        "action": "Contact the platform team to fix the configuration.",
+        "detail": None,
+    },
+    {
+        "pattern": "validation",
+        "category": "VALIDATION",
+        "summary": "Deployment request failed validation.",
+        "action": "Verify the service, version, and recipe, then try again.",
+        "detail": None,
+    },
+]
+
+
+def _classify_execution_failures(execution: dict) -> List[dict]:
+    signals = _collect_failure_signals(execution)
+    is_rollback = _is_rollback_execution(execution)
+    for signal in signals:
+        failure = _classify_failure_signal(signal, is_rollback)
+        if failure:
+            return [failure]
+    if is_rollback:
+        return [
+            _build_failure(
+                "ROLLBACK",
+                "Rollback could not be completed.",
+                "Retry the rollback or deploy a known good version.",
+                None,
+            )
+        ]
+    return [
+        _build_failure(
+            "UNKNOWN",
+            "Deployment failed for an unknown reason.",
+            "Retry the deployment or contact the platform team.",
+            None,
+        )
+    ]
+
+
+def _collect_failure_signals(execution: dict) -> List[dict]:
+    signals: List[dict] = []
+    for key in ("statusMessage", "message", "error", "exception"):
+        text = _coerce_text(execution.get(key))
+        if text:
+            signals.append({"text": text})
+    failures = execution.get("failures") or []
+    if isinstance(failures, list):
+        for failure in failures:
+            signals.append(_signal_from_failure(failure))
+    stages = execution.get("stages") or []
+    if isinstance(stages, list):
+        for stage in stages:
+            signal = _signal_from_stage(stage)
+            if signal:
+                signals.append(signal)
+    return [signal for signal in signals if signal]
+
+
+def _signal_from_failure(failure: object) -> dict:
+    if isinstance(failure, dict):
+        text = _coerce_text(
+            failure.get("message")
+            or failure.get("error")
+            or failure.get("detail")
+            or failure.get("exception")
+        )
+        error_code = _extract_error_code(failure)
+        if not text and not error_code:
+            return {}
+        return {"text": text, "error_code": error_code}
+    if failure is None:
+        return {}
+    return {"text": _coerce_text(failure)}
+
+
+def _signal_from_stage(stage: object) -> Optional[dict]:
+    if not isinstance(stage, dict):
+        return None
+    context = stage.get("context") or {}
+    text = _coerce_text(
+        stage.get("statusMessage")
+        or stage.get("message")
+        or stage.get("error")
+        or context.get("error")
+        or context.get("exception")
+        or context.get("details")
+    )
+    error_code = _extract_error_code(context) or _extract_error_code(stage)
+    if not text and not error_code:
+        return None
+    return {
+        "text": text,
+        "error_code": error_code,
+        "stage_type": stage.get("type"),
+        "stage_name": stage.get("name"),
+    }
+
+
+def _coerce_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value)
+        except (TypeError, ValueError):
+            return None
+    return str(value).strip() or None
+
+
+def _extract_error_code(payload: object) -> Optional[str]:
+    if isinstance(payload, str):
+        return payload.strip().lower() or None
+    if not isinstance(payload, dict):
+        return None
+    for key in ("error", "error_code", "errorCode", "code"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return None
+
+
+def _classify_failure_signal(signal: dict, is_rollback: bool) -> Optional[dict]:
+    error_code = (signal.get("error_code") or "").strip().lower()
+    if error_code in _ERROR_CODE_MAP:
+        entry = _ERROR_CODE_MAP[error_code]
+        return _build_failure(
+            entry["category"],
+            entry["summary"],
+            entry["action"],
+            entry.get("detail"),
+        )
+    text = (signal.get("text") or "").lower()
+    if text:
+        for entry in _PATTERN_MAP:
+            if entry["pattern"] in text:
+                return _build_failure(
+                    entry["category"],
+                    entry["summary"],
+                    entry["action"],
+                    entry.get("detail"),
+                )
+    if is_rollback and text:
+        return _build_failure(
+            "ROLLBACK",
+            "Rollback could not be completed.",
+            "Retry the rollback or deploy a known good version.",
+            None,
+        )
+    return None
+
+
+def _is_rollback_execution(execution: dict) -> bool:
+    for key in ("name", "pipelineName", "pipelineConfigId", "type", "kind"):
+        value = execution.get(key)
+        if isinstance(value, str) and "rollback" in value.lower():
+            return True
+    stages = execution.get("stages") or []
+    if isinstance(stages, list):
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            for key in ("type", "name"):
+                value = stage.get(key)
+                if isinstance(value, str) and "rollback" in value.lower():
+                    return True
+    return False
+
+
+def _build_failure(category: str, summary: str, action_hint: str, detail: Optional[str]) -> dict:
+    return {
+        "category": category,
+        "summary": summary,
+        "detail": detail,
+        "actionHint": action_hint,
+        "observedAt": SpinnakerAdapter._utc_now(),
+    }
