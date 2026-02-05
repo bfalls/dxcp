@@ -3,14 +3,14 @@
     "service_name": "demo-service",
     "allowed_environments": ["sandbox"],
     "allowed_recipes": ["default"],
-    "allowed_artifact_sources": ["local:"],
+    "allowed_artifact_sources": ["s3://dxcp-demo-bucket/"],
     "stable_service_url_template": "ssm:/dxcp/config/runtime/service_url/demo-service"
   },
   {
     "service_name": "demo-service-2",
     "allowed_environments": ["sandbox"],
     "allowed_recipes": ["default"],
-    "allowed_artifact_sources": ["local:"],
+    "allowed_artifact_sources": ["s3://dxcp-demo-bucket/"],
     "stable_service_url_template": "ssm:/dxcp/config/runtime/service_url/demo-service-2"
   }
 ]

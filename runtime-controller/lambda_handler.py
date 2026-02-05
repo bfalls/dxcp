@@ -8,6 +8,8 @@ from typing import Any, Dict, Optional, Tuple
 
 import boto3
 
+from artifact_ref import parse_s3_artifact_ref
+
 
 SSM_CLIENT = boto3.client("ssm")
 SECRETS_CLIENT = boto3.client("secretsmanager")
@@ -16,6 +18,7 @@ DDB_RESOURCE = boto3.resource("dynamodb")
 
 _TOKEN_CACHE: Optional[str] = None
 _AUTH_HEADER = "X-DXCP-Controller-Token"
+_ALLOWED_ARTIFACT_SCHEMES = ["s3"]
 
 
 def _now() -> str:
@@ -100,18 +103,15 @@ def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_artifact_ref(payload: Dict[str, Any]) -> Tuple[str, str, str]:
     artifact_ref = payload.get("artifactRef")
     if artifact_ref:
-        if not artifact_ref.startswith("s3://"):
-            raise ValueError("artifactRef must start with s3://")
-        without_scheme = artifact_ref[len("s3://") :]
-        if "/" not in without_scheme:
-            raise ValueError("artifactRef must include bucket and key")
-        bucket, key = without_scheme.split("/", 1)
+        bucket, key = parse_s3_artifact_ref(artifact_ref, _ALLOWED_ARTIFACT_SCHEMES)
         return artifact_ref, bucket, key
     bucket = payload.get("s3Bucket")
     key = payload.get("s3Key")
     if not bucket or not key:
         raise ValueError("s3Bucket and s3Key are required when artifactRef is omitted")
-    return f"s3://{bucket}/{key}", bucket, key
+    artifact_ref = f"s3://{bucket}/{key}"
+    parse_s3_artifact_ref(artifact_ref, _ALLOWED_ARTIFACT_SCHEMES)
+    return artifact_ref, bucket, key
 
 
 def _service_map() -> Dict[str, str]:
@@ -208,11 +208,10 @@ def _rollback(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not previous:
         return _respond(409, {"error": "no_previous_artifact"})
 
-    if not previous.startswith("s3://"):
+    try:
+        bucket, key = parse_s3_artifact_ref(previous, _ALLOWED_ARTIFACT_SCHEMES)
+    except ValueError:
         return _respond(409, {"error": "invalid_previous_artifact"})
-
-    without_scheme = previous[len("s3://") :]
-    bucket, key = without_scheme.split("/", 1)
     expected_bucket = _get_env("DXCP_ARTIFACT_BUCKET")
     if bucket != expected_bucket:
         return _respond(409, {"error": "artifact_bucket_mismatch"})

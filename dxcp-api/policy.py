@@ -1,6 +1,7 @@
 import re
 from typing import Optional
 from config import SETTINGS
+from artifact_ref import validate_artifact_ref_scheme
 
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$")
@@ -53,6 +54,10 @@ class Guardrails:
             raise PolicyError(400, "INVALID_ARTIFACT", "Artifact content type not allowlisted")
 
     def validate_artifact_source(self, artifact_ref: str, service_entry: dict) -> None:
+        try:
+            validate_artifact_ref_scheme(artifact_ref, SETTINGS.artifact_ref_schemes)
+        except ValueError as exc:
+            raise PolicyError(400, "INVALID_ARTIFACT", str(exc)) from exc
         if SETTINGS.runtime_artifact_bucket:
             bucket = SETTINGS.runtime_artifact_bucket
             prefixes = [f"s3://{bucket}", f"s3://{bucket}/"]

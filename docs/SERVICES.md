@@ -16,7 +16,7 @@ Each entry is a JSON object with:
   - Enforced allowlist of recipe ids compatible with the service.
   - A recipe must be both compatible with the Service and permitted by the Delivery Group.
 - allowed_artifact_sources
-  - List of allowed artifactRef prefixes, such as "local:" or "s3://bucket/".
+  - List of allowed artifactRef prefixes, such as "s3://bucket/".
 - stable_service_url_template (optional)
   - Template used by the UI for the service link.
   - Supports {service} and {version} placeholders.
@@ -27,7 +27,7 @@ Each entry is a JSON object with:
 {
   "service_name": "demo-service",
   "allowed_recipes": ["default"],
-  "allowed_artifact_sources": ["local:"],
+  "allowed_artifact_sources": ["s3://demo-artifacts/"],
   "stable_service_url_template": "http://127.0.0.1:9000"
 }
 ```

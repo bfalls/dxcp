@@ -27,13 +27,13 @@ def _write_service_registry(path: Path) -> None:
             "service_name": "service-a",
             "allowed_environments": ["sandbox"],
             "allowed_recipes": ["recipe-a"],
-            "allowed_artifact_sources": ["local:"],
+            "allowed_artifact_sources": ["s3://dxcp-test-bucket/"],
         },
         {
             "service_name": "service-b",
             "allowed_environments": ["sandbox"],
             "allowed_recipes": [],
-            "allowed_artifact_sources": ["local:"],
+            "allowed_artifact_sources": ["s3://dxcp-test-bucket/"],
         },
     ]
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -71,7 +71,7 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             {
                 "service": service_name,
                 "version": "1.0.0",
-                "artifactRef": f"local:{service_name}-1.0.0.zip",
+                "artifactRef": f"s3://dxcp-test-bucket/{service_name}-1.0.0.zip",
                 "sha256": "a" * 64,
                 "sizeBytes": 1024,
                 "contentType": "application/zip",

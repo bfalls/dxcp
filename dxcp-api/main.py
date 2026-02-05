@@ -49,6 +49,7 @@ for candidate in SPINNAKER_CANDIDATES:
         break
 
 from artifacts import build_artifact_source, semver_sort_key
+from artifact_ref import parse_s3_artifact_ref
 from spinnaker_adapter.adapter import SpinnakerAdapter, normalize_failures
 from spinnaker_adapter.redaction import redact_text
 
@@ -911,18 +912,6 @@ def _rollup_counts(items: list[tuple[str, int]]) -> list[dict]:
     ]
 
 
-def _parse_s3_ref(artifact_ref: str) -> tuple[str, str]:
-    if not artifact_ref.startswith("s3://"):
-        raise ValueError("artifactRef must start with s3://")
-    without_scheme = artifact_ref[len("s3://") :]
-    if "/" not in without_scheme:
-        raise ValueError("artifactRef must include bucket and key")
-    bucket, key = without_scheme.split("/", 1)
-    if not bucket or not key:
-        raise ValueError("artifactRef must include bucket and key")
-    return bucket, key
-
-
 def _compute_sha256(client, bucket: str, key: str) -> tuple[str, int, float]:
     start = time.monotonic()
     response = client.get_object(Bucket=bucket, Key=key)
@@ -960,12 +949,14 @@ def _register_existing_build_internal(service_entry: dict, service: str, version
         raise ValueError("Runtime artifact bucket is not configured")
 
     if artifact_ref:
-        bucket, key = _parse_s3_ref(artifact_ref)
+        bucket, key = parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
     else:
         if not s3_key:
             raise ValueError("s3Key is required when artifactRef is omitted")
         bucket = s3_bucket or SETTINGS.runtime_artifact_bucket
         key = s3_key
+        artifact_ref = f"s3://{bucket}/{key}"
+        parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
 
     if bucket != SETTINGS.runtime_artifact_bucket:
         raise ValueError("Artifact source not allowlisted")
@@ -1012,12 +1003,12 @@ def _register_existing_build_internal(service_entry: dict, service: str, version
     )
 
     guardrails.validate_artifact(size_bytes, sha256, content_type)
-    guardrails.validate_artifact_source(f"s3://{bucket}/{key}", service_entry)
+    guardrails.validate_artifact_source(artifact_ref, service_entry)
 
     record = {
         "service": service,
         "version": version,
-        "artifactRef": f"s3://{bucket}/{key}",
+        "artifactRef": artifact_ref,
         "sha256": sha256,
         "sizeBytes": size_bytes,
         "contentType": content_type,

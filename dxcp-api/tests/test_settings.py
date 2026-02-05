@@ -15,7 +15,7 @@ def _write_service_registry(path: Path) -> None:
             "service_name": "demo-service",
             "allowed_environments": ["sandbox"],
             "allowed_recipes": ["default"],
-            "allowed_artifact_sources": ["local:"],
+            "allowed_artifact_sources": ["s3://dxcp-test-bucket/"],
         }
     ]
     path.write_text(json.dumps(data), encoding="utf-8")

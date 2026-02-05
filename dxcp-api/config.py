@@ -72,6 +72,8 @@ class Settings:
             value = self._read_ssm(f"{self.ssm_prefix}/runtime/artifact_bucket")
             if value:
                 self.runtime_artifact_bucket = value
+        artifact_schemes = self._get("artifact_ref_schemes", "DXCP_ARTIFACT_REF_SCHEMES", "s3", str)
+        self.artifact_ref_schemes = [s.strip().lower() for s in artifact_schemes.split(",") if s.strip()]
 
     def _get(self, ssm_key: str, env_key: str, default, parser: Callable) -> Optional[object]:
         if env_key in os.environ:

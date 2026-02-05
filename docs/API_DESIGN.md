@@ -78,6 +78,7 @@ Kill switch:
   - artifact size max: 200MB
   - artifact types allowlist: zip, tar.gz
   - artifact checksum required: sha256
+  - artifactRef must be a URI with scheme; only s3 is supported in v1
 
 - Strict artifact validation
   - upload capability includes expected size, checksum, and content type
@@ -153,7 +154,7 @@ Fields:
 Fields:
 - service (allowlisted)
 - version (validated format)
-- artifactRef (string, storage path or handle)
+- artifactRef (string, URI with scheme; v1 supports s3://<bucket>/<key> only)
 - sha256
 - sizeBytes
 - contentType
@@ -165,6 +166,10 @@ Fields:
 - service (allowlisted)
 - version (validated format)
 - artifactRef (s3://bucket/key) OR s3Bucket + s3Key
+
+Notes:
+- artifactRef is treated as a URI with a scheme.
+- v1 only allows the s3 scheme.
 
 ### DeliveryGroup
 

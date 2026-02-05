@@ -193,4 +193,6 @@ Notes:
 - CurrentRunningState is computed from DeploymentRecord history stored by DXCP.
 - Deployment state is refreshed from the engine only when specific deployment records are fetched; list endpoints do not poll the engine.
 - DXCP exposes a single environment ("sandbox") and does not model traffic splits or multi-environment rollouts in Phase 3.
+- ArtifactRef is a URI with a scheme and opaque reference.
 - ArtifactRef is AWS S3-scoped today (s3://bucket/key) and validated against allowlisted sources.
+- Only the s3 scheme is supported in v1.
