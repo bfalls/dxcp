@@ -71,6 +71,8 @@ class Storage:
                 environment TEXT NOT NULL,
                 version TEXT NOT NULL,
                 recipe_id TEXT,
+                recipe_revision INTEGER,
+                effective_behavior_summary TEXT,
                 state TEXT NOT NULL,
                 deployment_kind TEXT,
                 outcome TEXT,
@@ -97,6 +99,8 @@ class Storage:
         self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
         self._ensure_column(cur, "deployments", "delivery_group_id", "TEXT")
         self._ensure_column(cur, "deployments", "recipe_id", "TEXT")
+        self._ensure_column(cur, "deployments", "recipe_revision", "INTEGER")
+        self._ensure_column(cur, "deployments", "effective_behavior_summary", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -185,6 +189,8 @@ class Storage:
                 spinnaker_application TEXT,
                 deploy_pipeline TEXT,
                 rollback_pipeline TEXT,
+                recipe_revision INTEGER,
+                effective_behavior_summary TEXT,
                 status TEXT,
                 created_at TEXT,
                 created_by TEXT,
@@ -195,6 +201,8 @@ class Storage:
             """
         )
         self._ensure_column(cur, "recipes", "status", "TEXT")
+        self._ensure_column(cur, "recipes", "recipe_revision", "INTEGER")
+        self._ensure_column(cur, "recipes", "effective_behavior_summary", "TEXT")
         self._ensure_column(cur, "recipes", "created_at", "TEXT")
         self._ensure_column(cur, "recipes", "created_by", "TEXT")
         self._ensure_column(cur, "recipes", "updated_at", "TEXT")
@@ -384,15 +392,17 @@ class Storage:
         return row is not None
 
     def insert_recipe(self, recipe: dict) -> dict:
+        recipe_revision = recipe.get("recipe_revision") or 1
+        effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO recipes (
                 id, name, description, allowed_parameters,
-                spinnaker_application, deploy_pipeline, rollback_pipeline, status,
+                spinnaker_application, deploy_pipeline, rollback_pipeline, recipe_revision, effective_behavior_summary, status,
                 created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 recipe["id"],
@@ -402,6 +412,8 @@ class Storage:
                 recipe.get("spinnaker_application"),
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
+                recipe_revision,
+                effective_behavior_summary,
                 recipe.get("status", "active"),
                 recipe.get("created_at"),
                 recipe.get("created_by"),
@@ -412,6 +424,8 @@ class Storage:
         )
         conn.commit()
         conn.close()
+        recipe["recipe_revision"] = recipe_revision
+        recipe["effective_behavior_summary"] = effective_behavior_summary
         return recipe
 
     def insert_audit_event(self, event: dict) -> dict:
@@ -476,13 +490,15 @@ class Storage:
         return [dict(row) for row in rows]
 
     def update_recipe(self, recipe: dict) -> dict:
+        recipe_revision = recipe.get("recipe_revision") or 1
+        effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
             """
             UPDATE recipes
             SET name = ?, description = ?, allowed_parameters = ?,
-                spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, status = ?,
+                spinnaker_application = ?, deploy_pipeline = ?, rollback_pipeline = ?, recipe_revision = ?, effective_behavior_summary = ?, status = ?,
                 created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
             """,
@@ -493,6 +509,8 @@ class Storage:
                 recipe.get("spinnaker_application"),
                 recipe.get("deploy_pipeline"),
                 recipe.get("rollback_pipeline"),
+                recipe_revision,
+                effective_behavior_summary,
                 recipe.get("status", "active"),
                 recipe.get("created_at"),
                 recipe.get("created_by"),
@@ -504,9 +522,13 @@ class Storage:
         )
         conn.commit()
         conn.close()
+        recipe["recipe_revision"] = recipe_revision
+        recipe["effective_behavior_summary"] = effective_behavior_summary
         return recipe
 
     def _row_to_recipe(self, row: sqlite3.Row) -> dict:
+        recipe_revision = row["recipe_revision"] if row["recipe_revision"] is not None else 1
+        effective_behavior_summary = row["effective_behavior_summary"] or "No behavior summary provided."
         return {
             "id": row["id"],
             "name": row["name"],
@@ -515,6 +537,8 @@ class Storage:
             "spinnaker_application": row["spinnaker_application"],
             "deploy_pipeline": row["deploy_pipeline"],
             "rollback_pipeline": row["rollback_pipeline"],
+            "recipe_revision": recipe_revision,
+            "effective_behavior_summary": effective_behavior_summary,
             "status": row["status"] or "active",
             "created_at": row["created_at"],
             "created_by": row["created_by"],
@@ -616,6 +640,8 @@ class Storage:
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
+            "recipe_revision": 1,
+            "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
             "status": "active",
             "created_at": now,
             "created_by": "system",
@@ -665,11 +691,11 @@ class Storage:
         cur.execute(
             """
             INSERT INTO deployments (
-                id, service, environment, version, recipe_id, state, deployment_kind, outcome,
+                id, service, environment, version, recipe_id, recipe_revision, effective_behavior_summary, state, deployment_kind, outcome,
                 intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
                 spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
                 rollback_of, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -677,6 +703,8 @@ class Storage:
                 record["environment"],
                 record["version"],
                 record.get("recipeId"),
+                record.get("recipeRevision"),
+                record.get("effectiveBehaviorSummary"),
                 record["state"],
                 deployment_kind,
                 outcome,
@@ -808,6 +836,8 @@ class Storage:
             "environment": row["environment"],
             "version": row["version"],
             "recipeId": row["recipe_id"],
+            "recipeRevision": row["recipe_revision"],
+            "effectiveBehaviorSummary": row["effective_behavior_summary"],
             "state": row["state"],
             "deploymentKind": row["deployment_kind"],
             "outcome": row["outcome"],
@@ -1185,6 +1215,8 @@ class DynamoStorage:
         items = self._scan_recipes()
         recipes = []
         for item in items:
+            recipe_revision = item.get("recipe_revision") or 1
+            effective_behavior_summary = item.get("effective_behavior_summary") or "No behavior summary provided."
             recipes.append(
                 {
                     "id": item.get("id"),
@@ -1194,6 +1226,8 @@ class DynamoStorage:
                     "spinnaker_application": item.get("spinnaker_application"),
                     "deploy_pipeline": item.get("deploy_pipeline"),
                     "rollback_pipeline": item.get("rollback_pipeline"),
+                    "recipe_revision": recipe_revision,
+                    "effective_behavior_summary": effective_behavior_summary,
                     "status": item.get("status") or "active",
                     "created_at": item.get("created_at"),
                     "created_by": item.get("created_by"),
@@ -1210,6 +1244,8 @@ class DynamoStorage:
         item = response.get("Item")
         if not item:
             return None
+        recipe_revision = item.get("recipe_revision") or 1
+        effective_behavior_summary = item.get("effective_behavior_summary") or "No behavior summary provided."
         return {
             "id": item.get("id"),
             "name": item.get("name"),
@@ -1218,6 +1254,8 @@ class DynamoStorage:
             "spinnaker_application": item.get("spinnaker_application"),
             "deploy_pipeline": item.get("deploy_pipeline"),
             "rollback_pipeline": item.get("rollback_pipeline"),
+            "recipe_revision": recipe_revision,
+            "effective_behavior_summary": effective_behavior_summary,
             "status": item.get("status") or "active",
             "created_at": item.get("created_at"),
             "created_by": item.get("created_by"),
@@ -1227,6 +1265,8 @@ class DynamoStorage:
         }
 
     def insert_recipe(self, recipe: dict) -> dict:
+        recipe_revision = recipe.get("recipe_revision") or 1
+        effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
         item = {
             "pk": "RECIPE",
             "sk": recipe["id"],
@@ -1237,6 +1277,8 @@ class DynamoStorage:
             "spinnaker_application": recipe.get("spinnaker_application"),
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
+            "recipe_revision": recipe_revision,
+            "effective_behavior_summary": effective_behavior_summary,
             "status": recipe.get("status", "active"),
             "created_at": recipe.get("created_at"),
             "created_by": recipe.get("created_by"),
@@ -1245,9 +1287,13 @@ class DynamoStorage:
             "last_change_reason": recipe.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
+        recipe["recipe_revision"] = recipe_revision
+        recipe["effective_behavior_summary"] = effective_behavior_summary
         return recipe
 
     def update_recipe(self, recipe: dict) -> dict:
+        recipe_revision = recipe.get("recipe_revision") or 1
+        effective_behavior_summary = recipe.get("effective_behavior_summary") or "No behavior summary provided."
         item = {
             "pk": "RECIPE",
             "sk": recipe["id"],
@@ -1258,6 +1304,8 @@ class DynamoStorage:
             "spinnaker_application": recipe.get("spinnaker_application"),
             "deploy_pipeline": recipe.get("deploy_pipeline"),
             "rollback_pipeline": recipe.get("rollback_pipeline"),
+            "recipe_revision": recipe_revision,
+            "effective_behavior_summary": effective_behavior_summary,
             "status": recipe.get("status", "active"),
             "created_at": recipe.get("created_at"),
             "created_by": recipe.get("created_by"),
@@ -1266,6 +1314,8 @@ class DynamoStorage:
             "last_change_reason": recipe.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
+        recipe["recipe_revision"] = recipe_revision
+        recipe["effective_behavior_summary"] = effective_behavior_summary
         return recipe
 
     def insert_audit_event(self, event: dict) -> dict:
@@ -1348,6 +1398,8 @@ class DynamoStorage:
             "spinnaker_application": None,
             "deploy_pipeline": "demo-deploy",
             "rollback_pipeline": "rollback-demo-service",
+            "recipe_revision": 1,
+            "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
             "status": "active",
             "created_at": now,
             "created_by": "system",
@@ -1389,6 +1441,8 @@ class DynamoStorage:
             "environment": record["environment"],
             "version": record["version"],
             "recipeId": record.get("recipeId"),
+            "recipeRevision": record.get("recipeRevision"),
+            "effectiveBehaviorSummary": record.get("effectiveBehaviorSummary"),
             "state": record["state"],
             "deploymentKind": deployment_kind,
             "outcome": outcome,
@@ -1452,6 +1506,8 @@ class DynamoStorage:
             "environment": item.get("environment"),
             "version": item.get("version"),
             "recipeId": item.get("recipeId"),
+            "recipeRevision": item.get("recipeRevision"),
+            "effectiveBehaviorSummary": item.get("effectiveBehaviorSummary"),
             "state": item.get("state"),
             "deploymentKind": item.get("deploymentKind"),
             "outcome": item.get("outcome"),
@@ -1484,6 +1540,8 @@ class DynamoStorage:
                     "environment": item.get("environment"),
                     "version": item.get("version"),
                     "recipeId": item.get("recipeId"),
+                    "recipeRevision": item.get("recipeRevision"),
+                    "effectiveBehaviorSummary": item.get("effectiveBehaviorSummary"),
                     "state": item.get("state"),
                     "deploymentKind": item.get("deploymentKind"),
                     "outcome": item.get("outcome"),
@@ -1568,6 +1626,8 @@ class DynamoStorage:
             "environment": item.get("environment"),
             "version": item.get("version"),
             "recipeId": item.get("recipeId"),
+            "recipeRevision": item.get("recipeRevision"),
+            "effectiveBehaviorSummary": item.get("effectiveBehaviorSummary"),
             "state": item.get("state"),
             "deploymentKind": item.get("deploymentKind"),
             "outcome": item.get("outcome"),

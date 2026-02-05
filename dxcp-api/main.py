@@ -596,6 +596,14 @@ def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> 
     if status not in {"active", "deprecated"}:
         return error_response(400, "INVALID_STATUS", "status must be active or deprecated")
     payload["status"] = status
+    behavior_summary = payload.get("effective_behavior_summary")
+    if not isinstance(behavior_summary, str) or not behavior_summary.strip():
+        return error_response(
+            400,
+            "RECIPE_BEHAVIOR_REQUIRED",
+            "effective_behavior_summary is required",
+        )
+    payload["effective_behavior_summary"] = behavior_summary.strip()
     return None
 
 
@@ -676,6 +684,8 @@ def _deployment_public_view(
         "environment": deployment.get("environment"),
         "version": deployment.get("version"),
         "recipeId": deployment.get("recipeId"),
+        "recipeRevision": deployment.get("recipeRevision"),
+        "effectiveBehaviorSummary": deployment.get("effectiveBehaviorSummary"),
         "state": deployment.get("state"),
         "deploymentKind": _deployment_kind(deployment),
         "outcome": _deployment_outcome(deployment, latest_success_id),
@@ -1071,6 +1081,8 @@ def create_deployment(
         "environment": intent.environment,
         "version": intent.version,
         "recipeId": recipe.get("id"),
+        "recipeRevision": recipe.get("recipe_revision"),
+        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary"),
         "state": "IN_PROGRESS",
         "deploymentKind": "ROLL_FORWARD",
         "outcome": None,
@@ -1322,6 +1334,7 @@ def create_recipe(
         return validation_error
     if storage.get_recipe(payload["id"]):
         return error_response(409, "RECIPE_EXISTS", "Recipe already exists")
+    payload["recipe_revision"] = payload.get("recipe_revision") or 1
     _apply_create_audit(payload, actor)
     storage.insert_recipe(payload)
     _record_audit_event(
@@ -1355,6 +1368,7 @@ def update_recipe(
     if not existing:
         return error_response(404, "NOT_FOUND", "Recipe not found")
     payload["id"] = recipe_id
+    payload["recipe_revision"] = (existing.get("recipe_revision") or 1) + 1
     _apply_update_audit(payload, actor, existing)
     if hasattr(storage, "update_recipe"):
         storage.update_recipe(payload)
@@ -1859,6 +1873,8 @@ def rollback_deployment(
         "environment": deployment["environment"],
         "version": prior["version"],
         "recipeId": deployment.get("recipeId") or "default",
+        "recipeRevision": recipe.get("recipe_revision") if recipe else None,
+        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary") if recipe else None,
         "state": "IN_PROGRESS",
         "deploymentKind": "ROLLBACK",
         "outcome": None,

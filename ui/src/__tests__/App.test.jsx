@@ -32,7 +32,16 @@ const buildFetchMock = ({
       guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
     }
   ]
-  let recipeList = recipes || [{ id: 'default', name: 'Default Deploy', status: 'active' }]
+  let recipeList =
+    recipes || [
+      {
+        id: 'default',
+        name: 'Default Deploy',
+        status: 'active',
+        recipe_revision: 1,
+        effective_behavior_summary: 'Standard roll-forward deploy with rollback support.'
+      }
+    ]
   const serviceList = servicesList || [{ service_name: 'demo-service' }]
   return async (url, options = {}) => {
     const parsed = new URL(url)

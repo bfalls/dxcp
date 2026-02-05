@@ -355,6 +355,8 @@ function buildRecipeDraft(recipe) {
     spinnaker_application: recipe?.spinnaker_application || '',
     deploy_pipeline: recipe?.deploy_pipeline || '',
     rollback_pipeline: recipe?.rollback_pipeline || '',
+    recipe_revision: recipe?.recipe_revision ?? 1,
+    effective_behavior_summary: recipe?.effective_behavior_summary || '',
     status: recipe?.status || 'active',
     change_reason: ''
   }
@@ -682,6 +684,16 @@ export default function App() {
       if (!recipeIdValue) return '-'
       const found = recipes.find((recipe) => recipe.id === recipeIdValue)
       return found?.name || recipeIdValue
+    },
+    [recipes]
+  )
+  const getRecipeDisplay = useCallback(
+    (recipeIdValue, recipeRevisionValue) => {
+      if (!recipeIdValue) return '-'
+      const found = recipes.find((recipe) => recipe.id === recipeIdValue)
+      const name = found?.name || recipeIdValue
+      const revision = recipeRevisionValue ?? found?.recipe_revision
+      return revision ? `${name} (v${revision})` : name
     },
     [recipes]
   )
@@ -1238,6 +1250,7 @@ export default function App() {
     const rollbackPipeline = mappingLocked
       ? activeAdminRecipe.rollback_pipeline
       : adminRecipeDraft.rollback_pipeline.trim() || null
+    const behaviorSummary = adminRecipeDraft.effective_behavior_summary.trim()
     const payload = {
       id: adminRecipeDraft.id.trim(),
       name: adminRecipeDraft.name.trim(),
@@ -1245,6 +1258,7 @@ export default function App() {
       spinnaker_application: spinnakerApplication,
       deploy_pipeline: deployPipeline,
       rollback_pipeline: rollbackPipeline,
+      effective_behavior_summary: behaviorSummary,
       status: adminRecipeDraft.status === 'deprecated' ? 'deprecated' : 'active'
     }
     const changeReason = adminRecipeDraft.change_reason.trim()
@@ -1253,6 +1267,7 @@ export default function App() {
     }
     if (!payload.id) return { error: 'Recipe id is required.' }
     if (!payload.name) return { error: 'Recipe name is required.' }
+    if (!payload.effective_behavior_summary) return { error: 'Effective behavior summary is required.' }
     const hasAnyPipeline = Boolean(payload.deploy_pipeline) || Boolean(payload.rollback_pipeline)
     if (hasAnyPipeline && !payload.spinnaker_application) {
       return { error: 'Spinnaker application is required when pipelines are set.' }
@@ -2367,7 +2382,7 @@ export default function App() {
                           </div>
                           <div><span className={statusClass(item.state)}>{item.state}</span></div>
                           <div>{item.version || '-'}</div>
-                          <div>{getRecipeLabel(item.recipeId)}</div>
+                          <div>{getRecipeDisplay(item.recipeId, item.recipeRevision)}</div>
                           <div>
                             <span className="badge neutral">
                               {deploymentKindLabel(item.deploymentKind, item.rollbackOf)}
@@ -2471,6 +2486,12 @@ export default function App() {
                   )}
                   {selectedRecipeDeprecated && (
                     <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
+                  )}
+                  {selectedRecipe && (
+                    <div className="helper">Recipe revision: v{selectedRecipe.recipe_revision ?? 1}</div>
+                  )}
+                  {selectedRecipe?.effective_behavior_summary && (
+                    <div className="helper">Behavior: {selectedRecipe.effective_behavior_summary}</div>
                   )}
                 </div>
                 <div className="row">
@@ -2629,6 +2650,14 @@ export default function App() {
                   <div className="list-item">
                     <div>Recipe</div>
                     <div>{selectedRecipe?.name || selectedRecipe?.id || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Recipe revision</div>
+                    <div>{selectedRecipe?.recipe_revision ? `v${selectedRecipe.recipe_revision}` : '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Behavior summary</div>
+                    <div>{selectedRecipe?.effective_behavior_summary || '-'}</div>
                   </div>
                   <div className="list-item">
                     <div>Version</div>
@@ -2821,6 +2850,14 @@ export default function App() {
                     <div className="list-item admin-detail">
                       <div>Operation</div>
                       <div>{deploymentKindLabel(selected.deploymentKind, selected.rollbackOf)}</div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Recipe</div>
+                      <div>{getRecipeDisplay(selected.recipeId, selected.recipeRevision)}</div>
+                    </div>
+                    <div className="list-item admin-detail">
+                      <div>Behavior summary</div>
+                      <div>{selected.effectiveBehaviorSummary || 'Not recorded'}</div>
                     </div>
                   </div>
                   <p>Service: {selected.service}</p>
@@ -3496,12 +3533,20 @@ export default function App() {
                             <div>{activeAdminRecipe.name}</div>
                           </div>
                           <div className="list-item admin-detail">
+                            <div>Revision</div>
+                            <div>v{activeAdminRecipe.recipe_revision ?? 1}</div>
+                          </div>
+                          <div className="list-item admin-detail">
                             <div>Status</div>
                             <div>{recipeStatusLabel(activeAdminRecipe.status)}</div>
                           </div>
                           <div className="list-item admin-detail">
                             <div>Description</div>
                             <div>{activeAdminRecipe.description || 'No description'}</div>
+                          </div>
+                          <div className="list-item admin-detail">
+                            <div>Behavior summary</div>
+                            <div>{activeAdminRecipe.effective_behavior_summary || 'No summary provided'}</div>
                           </div>
                           <div className="list-item admin-detail">
                             <div>Used by</div>
@@ -3657,6 +3702,18 @@ export default function App() {
                             onInput={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
                             disabled={adminReadOnly}
                           />
+                        </div>
+                        <div className="field">
+                          <label htmlFor="admin-recipe-behavior">Effective behavior summary</label>
+                          <textarea
+                            id="admin-recipe-behavior"
+                            rows={2}
+                            value={adminRecipeDraft.effective_behavior_summary}
+                            onChange={(e) => handleAdminRecipeDraftChange('effective_behavior_summary', e.target.value)}
+                            onInput={(e) => handleAdminRecipeDraftChange('effective_behavior_summary', e.target.value)}
+                            disabled={adminReadOnly}
+                          />
+                          <div className="helper">Short, user-facing summary of current recipe behavior.</div>
                         </div>
                         {isPlatformAdmin ? (
                           <>

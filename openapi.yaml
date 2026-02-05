@@ -321,6 +321,8 @@ components:
         - environment
         - version
         - recipeId
+        - recipeRevision
+        - effectiveBehaviorSummary
         - state
         - deploymentKind
         - outcome
@@ -340,6 +342,14 @@ components:
           type: string
         recipeId:
           type: string
+        recipeRevision:
+          type: integer
+          description: Recipe revision used for this deployment.
+          nullable: true
+        effectiveBehaviorSummary:
+          type: string
+          description: Frozen recipe behavior summary used at deployment time.
+          nullable: true
         state:
           $ref: '#/components/schemas/DeploymentState'
         deploymentKind:
@@ -603,6 +613,66 @@ components:
         registeredAt:
           type: string
           format: date-time
+    Recipe:
+      type: object
+      required: [id, name, recipe_revision, effective_behavior_summary, status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        spinnaker_application:
+          type: string
+        deploy_pipeline:
+          type: string
+        rollback_pipeline:
+          type: string
+        recipe_revision:
+          type: integer
+          description: Monotonic recipe revision.
+        effective_behavior_summary:
+          type: string
+          description: Short, user-facing description of effective behavior.
+        status:
+          type: string
+          enum: [active, deprecated]
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+        last_change_reason:
+          type: string
+    RecipeUpsert:
+      type: object
+      required: [id, name, effective_behavior_summary]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        spinnaker_application:
+          type: string
+        deploy_pipeline:
+          type: string
+        rollback_pipeline:
+          type: string
+        effective_behavior_summary:
+          type: string
+        status:
+          type: string
+          enum: [active, deprecated]
+        change_reason:
+          type: string
     Error:
       type: object
       required: [code, message, request_id]

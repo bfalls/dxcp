@@ -59,6 +59,8 @@ class DeploymentRecord(BaseModel):
     environment: str
     version: str
     recipeId: str
+    recipeRevision: Optional[int] = None
+    effectiveBehaviorSummary: Optional[str] = None
     state: DeploymentState
     deploymentKind: Optional[DeploymentKind] = None
     outcome: Optional[DeploymentOutcome] = None
@@ -120,6 +122,8 @@ class Recipe(BaseModel):
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
+    recipe_revision: int
+    effective_behavior_summary: str = Field(..., max_length=240)
     status: RecipeStatus = RecipeStatus.ACTIVE
     created_at: Optional[str] = None
     created_by: Optional[str] = None
@@ -135,6 +139,7 @@ class RecipeUpsert(BaseModel):
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
+    effective_behavior_summary: str = Field(..., max_length=240)
     status: RecipeStatus = RecipeStatus.ACTIVE
     change_reason: Optional[str] = None
 

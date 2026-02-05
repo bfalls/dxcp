@@ -104,6 +104,8 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
         "spinnaker_application": None,
         "deploy_pipeline": "demo-deploy",
         "rollback_pipeline": "rollback-demo-service",
+        "recipe_revision": 1,
+        "effective_behavior_summary": "Extra deploy recipe for tests.",
         "status": "active",
     }
     if main.storage.get_recipe("extra"):
@@ -117,6 +119,8 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
         "spinnaker_application": None,
         "deploy_pipeline": "demo-deploy",
         "rollback_pipeline": "rollback-demo-service",
+        "recipe_revision": 1,
+        "effective_behavior_summary": "Deprecated deploy recipe.",
         "status": "deprecated",
     }
     if main.storage.get_recipe("deprecated"):
@@ -243,6 +247,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
                 "spinnaker_application": "app-a",
                 "deploy_pipeline": "deploy-a",
                 "rollback_pipeline": "rollback-a",
+                "effective_behavior_summary": "Audit recipe behavior summary.",
                 "status": "active",
             },
         )
@@ -253,6 +258,8 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert created["created_at"]
     assert created["updated_at"]
     assert created.get("last_change_reason") in (None, "")
+    assert created["recipe_revision"] == 1
+    assert created["effective_behavior_summary"] == "Audit recipe behavior summary."
 
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         update_token = build_token(["dxcp-platform-admins"], subject="admin-2")
@@ -266,6 +273,7 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
                 "spinnaker_application": "app-a",
                 "deploy_pipeline": "deploy-a",
                 "rollback_pipeline": "rollback-a",
+                "effective_behavior_summary": "Audit recipe behavior summary v2.",
                 "status": "active",
                 "change_reason": "Refine metadata",
             },
@@ -277,3 +285,43 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert updated["created_at"] == created["created_at"]
     assert updated["updated_at"] != created["updated_at"]
     assert updated["last_change_reason"] == "Refine metadata"
+    assert updated["recipe_revision"] == 2
+    assert updated["effective_behavior_summary"] == "Audit recipe behavior summary v2."
+
+
+async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-recipe-snapshot", **auth_header(["dxcp-platform-admins"])},
+            json=_deployment_payload("default"),
+        )
+        assert response.status_code == 201
+        created = response.json()
+        assert created["recipeRevision"] == 1
+        assert created["effectiveBehaviorSummary"] == "Standard roll-forward deploy with rollback support."
+
+        update = await client.put(
+            "/v1/recipes/default",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={
+                "id": "default",
+                "name": "Default Deploy",
+                "description": "Default recipe for demo deployments",
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "effective_behavior_summary": "Updated default behavior summary.",
+                "status": "active",
+            },
+        )
+        assert update.status_code == 200
+
+        detail = await client.get(
+            f"/v1/deployments/{created['id']}",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        assert detail.status_code == 200
+        record = detail.json()
+        assert record["recipeRevision"] == 1
+        assert record["effectiveBehaviorSummary"] == "Standard roll-forward deploy with rollback support."
