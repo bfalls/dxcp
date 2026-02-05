@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { createApiClient } from './apiClient.js'
 import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
@@ -422,6 +422,9 @@ export default function App() {
   const [serviceDetailError, setServiceDetailError] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
   const [deployStep, setDeployStep] = useState('form')
+  const [preflightStatus, setPreflightStatus] = useState('idle')
+  const [preflightResult, setPreflightResult] = useState(null)
+  const [preflightError, setPreflightError] = useState('')
   const [policyDeployments, setPolicyDeployments] = useState([])
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
@@ -457,6 +460,7 @@ export default function App() {
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
+  const preflightKeyRef = useRef('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const versionInList = useMemo(
@@ -540,7 +544,7 @@ export default function App() {
     [recipes, recipeId]
   )
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
-  const canReviewDeploy = Boolean(
+  const canRunPreflight = Boolean(
     canDeploy &&
     recipeId &&
     changeSummary.trim() &&
@@ -548,6 +552,7 @@ export default function App() {
     !selectedRecipeDeprecated &&
     versionVerified
   )
+  const canReviewDeploy = Boolean(canRunPreflight && preflightStatus === 'ok')
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
@@ -596,6 +601,15 @@ export default function App() {
     if (adminGroupMode !== 'edit' || !activeAdminGroup) return null
     return diffLists(adminGroupDraft.allowed_recipes, activeAdminGroup.allowed_recipes || [])
   }, [adminGroupMode, adminGroupDraft.allowed_recipes, activeAdminGroup])
+  const preflightKey = useMemo(() => {
+    if (!canRunPreflight) return ''
+    return JSON.stringify({
+      service,
+      recipeId,
+      version,
+      changeSummary: changeSummary.trim(),
+    })
+  }, [canRunPreflight, service, recipeId, version, changeSummary])
   const getRecipeLabel = useCallback(
     (recipeIdValue) => {
       if (!recipeIdValue) return '-'
@@ -1418,11 +1432,15 @@ export default function App() {
       const inlineMessages = {
         CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
         QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
+        VERSION_NOT_FOUND: 'Version must be registered for this service.',
+        INVALID_VERSION: 'Version format is invalid.',
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
         RATE_LIMITED: 'Daily deploy quota exceeded for this delivery group.',
         RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+        RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
         RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
-        SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.'
+        SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+        SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.'
       }
       const inline = inlineMessages[result.code]
       if (inline) {
@@ -1656,6 +1674,81 @@ export default function App() {
       loadAllowedActions(service)
     }
   }, [service, isAuthenticated, accessToken])
+
+  useEffect(() => {
+    if (!canRunPreflight) {
+      if (preflightStatus !== 'idle' || preflightResult || preflightError) {
+        setPreflightStatus('idle')
+        setPreflightResult(null)
+        setPreflightError('')
+      }
+      preflightKeyRef.current = ''
+      return
+    }
+    if (preflightKeyRef.current && preflightKeyRef.current === preflightKey) {
+      return
+    }
+    setPreflightStatus('idle')
+    setPreflightResult(null)
+    setPreflightError('')
+    preflightKeyRef.current = preflightKey
+    if (deployStep === 'confirm') {
+      setDeployStep('form')
+    }
+  }, [canRunPreflight, preflightKey, preflightStatus, preflightResult, preflightError, deployStep])
+
+  useEffect(() => {
+    if (!canRunPreflight || !preflightKey || preflightStatus !== 'idle') return
+    let cancelled = false
+    const run = async () => {
+      setPreflightStatus('checking')
+      setPreflightError('')
+      const payload = {
+        service,
+        environment: 'sandbox',
+        version,
+        changeSummary,
+        recipeId
+      }
+      const result = await api.post('/deployments/validate', payload)
+      if (cancelled) return
+      if (result && result.code) {
+        const messages = {
+          CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
+          QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
+          VERSION_NOT_FOUND: 'Version must be registered for this service.',
+          INVALID_VERSION: 'Version format is invalid.',
+          RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+          RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
+          SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+          SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
+          ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
+          RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
+          MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
+          RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+        }
+        const inline = messages[result.code]
+        setPreflightStatus('error')
+        setPreflightError(`${result.code}: ${inline || result.message}`)
+        return
+      }
+      setPreflightResult(result)
+      setPreflightStatus('ok')
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    api,
+    canRunPreflight,
+    changeSummary,
+    preflightKey,
+    preflightStatus,
+    recipeId,
+    service,
+    version,
+  ])
 
   useEffect(() => {
     if (!isAuthenticated || !service || !accessToken) return
@@ -2332,6 +2425,38 @@ export default function App() {
                   />
                   {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
                 </div>
+                <div className="helper" style={{ marginTop: '12px' }}>Policy checks</div>
+                <div className="list" style={{ marginTop: '8px' }}>
+                  <div className="list-item admin-detail">
+                    <div>Deploys remaining today</div>
+                    <div>{preflightResult?.policy?.deployments_remaining ?? '-'}</div>
+                    <div />
+                  </div>
+                  <div className="list-item admin-detail">
+                    <div>Concurrent deployments</div>
+                    <div>
+                      {preflightResult?.policy
+                        ? `${preflightResult.policy.current_concurrent_deployments} / ${preflightResult.policy.max_concurrent_deployments}`
+                        : '-'}
+                    </div>
+                    <div />
+                  </div>
+                  <div className="list-item admin-detail">
+                    <div>Version status</div>
+                    <div>{preflightResult?.versionRegistered ? 'Registered' : '-'}</div>
+                    <div />
+                  </div>
+                </div>
+                {preflightStatus === 'checking' && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Checking policy and guardrails...
+                  </div>
+                )}
+                {preflightStatus === 'error' && preflightError && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    {preflightError}
+                  </div>
+                )}
                 <button
                   className="button"
                   onClick={() => setDeployStep('confirm')}

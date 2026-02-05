@@ -231,6 +231,11 @@ Fields:
 
 ### Deployments
 
+- POST /v1/deployments/validate
+  - Validate intent against current policy and guardrails
+  - Request: DeploymentIntent
+  - Response: DeploymentPreflight (quota + concurrency snapshot)
+
 - POST /v1/deployments
   - Trigger deployment by intent
   - Requires Idempotency-Key header

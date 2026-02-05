@@ -20,6 +20,7 @@ const buildFetchMock = ({
   recipes,
   servicesList,
   guardrailValidation,
+  preflightResponse,
   versionsByService
 }) => {
   let groups = deliveryGroups || [
@@ -61,6 +62,28 @@ const buildFetchMock = ({
     }
     if (pathname === '/v1/deployments' && options.method === 'POST') {
       return ok(deployResponse || { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' })
+    }
+    if (pathname === '/v1/deployments/validate' && options.method === 'POST') {
+      if (preflightResponse) {
+        return ok(preflightResponse)
+      }
+      const body = JSON.parse(options.body || '{}')
+      return ok({
+        service: body.service,
+        environment: body.environment,
+        version: body.version,
+        recipeId: body.recipeId,
+        deliveryGroupId: 'default',
+        versionRegistered: true,
+        policy: {
+          max_concurrent_deployments: 1,
+          current_concurrent_deployments: 0,
+          daily_deploy_quota: 5,
+          deployments_used: 0,
+          deployments_remaining: 5
+        },
+        validatedAt: '2025-01-01T00:00:00Z'
+      })
     }
     if (pathname === '/v1/settings/public') {
       return ok({
@@ -510,7 +533,7 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deployResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded' },
+      preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)
@@ -528,13 +551,9 @@ export async function runAllTests() {
     await view.findByDisplayValue('release')
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !reviewButton.disabled)
-    assert.equal(reviewButton.disabled, false)
-    fireEvent.click(reviewButton)
-    const confirmButton = view.getByRole('button', { name: 'Confirm deploy' })
-    await waitForCondition(() => !confirmButton.disabled)
-    fireEvent.click(confirmButton)
     await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
+    await waitForCondition(() => reviewButton.disabled)
+    assert.equal(reviewButton.disabled, true)
   })
 
   await runTest('Allowed deploy redirects to detail page', async () => {

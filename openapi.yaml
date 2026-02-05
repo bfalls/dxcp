@@ -13,6 +13,7 @@ info:
     - Rate limits (default): 60 rpm read, 10 rpm mutate.
     - Daily quotas (default): 25 deployments, 10 rollbacks, 50 build registrations, 50 upload capability requests per client.
     - Strict input validation for version, size, and allowlisted artifacts.
+    - Version must be registered before deploy.
     - Kill switch can disable all mutating operations (returns 503 MUTATIONS_DISABLED).
 
 servers:
@@ -76,6 +77,34 @@ paths:
                   $ref: '#/components/schemas/DeploymentRecord'
         '429':
           $ref: '#/components/responses/RateLimited'
+
+  /deployments/validate:
+    post:
+      summary: Validate deployment intent and policy
+      operationId: validateDeployment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentIntent'
+      responses:
+        '200':
+          description: Pre-flight validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentPreflight'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '409':
+          $ref: '#/components/responses/DeploymentLocked'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
 
   /deployments/{deploymentId}:
     get:
@@ -289,6 +318,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NormalizedFailure'
+    DeploymentPreflight:
+      type: object
+      required:
+        - service
+        - environment
+        - version
+        - recipeId
+        - deliveryGroupId
+        - versionRegistered
+        - policy
+        - validatedAt
+      properties:
+        service:
+          type: string
+        environment:
+          type: string
+          enum: [sandbox]
+        version:
+          type: string
+        recipeId:
+          type: string
+        deliveryGroupId:
+          type: string
+        versionRegistered:
+          type: boolean
+        policy:
+          type: object
+          required:
+            - max_concurrent_deployments
+            - current_concurrent_deployments
+            - daily_deploy_quota
+            - deployments_used
+            - deployments_remaining
+          properties:
+            max_concurrent_deployments:
+              type: integer
+            current_concurrent_deployments:
+              type: integer
+            daily_deploy_quota:
+              type: integer
+            deployments_used:
+              type: integer
+            deployments_remaining:
+              type: integer
+        validatedAt:
+          type: string
+          format: date-time
     DeploymentState:
       type: string
       enum: [PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK]
@@ -411,7 +487,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     DeploymentLocked:
-      description: Delivery group deployment lock active.
+      description: Delivery group concurrency limit reached.
       content:
         application/json:
           schema:

@@ -201,6 +201,22 @@ async def test_deploy_rejects_deprecated_recipe(tmp_path: Path, monkeypatch):
     assert response.json()["code"] == "RECIPE_DEPRECATED"
 
 
+async def test_deploy_preflight_returns_policy_snapshot(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deployment_payload("default"),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["service"] == "demo-service"
+    assert body["deliveryGroupId"] == "default"
+    assert body["versionRegistered"] is True
+    assert body["policy"]["max_concurrent_deployments"] >= 1
+    assert "deployments_remaining" in body["policy"]
+
+
 async def test_deploy_rejects_unregistered_version(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         payload = _deployment_payload("default")

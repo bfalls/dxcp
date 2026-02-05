@@ -1047,6 +1047,70 @@ def create_deployment(
     return _deployment_public_view(actor, record)
 
 
+@app.post("/v1/deployments/validate")
+def validate_deployment(
+    intent: DeploymentIntent,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
+    if role_error:
+        return role_error
+    rate_limiter.check_read(actor.actor_id)
+    guardrails.require_mutations_enabled()
+    group, group_error = resolve_delivery_group(intent.service, actor)
+    if group_error:
+        return group_error
+    policy_env_error = _policy_check_environment(group, intent.environment, actor)
+    if policy_env_error:
+        return policy_env_error
+    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
+    if recipe_error:
+        return recipe_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    if policy_recipe_error:
+        return policy_recipe_error
+    try:
+        service_entry = guardrails.validate_service(intent.service)
+        guardrails.validate_environment(intent.environment, service_entry)
+        guardrails.validate_version(intent.version)
+    except PolicyError as exc:
+        return _capability_error(exc.code, exc.message, actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    if recipe_capability_error:
+        return recipe_capability_error
+    build = storage.find_latest_build(intent.service, intent.version)
+    if not build:
+        return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
+
+    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    active = storage.count_active_deployments_for_group(group["id"])
+    if active >= max_concurrent:
+        return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
+    quota = rate_limiter.get_daily_remaining(group["id"], "deploy", daily_deploy_quota)
+    if quota["remaining"] <= 0:
+        return error_response(429, "QUOTA_EXCEEDED", "Daily quota exceeded")
+
+    return {
+        "service": intent.service,
+        "environment": intent.environment,
+        "version": intent.version,
+        "recipeId": recipe.get("id"),
+        "deliveryGroupId": group.get("id"),
+        "versionRegistered": True,
+        "policy": {
+            "max_concurrent_deployments": max_concurrent,
+            "current_concurrent_deployments": active,
+            "daily_deploy_quota": daily_deploy_quota,
+            "deployments_used": quota["used"],
+            "deployments_remaining": quota["remaining"],
+        },
+        "validatedAt": utc_now(),
+    }
+
+
 @app.get("/v1/deployments")
 def list_deployments(
     request: Request,

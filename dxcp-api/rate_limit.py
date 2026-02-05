@@ -120,3 +120,28 @@ class RateLimiter:
             self._check_daily(scope_id, "build_register", SETTINGS.daily_quota_build_register)
         elif quota_key == "upload_capability":
             self._check_daily(scope_id, "upload_capability", SETTINGS.daily_quota_upload_capability)
+
+    def get_daily_remaining(self, scope_id: str, key: str, limit: int) -> dict:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        if limit < 0:
+            limit = 0
+        if self._ddb:
+            count = self._get_ddb_daily_count(scope_id, key, day)
+        else:
+            daily_key = f"{day}:{key}"
+            count = self._daily_counts[scope_id].get(daily_key, 0)
+        used = int(count)
+        remaining = max(limit - used, 0)
+        return {"used": used, "remaining": remaining, "limit": int(limit)}
+
+    def _get_ddb_daily_count(self, scope_id: str, key: str, day: str) -> int:
+        if not self._ddb:
+            return 0
+        sk = f"DAY#{key}#{day}"
+        response = self._ddb.get_item(Key={"pk": f"RATE#{scope_id}", "sk": sk})
+        item = response.get("Item") or {}
+        count = item.get("count", 0)
+        try:
+            return int(count)
+        except (TypeError, ValueError):
+            return 0
