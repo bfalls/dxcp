@@ -1,0 +1,86 @@
+{
+  "application": "dxcp-demo",
+  "name": "dxcp-canary-deploy",
+  "description": "DXCP Canary deploy with explicit approval gate for deterministic failure",
+  "keepWaitingPipelines": false,
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "name": "service",
+      "required": true
+    },
+    {
+      "name": "version",
+      "required": true
+    },
+    {
+      "name": "artifactRef",
+      "required": true
+    },
+    {
+      "name": "engineUrl",
+      "required": true
+    },
+    {
+      "name": "engineToken",
+      "required": true
+    },
+    {
+      "name": "s3Bucket",
+      "required": false
+    },
+    {
+      "name": "s3Key",
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "type": "webhook",
+      "name": "deploy-canary",
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "method": "POST",
+      "url": "${parameters.engineUrl}deploy",
+      "customHeaders": {
+        "X-DXCP-Controller-Token": "${parameters.engineToken}"
+      },
+      "payload": {
+        "service": "${parameters.service}",
+        "version": "${parameters.version}",
+        "artifactRef": "${parameters.artifactRef}",
+        "s3Bucket": "${parameters.s3Bucket}",
+        "s3Key": "${parameters.s3Key}"
+      }
+    },
+    {
+      "type": "manualJudgment",
+      "name": "canary-verdict",
+      "refId": "2",
+      "requisiteStageRefIds": [
+        "1"
+      ],
+      "instructions": "Continue to promote. Stop to fail the canary (deterministic demo failure)."
+    },
+    {
+      "type": "webhook",
+      "name": "promote-canary",
+      "refId": "3",
+      "requisiteStageRefIds": [
+        "2"
+      ],
+      "method": "POST",
+      "url": "${parameters.engineUrl}deploy",
+      "customHeaders": {
+        "X-DXCP-Controller-Token": "${parameters.engineToken}"
+      },
+      "payload": {
+        "service": "${parameters.service}",
+        "version": "${parameters.version}",
+        "artifactRef": "${parameters.artifactRef}",
+        "s3Bucket": "${parameters.s3Bucket}",
+        "s3Key": "${parameters.s3Key}"
+      }
+    }
+  ]
+}

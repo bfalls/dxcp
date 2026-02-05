@@ -1,0 +1,66 @@
+{
+  "application": "dxcp-demo",
+  "name": "dxcp-bluegreen-deploy",
+  "description": "DXCP Blue/Green deploy with explicit cutover gate (traffic switch placeholder)",
+  "keepWaitingPipelines": false,
+  "limitConcurrent": true,
+  "parameterConfig": [
+    {
+      "name": "service",
+      "required": true
+    },
+    {
+      "name": "version",
+      "required": true
+    },
+    {
+      "name": "artifactRef",
+      "required": true
+    },
+    {
+      "name": "engineUrl",
+      "required": true
+    },
+    {
+      "name": "engineToken",
+      "required": true
+    },
+    {
+      "name": "s3Bucket",
+      "required": false
+    },
+    {
+      "name": "s3Key",
+      "required": false
+    }
+  ],
+  "stages": [
+    {
+      "type": "webhook",
+      "name": "deploy-green",
+      "refId": "1",
+      "requisiteStageRefIds": [],
+      "method": "POST",
+      "url": "${parameters.engineUrl}deploy",
+      "customHeaders": {
+        "X-DXCP-Controller-Token": "${parameters.engineToken}"
+      },
+      "payload": {
+        "service": "${parameters.service}",
+        "version": "${parameters.version}",
+        "artifactRef": "${parameters.artifactRef}",
+        "s3Bucket": "${parameters.s3Bucket}",
+        "s3Key": "${parameters.s3Key}"
+      }
+    },
+    {
+      "type": "manualJudgment",
+      "name": "cutover-traffic",
+      "refId": "2",
+      "requisiteStageRefIds": [
+        "1"
+      ],
+      "instructions": "Continue to confirm traffic cutover. Stop to fail before cutover."
+    }
+  ]
+}
