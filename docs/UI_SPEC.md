@@ -92,7 +92,7 @@ Tabs:
 Overview tab
 - Goal: quick status and latest activity.
 - Key data: latest deployment state, version, updatedAt, rollbackOf if any.
-- Actions: open deployment detail, open Spinnaker deep link.
+- Actions: open deployment detail, open execution detail (PLATFORM_ADMIN only).
 - Integrations: show Backstage entity ref and link when configured.
 
 Deploy tab
@@ -110,7 +110,7 @@ History tab
 Failures tab
 - Goal: see normalized failures for the service.
 - Key data: category badge, summary, suggested action, observedAt.
-- Secondary action: open Spinnaker execution when available.
+- Secondary action: open execution detail (PLATFORM_ADMIN only).
 Current behavior: Failures are derived from the latest deployment for the service.
 
 Insights tab
@@ -178,13 +178,13 @@ User goal:
 
 Key data:
 - State, service, version, createdAt, updatedAt.
-- Spinnaker execution id and deep link.
+- Execution id and deep link (PLATFORM_ADMIN only).
 - Timeline events (normalized, ordered by timestamp).
 - Failures (normalized with category badge and suggested action).
 
 Primary actions:
 - Rollback (DELIVERY_OWNER, PLATFORM_ADMIN only).
-- Open Spinnaker deep link.
+- Open execution detail (PLATFORM_ADMIN only).
 - Open service URL (if available).
 
 Blocked-action UX:
@@ -271,7 +271,7 @@ User goal:
 
 Key data:
 - Recipe id, name, description.
-- Spinnaker application and deploy/rollback pipelines.
+- Engine mapping (PLATFORM_ADMIN only).
 - Status (active, deprecated).
 - Used-by count (delivery groups).
 

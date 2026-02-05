@@ -97,7 +97,7 @@ async def test_spinnaker_discovery_requires_scope(tmp_path: Path, monkeypatch):
             headers={"Authorization": f"Bearer {token}"},
         )
     assert response.status_code == 403
-    assert response.json()["code"] == "DELIVERY_GROUP_SCOPE_REQUIRED"
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
 
 
 async def test_spinnaker_discovery_filters_non_admin(tmp_path: Path, monkeypatch):
@@ -107,7 +107,6 @@ async def test_spinnaker_discovery_filters_non_admin(tmp_path: Path, monkeypatch
                 "id": "recipe-a",
                 "name": "Recipe A",
                 "description": None,
-                "allowed_parameters": [],
                 "spinnaker_application": "app-alpha",
                 "deploy_pipeline": "pipe-deploy",
                 "rollback_pipeline": "pipe-rollback",
@@ -119,7 +118,6 @@ async def test_spinnaker_discovery_filters_non_admin(tmp_path: Path, monkeypatch
                 "id": "recipe-b",
                 "name": "Recipe B",
                 "description": None,
-                "allowed_parameters": [],
                 "spinnaker_application": "app-beta",
                 "deploy_pipeline": "pipe-beta",
                 "rollback_pipeline": "pipe-beta-rollback",
@@ -137,47 +135,10 @@ async def test_spinnaker_discovery_filters_non_admin(tmp_path: Path, monkeypatch
                 "guardrails": None,
             }
         )
-        main.spinnaker.mode = "http"
-        monkeypatch.setattr(
-            main.spinnaker,
-            "list_applications",
-            lambda: [
-                {"name": "app-alpha"},
-                {"name": "app-beta"},
-            ],
-        )
-        monkeypatch.setattr(
-            main.spinnaker,
-            "list_pipeline_configs",
-            lambda application: [
-                {"id": "1", "name": "pipe-deploy"},
-                {"id": "2", "name": "pipe-rollback"},
-                {"id": "3", "name": "pipe-beta"},
-            ],
-        )
         token = build_token(["dxcp-observers"], subject="owner-1")
         apps_response = await client.get(
             "/v1/spinnaker/applications",
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert apps_response.status_code == 200
-        assert apps_response.json() == {"applications": [{"name": "app-alpha"}]}
-
-        pipelines_response = await client.get(
-            "/v1/spinnaker/applications/app-alpha/pipelines",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert pipelines_response.status_code == 200
-        assert pipelines_response.json() == {
-            "pipelines": [
-                {"id": "1", "name": "pipe-deploy"},
-                {"id": "2", "name": "pipe-rollback"},
-            ]
-        }
-
-        forbidden_response = await client.get(
-            "/v1/spinnaker/applications/app-beta/pipelines",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert forbidden_response.status_code == 403
-        assert forbidden_response.json()["code"] == "SPINNAKER_SCOPE_FORBIDDEN"
+        assert apps_response.status_code == 403
+        assert apps_response.json()["code"] == "ROLE_FORBIDDEN"

@@ -270,7 +270,6 @@ function buildGroupDraft(group, guardrailDefaults) {
     description: group?.description || '',
     owner: group?.owner || '',
     services: Array.isArray(group?.services) ? [...group.services] : [],
-    allowed_environments: Array.isArray(group?.allowed_environments) ? [...group.allowed_environments] : ['sandbox'],
     allowed_recipes: Array.isArray(group?.allowed_recipes) ? [...group.allowed_recipes] : [],
     change_reason: '',
     guardrails: {
@@ -295,7 +294,6 @@ function buildRecipeDraft(recipe) {
     id: recipe?.id || '',
     name: recipe?.name || '',
     description: recipe?.description || '',
-    allowed_parameters: Array.isArray(recipe?.allowed_parameters) ? recipe.allowed_parameters.join(', ') : '',
     spinnaker_application: recipe?.spinnaker_application || '',
     deploy_pipeline: recipe?.deploy_pipeline || '',
     rollback_pipeline: recipe?.rollback_pipeline || '',
@@ -310,14 +308,6 @@ function formatAuditValue(by, at) {
   return `${who} at ${when}`
 }
 
-function parseAllowedParameters(value) {
-  if (!value) return []
-  const parts = String(value)
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return Array.from(new Set(parts))
-}
 
 function recipeStatusLabel(value) {
   const status = String(value || 'active').toLowerCase()
@@ -1028,7 +1018,6 @@ export default function App() {
       description: adminGroupDraft.description.trim() || null,
       owner: adminGroupDraft.owner.trim() || null,
       services: adminGroupDraft.services.slice().sort(),
-      allowed_environments: adminGroupDraft.allowed_environments.slice().sort(),
       allowed_recipes: adminGroupDraft.allowed_recipes.slice().sort(),
       guardrails: guardrailsPayload
     }
@@ -1158,7 +1147,6 @@ export default function App() {
       id: adminRecipeDraft.id.trim(),
       name: adminRecipeDraft.name.trim(),
       description: adminRecipeDraft.description.trim() || null,
-      allowed_parameters: parseAllowedParameters(adminRecipeDraft.allowed_parameters),
       spinnaker_application: spinnakerApplication,
       deploy_pipeline: deployPipeline,
       rollback_pipeline: rollbackPipeline,
@@ -1287,7 +1275,7 @@ export default function App() {
     setRefreshClampNote(reason ? `Clamped to admin ${reason}.` : '')
   }
 
-  function renderFailures(list, spinnakerUrl) {
+  function renderFailures(list, engineUrl) {
     if (!list || list.length === 0) {
       return <div className="helper">No failures reported.</div>
     }
@@ -1310,10 +1298,10 @@ export default function App() {
             </div>
           )
         })}
-        {spinnakerUrl && (
+        {isPlatformAdmin && engineUrl && (
           <div className="links" style={{ marginTop: '12px' }}>
-            <a className="link secondary" href={spinnakerUrl} target="_blank" rel="noreferrer">
-              Open Spinnaker execution
+            <a className="link secondary" href={engineUrl} target="_blank" rel="noreferrer">
+              Open execution detail
             </a>
           </div>
         )}
@@ -1994,14 +1982,14 @@ export default function App() {
                       >
                         Open deployment detail
                       </button>
-                      {serviceDetailLatest.spinnakerExecutionUrl && (
+                      {isPlatformAdmin && serviceDetailLatest.engineExecutionUrl && (
                         <a
                           className="link"
-                          href={serviceDetailLatest.spinnakerExecutionUrl}
+                          href={serviceDetailLatest.engineExecutionUrl}
                           target="_blank"
                           rel="noreferrer"
                         >
-                          Open in Spinnaker
+                          Execution detail
                         </a>
                       )}
                     </div>
@@ -2124,7 +2112,7 @@ export default function App() {
           {!serviceDetailLoading && serviceDetailTab === 'failures' && (
             <div className="card" style={{ gridColumn: '1 / -1' }}>
               <h2>Latest failures</h2>
-              {renderFailures(serviceDetailFailures, serviceDetailStatus?.latest?.spinnakerExecutionUrl)}
+            {renderFailures(serviceDetailFailures, serviceDetailStatus?.latest?.engineExecutionUrl)}
             </div>
           )}
 
@@ -2345,7 +2333,9 @@ export default function App() {
                 <p>Service: {deployResult.service}</p>
                 <p>Version: {deployResult.version}</p>
                 <p>Deployment id: {deployResult.id}</p>
-                {deployResult.spinnakerExecutionId && <p>Spinnaker execution: {deployResult.spinnakerExecutionId}</p>}
+                {isPlatformAdmin && deployResult.engineExecutionId && (
+                  <p>Execution id: {deployResult.engineExecutionId}</p>
+                )}
                 <button className="button secondary" onClick={() => openDeployment(deployResult)}>
                   View detail
                 </button>
@@ -2395,11 +2385,11 @@ export default function App() {
                 <p>Version: {selected.version}</p>
                 <p>Created: {formatTime(selected.createdAt)}</p>
                 <p>Updated: {formatTime(selected.updatedAt)}</p>
-                {selected.spinnakerExecutionId && <p>Spinnaker execution: {selected.spinnakerExecutionId}</p>}
+                {isPlatformAdmin && selected.engineExecutionId && <p>Execution id: {selected.engineExecutionId}</p>}
                 <div className="links">
-                  {selected.spinnakerExecutionUrl && (
-                    <a className="link" href={selected.spinnakerExecutionUrl} target="_blank" rel="noreferrer">
-                      Debug in Spinnaker
+                  {isPlatformAdmin && selected.engineExecutionUrl && (
+                    <a className="link" href={selected.engineExecutionUrl} target="_blank" rel="noreferrer">
+                      Execution detail
                     </a>
                   )}
                   {serviceUrl && (
@@ -2450,7 +2440,7 @@ export default function App() {
           </div>
           <div className="card">
             <h2>Failures</h2>
-            {renderFailures(failures, selected?.spinnakerExecutionUrl)}
+            {renderFailures(failures, selected?.engineExecutionUrl)}
           </div>
         </div>
       )}
@@ -2868,28 +2858,6 @@ export default function App() {
                           />
                         </div>
                         <div className="helper">Admin-only configuration. Affects Delivery Owners and Observers.</div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Allowed environments</div>
-                        <div className="checklist">
-                          {['sandbox'].map((env) => (
-                            <label key={env} className="check-item">
-                              <input
-                                type="checkbox"
-                                checked={adminGroupDraft.allowed_environments.includes(env)}
-                                onChange={() => {
-                                  const set = new Set(adminGroupDraft.allowed_environments)
-                                  if (set.has(env)) {
-                                    set.delete(env)
-                                  } else {
-                                    set.add(env)
-                                  }
-                                  handleAdminGroupDraftChange('allowed_environments', Array.from(set))
-                                }}
-                                disabled={adminReadOnly}
-                              />
-                              <span>{env}</span>
-                            </label>
-                          ))}
-                        </div>
                         <div className="helper" style={{ marginTop: '12px' }}>Services</div>
                         <div className="checklist">
                           {sortedServiceNames.length === 0 && <div className="helper">No allowlisted services found.</div>}
@@ -3049,7 +3017,9 @@ export default function App() {
                               </div>
                               <div>{usage} groups</div>
                               <div>
-                                {recipe.spinnaker_application ? recipe.spinnaker_application : 'No engine mapping'}
+                                {isPlatformAdmin
+                                  ? recipe.spinnaker_application || 'No engine mapping'
+                                  : 'Diagnostics hidden'}
                               </div>
                               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                                 <button
@@ -3111,32 +3081,29 @@ export default function App() {
                             <div>{activeAdminRecipe.last_change_reason || 'None'}</div>
                           </div>
                         </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
-                        <div className="list">
-                          <div className="list-item admin-detail">
-                            <div>Application</div>
-                            <div>{activeAdminRecipe.spinnaker_application || 'Not set'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Deploy pipeline</div>
-                            <div>{activeAdminRecipe.deploy_pipeline || 'Not set'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Rollback pipeline</div>
-                            <div>{activeAdminRecipe.rollback_pipeline || 'Not set'}</div>
-                          </div>
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Allowed parameters</div>
-                        <div className="list">
-                          {(activeAdminRecipe.allowed_parameters || []).length === 0 && (
-                            <div className="helper">No allowed parameters.</div>
-                          )}
-                          {(activeAdminRecipe.allowed_parameters || []).map((param) => (
-                            <div className="list-item admin-detail" key={param}>
-                              <div>{param}</div>
+                        {isPlatformAdmin ? (
+                          <>
+                            <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                            <div className="list">
+                              <div className="list-item admin-detail">
+                                <div>Application</div>
+                                <div>{activeAdminRecipe.spinnaker_application || 'Not set'}</div>
+                              </div>
+                              <div className="list-item admin-detail">
+                                <div>Deploy pipeline</div>
+                                <div>{activeAdminRecipe.deploy_pipeline || 'Not set'}</div>
+                              </div>
+                              <div className="list-item admin-detail">
+                                <div>Rollback pipeline</div>
+                                <div>{activeAdminRecipe.rollback_pipeline || 'Not set'}</div>
+                              </div>
                             </div>
-                          ))}
-                        </div>
+                          </>
+                        ) : (
+                          <div className="helper" style={{ marginTop: '12px' }}>
+                            Engine mapping is visible to Platform Admins only.
+                          </div>
+                        )}
                         <button
                           className="button secondary"
                           style={{ marginTop: '12px' }}
@@ -3249,50 +3216,48 @@ export default function App() {
                             disabled={adminReadOnly}
                           />
                         </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-params">Allowed parameters (comma-separated)</label>
-                          <input
-                            id="admin-recipe-params"
-                            value={adminRecipeDraft.allowed_parameters}
-                            onChange={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('allowed_parameters', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
-                        {adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && (
-                          <div className="helper">Engine mapping is locked while recipe is in use.</div>
+                        {isPlatformAdmin ? (
+                          <>
+                            <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                            {adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && (
+                              <div className="helper">Engine mapping is locked while recipe is in use.</div>
+                            )}
+                            <div className="field">
+                              <label htmlFor="admin-recipe-app">Spinnaker application</label>
+                              <input
+                                id="admin-recipe-app"
+                                value={adminRecipeDraft.spinnaker_application}
+                                onChange={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
+                                onInput={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
+                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
+                              />
+                            </div>
+                            <div className="field">
+                              <label htmlFor="admin-recipe-deploy">Deploy pipeline</label>
+                              <input
+                                id="admin-recipe-deploy"
+                                value={adminRecipeDraft.deploy_pipeline}
+                                onChange={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
+                                onInput={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
+                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
+                              />
+                            </div>
+                            <div className="field">
+                              <label htmlFor="admin-recipe-rollback">Rollback pipeline</label>
+                              <input
+                                id="admin-recipe-rollback"
+                                value={adminRecipeDraft.rollback_pipeline}
+                                onChange={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
+                                onInput={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
+                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <div className="helper" style={{ marginTop: '12px' }}>
+                            Engine mapping is visible to Platform Admins only.
+                          </div>
                         )}
-                        <div className="field">
-                          <label htmlFor="admin-recipe-app">Spinnaker application</label>
-                          <input
-                            id="admin-recipe-app"
-                            value={adminRecipeDraft.spinnaker_application}
-                            onChange={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
-                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-deploy">Deploy pipeline</label>
-                          <input
-                            id="admin-recipe-deploy"
-                            value={adminRecipeDraft.deploy_pipeline}
-                            onChange={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
-                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-rollback">Rollback pipeline</label>
-                          <input
-                            id="admin-recipe-rollback"
-                            value={adminRecipeDraft.rollback_pipeline}
-                            onChange={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
-                            disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                          />
-                        </div>
                         <div className="field">
                           <label htmlFor="admin-recipe-status">Deprecated</label>
                           <input

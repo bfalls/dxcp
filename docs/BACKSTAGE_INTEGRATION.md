@@ -54,7 +54,7 @@ Response example:
     "recipeId": "default",
     "createdAt": "2024-01-01T00:00:00Z",
     "updatedAt": "2024-01-01T00:05:00Z",
-    "spinnakerExecutionUrl": "https://spinnaker.example/pipelines/dep-123",
+    "engineExecutionUrl": "https://spinnaker.example/pipelines/dep-123",
     "rollbackOf": null
   }
 }

@@ -31,7 +31,7 @@ Roles (demo):
 - OBSERVER: read-only
 
 Spinnaker discovery endpoints:
-- /v1/spinnaker/* requires authentication.
+- /v1/spinnaker/* requires PLATFORM_ADMIN.
 - PLATFORM_ADMIN only.
 - Non-admin requests return 403.
 
@@ -97,7 +97,7 @@ Fields:
 - recipeId (string, required)
 
 Notes:
-- spinnakerApplication and spinnakerPipeline are mapped from the Recipe and not user-provided.
+- Engine application and pipeline identifiers are mapped from the Recipe and not user-provided.
 
 ### DeploymentRecord
 
@@ -108,10 +108,12 @@ Fields:
 - version
 - recipeId
 - state (PENDING | IN_PROGRESS | ACTIVE | SUCCEEDED | FAILED | CANCELED | ROLLED_BACK)
+- changeSummary
 - createdAt
 - updatedAt
-- spinnakerExecutionId (required)
-- spinnakerExecutionUrl (required, deep-linkable)
+- deliveryGroupId
+- engineExecutionId (admin-only)
+- engineExecutionUrl (admin-only)
 - rollbackOf (optional; deployment id being rolled back)
 - failures (list of NormalizedFailure)
 
@@ -168,7 +170,6 @@ Fields:
 - description (optional)
 - owner (optional)
 - services (list of allowlisted service names)
-- allowed_environments (optional)
 - allowed_recipes (list of recipe ids or names)
 - guardrails (optional, DeliveryGroupGuardrails)
 - created_at
@@ -193,7 +194,6 @@ Fields:
 - id
 - name
 - description (optional)
-- allowed_parameters
 - spinnaker_application
 - deploy_pipeline
 - rollback_pipeline
@@ -296,16 +296,12 @@ Fields:
   - List Spinnaker applications (Gate)
   - Optional query: tagName, tagValue (filter applications by tag)
   - Response: list of { name }
-  - Authz:
-    - PLATFORM_ADMIN: full discovery
-    - DELIVERY_OWNER, OBSERVER: filtered to delivery group scope (owner-matched groups only)
+  - Authz: PLATFORM_ADMIN only
 
 - GET /v1/spinnaker/applications/{application}/pipelines
   - List Spinnaker pipeline configs for an application
   - Response: list of { id, name }
-  - Authz:
-    - PLATFORM_ADMIN: full discovery
-    - DELIVERY_OWNER, OBSERVER: filtered to delivery group scope (owner-matched groups only)
+  - Authz: PLATFORM_ADMIN only
 
 - GET /v1/spinnaker/status
   - Spinnaker health check
@@ -391,10 +387,9 @@ Enforcement order:
 
 ---
 
-## Spinnaker Integration Requirements
+## Engine Integration Requirements
 
-- Every DeploymentRecord must include spinnakerExecutionId
-- Every DeploymentRecord must include spinnakerExecutionUrl for UI deep-link
+- DeploymentRecords include engine execution identifiers for PLATFORM_ADMIN diagnostics.
 
 ---
 
@@ -402,4 +397,4 @@ Enforcement order:
 
 - API contract is stable and documented
 - Guardrails are explicit and enforceable
-- Spinnaker linkage is captured in the DeploymentRecord
+- Engine linkage is captured for PLATFORM_ADMIN diagnostics

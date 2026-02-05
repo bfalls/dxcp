@@ -160,8 +160,8 @@ Notes:
 
 ## DXCP pipeline contract
 
-DXCP requires both `spinnakerApplication` and `spinnakerPipeline` on deploy requests.
-Rollback uses the stored values from the deployment record; if they are missing, rollback fails with a clear error.
+DXCP maps `spinnakerApplication` and `spinnakerPipeline` from the selected Recipe.
+Rollback uses the stored mapping from the deployment record; if it is missing, rollback fails with a clear error.
 
 DXCP supplies intent (service + artifact/version). Spinnaker owns engine configuration (URLs, tokens, credentials).
 

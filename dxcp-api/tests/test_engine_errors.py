@@ -85,7 +85,6 @@ async def test_engine_error_schema_non_admin(tmp_path: Path, monkeypatch):
             "id": "default",
             "name": "Default Recipe",
             "description": None,
-            "allowed_parameters": [],
             "spinnaker_application": "app-one",
             "deploy_pipeline": "deploy-one",
             "rollback_pipeline": "rollback-one",
@@ -106,15 +105,12 @@ async def test_engine_error_schema_non_admin(tmp_path: Path, monkeypatch):
                 "guardrails": None,
             }
         )
-        def _boom():
-            raise RuntimeError("Spinnaker HTTP 403: Authorization: Bearer secret")
-        monkeypatch.setattr(main.spinnaker, "list_applications", _boom)
         token = build_token(["dxcp-observers"], subject="observer-1")
         response = await client.get(
             "/v1/spinnaker/applications",
             headers={"Authorization": f"Bearer {token}"},
         )
-    assert response.status_code == 502
+    assert response.status_code == 403
     body = response.json()
-    assert body["code"] == "ENGINE_UNAUTHORIZED"
+    assert body["code"] == "ROLE_FORBIDDEN"
     assert "operator_hint" not in body

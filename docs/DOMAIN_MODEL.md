@@ -17,9 +17,7 @@ Fields (required unless noted):
 - version: artifact version or build ID
 - environment: single allowed environment (sandbox)
 - changeSummary: required change summary
-- recipeId (optional): selects a Recipe by id
-- spinnakerApplication (optional): engine application name (resolved by recipe)
-- spinnakerPipeline (optional): engine pipeline name (resolved by recipe)
+- recipeId: selects a Recipe by id
 
 Notes:
 - Intent is validated by guardrails before any engine call.
@@ -34,12 +32,14 @@ Fields:
 - service: allowlisted service name
 - environment: resolved environment
 - version: artifact version
-- recipeId (optional): recipe id used
+- recipeId: recipe id used
 - state: one of PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK
+- changeSummary: user-provided change summary
 - createdAt: timestamp
 - updatedAt: timestamp
-- spinnakerExecutionId: reference to engine execution
-- spinnakerExecutionUrl: deep link to engine execution
+- deliveryGroupId: delivery group policy scope
+- engineExecutionId (admin-only): reference to engine execution
+- engineExecutionUrl (admin-only): deep link to engine execution
 - rollbackOf (optional): original deployment id
 - failures: list of FailureModel entries (can be empty)
 
@@ -52,7 +52,7 @@ Notes:
 Normalized representation of a failure, regardless of engine source.
 
 Fields:
-- category: one of VALIDATION, POLICY, ARTIFACT, INFRASTRUCTURE, TIMEOUT, ROLLBACK, UNKNOWN
+- category: one of VALIDATION, POLICY, ARTIFACT, INFRASTRUCTURE, CONFIG, APP, TIMEOUT, ROLLBACK, UNKNOWN
 - summary: one line description of what failed
 - detail (optional): short explanation
 - actionHint (optional): suggested next step
@@ -70,7 +70,6 @@ Fields:
 - id: unique identifier
 - name: human readable name
 - description: short purpose statement
-- allowed_parameters: explicit allowlist of parameters DXCP will pass to the adapter
 - spinnaker_application: engine application identifier
 - deploy_pipeline: engine pipeline identifier for deploy
 - rollback_pipeline: engine pipeline identifier for rollback
@@ -84,6 +83,7 @@ Fields:
 Notes:
 - Only a small, approved set of recipes exist.
 - Recipes evolve centrally to preserve safety and consistency.
+- Engine mapping fields are admin-only diagnostics.
 
 ## DeliveryGroup
 
@@ -95,7 +95,6 @@ Fields:
 - description (optional): short summary of the group
 - owner (optional): team or user identifier
 - services: list of allowlisted service names
-- allowed_environments (optional): policy allowlist of environments
 - allowed_recipes: list of recipe ids or names (can be empty)
 - guardrails (optional): policy limits scoped to the group
   - max_concurrent_deployments

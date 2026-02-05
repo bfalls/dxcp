@@ -771,6 +771,7 @@ class Storage:
             "spinnakerApplication": row["spinnaker_application"],
             "spinnakerPipeline": row["spinnaker_pipeline"],
             "rollbackOf": row["rollback_of"],
+            "deliveryGroupId": row["delivery_group_id"],
             "failures": failures,
         }
 

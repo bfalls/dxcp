@@ -241,12 +241,12 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkey
         body = response.json()
         assert body["version"] == "1.0.0"
         assert body["rollbackOf"] == "dep-b"
-        assert body["spinnakerExecutionId"]
+        assert body["engineExecutionId"]
         assert fake.triggered[0]["kind"] == "rollback"
         assert fake.triggered[0]["payload"]["version"] == "1.0.0"
         assert fake.triggered[0]["payload"]["targetVersion"] == "1.0.0"
 
-        fake.executions[body["spinnakerExecutionId"]]["state"] = "SUCCEEDED"
+        fake.executions[body["engineExecutionId"]]["state"] = "SUCCEEDED"
         detail = await client.get(
             f"/v1/deployments/{body['id']}",
             headers=auth_header(["dxcp-platform-admins"]),

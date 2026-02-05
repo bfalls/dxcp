@@ -8,7 +8,7 @@ info:
     Policy and guardrails (enforced):
     - Allowlisted service only.
     - Single environment only: "sandbox".
-    - One active deployment at a time (global lock).
+    - One active deployment at a time per delivery group.
     - Idempotency-Key required for mutating operations.
     - Rate limits (default): 60 rpm read, 10 rpm mutate.
     - Daily quotas (default): 25 deployments, 10 rollbacks, 50 build registrations, 50 upload capability requests per client.
@@ -221,7 +221,7 @@ components:
   schemas:
     DeploymentIntent:
       type: object
-      required: [service, environment, version, changeSummary]
+      required: [service, environment, version, changeSummary, recipeId]
       properties:
         service:
           type: string
@@ -235,6 +235,9 @@ components:
         changeSummary:
           type: string
           maxLength: 240
+        recipeId:
+          type: string
+          description: Required recipe identifier.
     DeploymentRecord:
       type: object
       required:
@@ -242,11 +245,12 @@ components:
         - service
         - environment
         - version
+        - recipeId
         - state
+        - changeSummary
         - createdAt
         - updatedAt
-        - spinnakerExecutionId
-        - spinnakerExecutionUrl
+        - deliveryGroupId
       properties:
         id:
           type: string
@@ -257,19 +261,27 @@ components:
           enum: [sandbox]
         version:
           type: string
+        recipeId:
+          type: string
         state:
           $ref: '#/components/schemas/DeploymentState'
+        changeSummary:
+          type: string
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
-        spinnakerExecutionId:
+        deliveryGroupId:
           type: string
-        spinnakerExecutionUrl:
+        engineExecutionId:
+          type: string
+          description: Admin-only engine execution identifier.
+        engineExecutionUrl:
           type: string
           format: uri
+          description: Admin-only engine execution link.
         rollbackOf:
           type: string
           description: Deployment id being rolled back, when applicable.
@@ -286,7 +298,7 @@ components:
       properties:
         category:
           type: string
-          enum: [INFRA, CONFIG, APP, POLICY, UNKNOWN]
+          enum: [VALIDATION, POLICY, ARTIFACT, INFRASTRUCTURE, CONFIG, APP, TIMEOUT, ROLLBACK, UNKNOWN]
         summary:
           type: string
         detail:
@@ -366,11 +378,15 @@ components:
           format: date-time
     Error:
       type: object
-      required: [code, message]
+      required: [code, message, request_id]
       properties:
         code:
           type: string
         message:
+          type: string
+        request_id:
+          type: string
+        operator_hint:
           type: string
         details:
           type: object
@@ -395,7 +411,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     DeploymentLocked:
-      description: Global deployment lock active.
+      description: Delivery group deployment lock active.
       content:
         application/json:
           schema:

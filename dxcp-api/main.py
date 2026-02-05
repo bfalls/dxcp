@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import FastAPI, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from fastapi.exceptions import HTTPException as FastAPIHTTPException, RequestValidationError
 
 from auth import get_actor
 from config import SETTINGS
@@ -116,6 +116,16 @@ async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
         status_code=exc.status_code,
         content={"code": "HTTP_ERROR", "message": str(exc.detail), "request_id": request_id_ctx.get() or str(uuid.uuid4())},
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError):
+    for error in exc.errors():
+        loc = error.get("loc") or ()
+        err_type = error.get("type")
+        if loc == ("body", "recipeId") and err_type in {"missing", "value_error.missing"}:
+            return error_response(400, "RECIPE_ID_REQUIRED", "recipeId is required")
+    return error_response(400, "INVALID_REQUEST", "Invalid request")
 
 
 @app.middleware("http")
@@ -565,9 +575,6 @@ def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> 
         return error_response(400, "ID_MISMATCH", "Recipe id cannot be changed")
     if not payload.get("name"):
         return error_response(400, "RECIPE_NAME_REQUIRED", "Recipe name is required")
-    allowed_parameters = payload.get("allowed_parameters", [])
-    if not isinstance(allowed_parameters, list):
-        return error_response(400, "INVALID_ALLOWED_PARAMETERS", "allowed_parameters must be a list")
     spinnaker_application = payload.get("spinnaker_application")
     deploy_pipeline = payload.get("deploy_pipeline")
     rollback_pipeline = payload.get("rollback_pipeline")
@@ -596,6 +603,41 @@ def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
         payload["spinnakerApplication"] = recipe.get("spinnaker_application")
     if recipe.get("deploy_pipeline"):
         payload["spinnakerPipeline"] = recipe.get("deploy_pipeline")
+
+
+def _deployment_public_view(actor: Actor, deployment: dict) -> dict:
+    delivery_group_id = deployment.get("deliveryGroupId")
+    if not delivery_group_id and deployment.get("service"):
+        group = storage.get_delivery_group_for_service(deployment["service"])
+        if group:
+            delivery_group_id = group.get("id")
+    payload = {
+        "id": deployment.get("id"),
+        "service": deployment.get("service"),
+        "environment": deployment.get("environment"),
+        "version": deployment.get("version"),
+        "recipeId": deployment.get("recipeId"),
+        "state": deployment.get("state"),
+        "changeSummary": deployment.get("changeSummary"),
+        "createdAt": deployment.get("createdAt"),
+        "updatedAt": deployment.get("updatedAt"),
+        "rollbackOf": deployment.get("rollbackOf"),
+        "deliveryGroupId": delivery_group_id,
+        "failures": deployment.get("failures") or [],
+    }
+    if actor.role == Role.PLATFORM_ADMIN:
+        payload["engineExecutionId"] = deployment.get("spinnakerExecutionId")
+        payload["engineExecutionUrl"] = deployment.get("spinnakerExecutionUrl")
+    return payload
+
+
+def _recipe_public_view(actor: Actor, recipe: dict) -> dict:
+    payload = Recipe(**recipe).dict()
+    if actor.role != Role.PLATFORM_ADMIN:
+        payload.pop("spinnaker_application", None)
+        payload.pop("deploy_pipeline", None)
+        payload.pop("rollback_pipeline", None)
+    return payload
 
 
 def enforce_idempotency(request: Request, idempotency_key: str):
@@ -844,7 +886,7 @@ def _register_existing_build_internal(service_entry: dict, service: str, version
         service,
         version,
     )
-    return record
+    return _deployment_public_view(actor, record)
 
 
 def _extract_tags(app: dict) -> list:
@@ -937,8 +979,6 @@ def create_deployment(
         return cached
 
     payload = intent.dict()
-    payload.pop("spinnakerApplication", None)
-    payload.pop("spinnakerPipeline", None)
     payload.pop("recipeId", None)
     _apply_recipe_mapping(payload, recipe)
     if spinnaker.mode == "http":
@@ -1017,7 +1057,7 @@ def create_deployment(
         outcome="SUCCESS",
         summary=f"Deploy submitted for {intent.service}",
     )
-    return record
+    return _deployment_public_view(actor, record)
 
 
 @app.get("/v1/deployments")
@@ -1030,7 +1070,7 @@ def list_deployments(
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     deployments = storage.list_deployments(service, state)
-    return deployments
+    return [_deployment_public_view(actor, deployment) for deployment in deployments]
 
 
 @app.get("/v1/services")
@@ -1207,7 +1247,7 @@ def list_recipes(request: Request, authorization: Optional[str] = Header(None)):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     recipes = storage.list_recipes()
-    return [Recipe(**recipe).dict() for recipe in recipes]
+    return [_recipe_public_view(actor, recipe) for recipe in recipes]
 
 
 @app.get("/v1/recipes/{recipe_id}")
@@ -1217,7 +1257,7 @@ def get_recipe(recipe_id: str, request: Request, authorization: Optional[str] = 
     recipe = storage.get_recipe(recipe_id)
     if not recipe:
         return error_response(404, "NOT_FOUND", "Recipe not found")
-    return Recipe(**recipe).dict()
+    return _recipe_public_view(actor, recipe)
 
 
 @app.get("/v1/services/{service}/versions")
@@ -1262,7 +1302,7 @@ def get_service_delivery_status(
             "latest": None,
         }
     latest = deployments[0]
-    return {
+    payload = {
         "service": service,
         "hasDeployments": True,
         "latest": {
@@ -1272,10 +1312,13 @@ def get_service_delivery_status(
             "recipeId": latest.get("recipeId"),
             "createdAt": latest.get("createdAt"),
             "updatedAt": latest.get("updatedAt"),
-            "spinnakerExecutionUrl": latest.get("spinnakerExecutionUrl"),
             "rollbackOf": latest.get("rollbackOf"),
         },
     }
+    if actor.role == Role.PLATFORM_ADMIN:
+        payload["latest"]["engineExecutionId"] = latest.get("spinnakerExecutionId")
+        payload["latest"]["engineExecutionUrl"] = latest.get("spinnakerExecutionUrl")
+    return payload
 
 
 @app.get("/v1/services/{service}/allowed-actions")
@@ -1332,7 +1375,7 @@ def get_deployment(
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
-    return deployment
+    return _deployment_public_view(actor, deployment)
 
 
 @app.get("/v1/deployments/{deployment_id}/failures")
@@ -1436,7 +1479,6 @@ def validate_guardrails(
         "spinnaker_application" in payload
         or "deploy_pipeline" in payload
         or "rollback_pipeline" in payload
-        or "allowed_parameters" in payload
         or "status" in payload
         or "id" in payload
         or "name" in payload
@@ -1530,20 +1572,15 @@ def list_spinnaker_applications(
 ):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    scope = None
-    if actor.role != Role.PLATFORM_ADMIN:
-        scope, scope_error = _spinnaker_scope_for_actor(actor)
-        if scope_error:
-            return scope_error
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view engine mapping")
+    if role_error:
+        return role_error
     if spinnaker.mode != "http":
         return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
         apps = spinnaker.list_applications()
     except Exception as exc:
         return _engine_error_response(actor, "Unable to retrieve Spinnaker applications", exc)
-    if scope:
-        allowed_apps = scope["apps"]
-        apps = [app for app in apps if isinstance(app, dict) and app.get("name") in allowed_apps]
     if tagName:
         apps = [app for app in apps if isinstance(app, dict) and _matches_tag(app, tagName, tagValue)]
     return {
@@ -1563,31 +1600,15 @@ def list_spinnaker_pipelines(
 ):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    scope = None
-    if actor.role != Role.PLATFORM_ADMIN:
-        scope, scope_error = _spinnaker_scope_for_actor(actor)
-        if scope_error:
-            return scope_error
-        allowed_apps = scope["apps"]
-        if application not in allowed_apps:
-            return error_response(
-                403,
-                "SPINNAKER_SCOPE_FORBIDDEN",
-                f"Application {application} is not in delivery group scope",
-            )
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view engine mapping")
+    if role_error:
+        return role_error
     if spinnaker.mode != "http":
         return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
         pipelines = spinnaker.list_pipeline_configs(application)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to retrieve Spinnaker pipelines", exc)
-    if scope:
-        allowed_pipelines = scope["pipelines"].get(application, set())
-        pipelines = [
-            pipeline
-            for pipeline in pipelines
-            if isinstance(pipeline, dict) and pipeline.get("name") in allowed_pipelines
-        ]
     return {
         "pipelines": [
             {
@@ -1705,7 +1726,7 @@ def rollback_deployment(
         service_name=deployment["service"],
         environment=deployment["environment"],
     )
-    return record
+    return _deployment_public_view(actor, record)
 
 
 @app.post("/v1/builds/upload-capability", status_code=201)

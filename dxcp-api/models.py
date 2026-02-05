@@ -29,9 +29,7 @@ class DeploymentIntent(BaseModel):
     environment: str
     version: str
     changeSummary: str = Field(..., max_length=240)
-    recipeId: Optional[str] = None
-    spinnakerApplication: Optional[str] = None
-    spinnakerPipeline: Optional[str] = None
+    recipeId: str
 
 
 class NormalizedFailure(BaseModel):
@@ -47,12 +45,14 @@ class DeploymentRecord(BaseModel):
     service: str
     environment: str
     version: str
-    recipeId: Optional[str] = None
+    recipeId: str
     state: DeploymentState
+    changeSummary: str
     createdAt: str
     updatedAt: str
-    spinnakerExecutionId: str
-    spinnakerExecutionUrl: str
+    deliveryGroupId: str
+    engineExecutionId: Optional[str] = None
+    engineExecutionUrl: Optional[str] = None
     rollbackOf: Optional[str] = None
     failures: List[NormalizedFailure] = []
 
@@ -76,7 +76,6 @@ class DeliveryGroup(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
-    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     created_at: Optional[str] = None
@@ -92,7 +91,6 @@ class DeliveryGroupUpsert(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
-    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     change_reason: Optional[str] = None
@@ -102,7 +100,6 @@ class Recipe(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    allowed_parameters: List[str] = Field(default_factory=list)
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
@@ -118,7 +115,6 @@ class RecipeUpsert(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
-    allowed_parameters: List[str] = Field(default_factory=list)
     spinnaker_application: Optional[str] = None
     deploy_pipeline: Optional[str] = None
     rollback_pipeline: Optional[str] = None
@@ -191,4 +187,6 @@ class BuildRegisterExistingRequest(BaseModel):
 class ErrorResponse(BaseModel):
     code: str
     message: str
+    request_id: str
+    operator_hint: Optional[str] = None
     details: Optional[dict] = None

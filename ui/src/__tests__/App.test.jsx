@@ -171,7 +171,7 @@ const buildFetchMock = ({
         version: '2.1.0',
         createdAt: '2025-01-01T00:00:00Z',
         updatedAt: '2025-01-01T00:00:00Z',
-        spinnakerExecutionUrl: 'https://spinnaker.example/executions/dep-1'
+        engineExecutionUrl: 'https://spinnaker.example/executions/dep-1'
       })
     }
     if (pathname === '/v1/deployments/dep-1/failures') {
@@ -839,7 +839,7 @@ export async function runAllTests() {
     const badge = view.container.querySelector('.failure .badge')
     assert.ok(badge)
     assert.equal(badge.textContent, 'INFRASTRUCTURE')
-    assert.ok(view.getByRole('link', { name: 'Open Spinnaker execution' }))
+    assert.ok(view.getByRole('link', { name: 'Open execution detail' }))
   })
 
   await runTest('Services list renders from API', async () => {

@@ -23,7 +23,6 @@ Fields:
 - description (optional)
 - owner (optional)
 - services (list of allowlisted services)
-- allowed_environments (optional)
 - allowed_recipes (list of recipe ids)
 - guardrails:
   - max_concurrent_deployments
@@ -55,7 +54,6 @@ Fields:
 - id (immutable)
 - name
 - description (optional)
-- allowed_parameters (list)
 - spinnaker_application
 - deploy_pipeline
 - rollback_pipeline
