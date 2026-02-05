@@ -79,6 +79,17 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
+    main.storage.insert_build(
+        {
+            "service": "demo-service",
+            "version": "1.0.0",
+            "artifactRef": "local:demo-service-1.0.0.zip",
+            "sha256": "a" * 64,
+            "sizeBytes": 1024,
+            "contentType": "application/zip",
+            "registeredAt": main.utc_now(),
+        }
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://testserver",

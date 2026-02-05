@@ -28,7 +28,15 @@ class RateLimiter:
 
     def _check_minute(self, client_id: str, limit: int) -> None:
         if self._ddb:
-            self._check_ddb_rate(client_id, "MINUTE", int(time.time() // 60), limit, 120, "Rate limit exceeded")
+            self._check_ddb_rate(
+                client_id,
+                "MINUTE",
+                int(time.time() // 60),
+                limit,
+                120,
+                "RATE_LIMITED",
+                "Rate limit exceeded",
+            )
             return
         now = time.time()
         bucket = self._minute_counters[(client_id, limit)]
@@ -44,16 +52,31 @@ class RateLimiter:
         day = time.strftime("%Y-%m-%d", time.gmtime())
         if self._ddb:
             ttl_seconds = 48 * 60 * 60
-            self._check_ddb_rate(client_id, f"DAY#{key}", day, limit, ttl_seconds, "Daily quota exceeded")
+            self._check_ddb_rate(
+                client_id,
+                f"DAY#{key}",
+                day,
+                limit,
+                ttl_seconds,
+                "QUOTA_EXCEEDED",
+                "Daily quota exceeded",
+            )
             return
         daily_key = f"{day}:{key}"
         count = self._daily_counts[client_id][daily_key]
         if count >= limit:
-            raise PolicyError(429, "RATE_LIMITED", "Daily quota exceeded")
+            raise PolicyError(429, "QUOTA_EXCEEDED", "Daily quota exceeded")
         self._daily_counts[client_id][daily_key] += 1
 
     def _check_ddb_rate(
-        self, client_id: str, scope: str, bucket: object, limit: int, ttl_seconds: int, message: str
+        self,
+        client_id: str,
+        scope: str,
+        bucket: object,
+        limit: int,
+        ttl_seconds: int,
+        error_code: str,
+        message: str,
     ) -> None:
         now = int(time.time())
         ttl = now + ttl_seconds
@@ -72,9 +95,9 @@ class RateLimiter:
                 },
             )
         except ClientError as exc:
-            code = exc.response.get("Error", {}).get("Code")
-            if code == "ConditionalCheckFailedException":
-                raise PolicyError(429, "RATE_LIMITED", message)
+            ddb_code = exc.response.get("Error", {}).get("Code")
+            if ddb_code == "ConditionalCheckFailedException":
+                raise PolicyError(429, error_code, message)
             raise
 
     def check_read(self, client_id: str) -> None:

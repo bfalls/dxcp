@@ -42,7 +42,7 @@ class Guardrails:
 
     def validate_version(self, version: str) -> None:
         if not VERSION_PATTERN.match(version):
-            raise PolicyError(400, "INVALID_REQUEST", "Version format is invalid")
+            raise PolicyError(400, "INVALID_VERSION", "Version format is invalid")
 
     def validate_artifact(self, size_bytes: int, sha256: str, content_type: str) -> None:
         if size_bytes > SETTINGS.max_artifact_size_bytes:
@@ -70,7 +70,7 @@ class Guardrails:
 
     def enforce_global_lock(self) -> None:
         if self.storage.has_active_deployment():
-            raise PolicyError(409, "DEPLOYMENT_LOCKED", "Another deployment is active")
+            raise PolicyError(409, "CONCURRENCY_LIMIT_REACHED", "Another deployment is active")
 
     def enforce_delivery_group_lock(self, group_id: str, max_concurrent: int) -> None:
         if max_concurrent < 1:
@@ -79,6 +79,6 @@ class Guardrails:
         if active >= max_concurrent:
             raise PolicyError(
                 409,
-                "DEPLOYMENT_LOCKED",
+                "CONCURRENCY_LIMIT_REACHED",
                 f"Delivery group {group_id} has active deployments",
             )

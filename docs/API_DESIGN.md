@@ -67,13 +67,14 @@ Kill switch:
   - any other value returns 400 INVALID_ENVIRONMENT
 
 - One active deployment at a time per delivery group (default)
-  - when a deployment is in ACTIVE or IN_PROGRESS in a group, new deploy/rollback requests return 409 DEPLOYMENT_LOCKED
+  - when a deployment is in ACTIVE or IN_PROGRESS in a group, new deploy/rollback requests return 409 CONCURRENCY_LIMIT_REACHED
 
 - Idempotency keys required
   - missing Idempotency-Key on mutating endpoints returns 400 IDMP_KEY_REQUIRED
 
 - Input validation
   - version format: ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$
+  - version must be registered for the service before deploy
   - artifact size max: 200MB
   - artifact types allowlist: zip, tar.gz
   - artifact checksum required: sha256
@@ -98,6 +99,7 @@ Fields:
 
 Notes:
 - Engine application and pipeline identifiers are mapped from the Recipe and not user-provided.
+- Deploy rejects versions that are not registered for the service.
 
 ### DeploymentRecord
 
@@ -333,7 +335,7 @@ Fields:
   - Response: BuildRegistration
 
 - POST /v1/builds/register
-  - Register an existing S3 artifact without upload capability (optional; DXCP also auto-registers on deploy)
+  - Register an existing S3 artifact without upload capability
   - Requires Idempotency-Key header
   - Request: BuildRegisterExisting (service, version, artifactRef OR s3Bucket+s3Key)
   - Response: BuildRegistration
@@ -358,11 +360,13 @@ Notes:
 - request_id is always present for correlation.
 
 - 400 INVALID_REQUEST
+- 400 INVALID_VERSION
 - 400 INVALID_ENVIRONMENT
 - 400 IDMP_KEY_REQUIRED
 - 400 INVALID_ARTIFACT
 - 400 NO_PRIOR_SUCCESSFUL_VERSION
 - 400 RECIPE_ID_REQUIRED
+- 400 VERSION_NOT_FOUND
 - 401 UNAUTHORIZED
 - 403 SERVICE_NOT_ALLOWLISTED
 - 403 SERVICE_NOT_IN_DELIVERY_GROUP
@@ -370,8 +374,8 @@ Notes:
 - 403 RECIPE_NOT_ALLOWED
 - 403 ENVIRONMENT_NOT_ALLOWED
 - 404 RECIPE_NOT_FOUND
-- 409 DEPLOYMENT_LOCKED
-- 429 RATE_LIMITED
+- 409 CONCURRENCY_LIMIT_REACHED
+- 429 QUOTA_EXCEEDED
 - 503 MUTATIONS_DISABLED
 - 400 RECIPE_INCOMPATIBLE
 

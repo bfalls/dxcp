@@ -198,11 +198,14 @@ curl -sS -X POST http://127.0.0.1:8000/v1/deployments \
 
 ## Artifact discovery + versions
 
-DXCP auto-discovers deployable versions by scanning the runtime artifact bucket for:
+DXCP can discover candidate versions by scanning the runtime artifact bucket for:
 
 ```
 s3://<artifact_bucket>/<service>/<service>-<version>.zip
 ```
+
+Deployments require versions to be registered in DXCP before use. Use the build
+registration endpoints to publish versions so they can be selected and deployed.
 
 List versions for a service:
 

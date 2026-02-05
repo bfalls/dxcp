@@ -167,7 +167,7 @@ async def test_rollback_active_lock(tmp_path: Path, monkeypatch):
         )
     assert response.status_code == 409
     body = response.json()
-    assert body["code"] == "DEPLOYMENT_LOCKED"
+    assert body["code"] == "CONCURRENCY_LIMIT_REACHED"
 
 
 async def test_rollback_unknown_deployment(tmp_path: Path, monkeypatch):

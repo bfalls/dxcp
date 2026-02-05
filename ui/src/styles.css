@@ -243,6 +243,7 @@ body {
   border-radius: 12px;
   background: rgba(13, 22, 22, 0.6);
   text-align: left;
+  color: var(--ink);
 }
 
 .table-row.history {

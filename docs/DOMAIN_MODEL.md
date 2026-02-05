@@ -14,7 +14,7 @@ Represents what a user wants to deploy and how.
 
 Fields (required unless noted):
 - service: allowlisted service name
-- version: artifact version or build ID
+- version: registered build version
 - environment: single allowed environment (sandbox)
 - changeSummary: required change summary
 - recipeId: selects a Recipe by id
@@ -22,6 +22,7 @@ Fields (required unless noted):
 Notes:
 - Intent is validated by guardrails before any engine call.
 - Intent does not include engine-specific fields.
+- Version must already be registered for the service.
 
 ## DeploymentRecord
 

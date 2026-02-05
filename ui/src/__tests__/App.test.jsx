@@ -510,7 +510,7 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deployResponse: { code: 'RATE_LIMITED', message: 'Daily quota exceeded' },
+      deployResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)
@@ -534,7 +534,7 @@ export async function runAllTests() {
     const confirmButton = view.getByRole('button', { name: 'Confirm deploy' })
     await waitForCondition(() => !confirmButton.disabled)
     fireEvent.click(confirmButton)
-    await view.findByText('RATE_LIMITED: Daily deploy quota exceeded for this delivery group.')
+    await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
   })
 
   await runTest('Allowed deploy redirects to detail page', async () => {

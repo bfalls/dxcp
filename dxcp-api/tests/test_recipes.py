@@ -73,6 +73,17 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
+    main.storage.insert_build(
+        {
+            "service": "demo-service",
+            "version": "1.0.0",
+            "artifactRef": "local:demo-service-1.0.0.zip",
+            "sha256": "a" * 64,
+            "sizeBytes": 1024,
+            "contentType": "application/zip",
+            "registeredAt": main.utc_now(),
+        }
+    )
     default_group = main.storage.get_delivery_group("default")
     if not default_group:
         main.storage.insert_delivery_group(
@@ -188,6 +199,19 @@ async def test_deploy_rejects_deprecated_recipe(tmp_path: Path, monkeypatch):
         )
     assert response.status_code == 403
     assert response.json()["code"] == "RECIPE_DEPRECATED"
+
+
+async def test_deploy_rejects_unregistered_version(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        payload = _deployment_payload("default")
+        payload["version"] = "9.9.9"
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-missing-version", **auth_header(["dxcp-platform-admins"])},
+            json=payload,
+        )
+    assert response.status_code == 400
+    assert response.json()["code"] == "VERSION_NOT_FOUND"
 
 
 async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypatch):

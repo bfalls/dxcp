@@ -79,6 +79,18 @@ async def _client_and_state(tmp_path: Path, monkeypatch, group_a_guardrails: dic
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
+    for service_name in ["service-a", "service-b"]:
+        main.storage.insert_build(
+            {
+                "service": service_name,
+                "version": "1.0.0",
+                "artifactRef": f"local:{service_name}-1.0.0.zip",
+                "sha256": "a" * 64,
+                "sizeBytes": 1024,
+                "contentType": "application/zip",
+                "registeredAt": main.utc_now(),
+            }
+        )
     main.storage.insert_delivery_group(
         {
             "id": "group-a",
@@ -141,7 +153,7 @@ async def test_group_lock_blocks_same_group(tmp_path: Path, monkeypatch):
         )
     assert first.status_code == 201
     assert second.status_code == 409
-    assert second.json()["code"] == "DEPLOYMENT_LOCKED"
+    assert second.json()["code"] == "CONCURRENCY_LIMIT_REACHED"
 
 
 async def test_group_lock_allows_different_groups(tmp_path: Path, monkeypatch):
@@ -182,4 +194,4 @@ async def test_group_quota_scoped(tmp_path: Path, monkeypatch):
         )
     assert first.status_code == 201
     assert second.status_code == 429
-    assert second.json()["code"] == "RATE_LIMITED"
+    assert second.json()["code"] == "QUOTA_EXCEEDED"

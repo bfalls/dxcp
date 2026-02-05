@@ -963,6 +963,10 @@ def create_deployment(
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
+    build = storage.find_latest_build(intent.service, intent.version)
+    if not build:
+        _record_deploy_denied(actor, intent, "VERSION_NOT_FOUND", group.get("id"))
+        return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
     if recipe_capability_error:
         return recipe_capability_error
@@ -985,23 +989,6 @@ def create_deployment(
         if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
             _record_deploy_denied(actor, intent, "INVALID_REQUEST", group.get("id"))
             return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for deploy")
-        build = storage.find_latest_build(intent.service, intent.version)
-        if not build:
-            auto_key = f"{intent.service}/{intent.service}-{intent.version}.zip"
-            try:
-                build = _register_existing_build_internal(
-                    service_entry,
-                    intent.service,
-                    intent.version,
-                    None,
-                    None,
-                    auto_key,
-                )
-            except ValueError as exc:
-                _record_deploy_denied(actor, intent, "MISSING_BUILD", group.get("id"))
-                return error_response(400, "MISSING_BUILD", f"No build registered; expected s3://{SETTINGS.runtime_artifact_bucket}/{auto_key} ({exc})")
-            except RuntimeError as exc:
-                return error_response(500, "INTERNAL_ERROR", str(exc))
         payload["artifactRef"] = build["artifactRef"]
 
     try:

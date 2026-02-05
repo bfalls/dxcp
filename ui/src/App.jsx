@@ -1416,6 +1416,8 @@ export default function App() {
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
       const inlineMessages = {
+        CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
+        QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
         RATE_LIMITED: 'Daily deploy quota exceeded for this delivery group.',
         RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
