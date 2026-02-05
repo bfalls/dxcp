@@ -208,6 +208,8 @@ class BuildRegisterExistingRequest(BaseModel):
 
 class ErrorResponse(BaseModel):
     code: str
+    error_code: str
+    failure_cause: str
     message: str
     request_id: str
     operator_hint: Optional[str] = None

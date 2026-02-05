@@ -237,6 +237,13 @@ function outcomeTone(outcome, state) {
   return OUTCOME_TONES[resolved] || 'neutral'
 }
 
+function failureCauseHeadline(cause) {
+  const normalized = String(cause || '').toUpperCase()
+  if (normalized === 'POLICY_CHANGE') return 'Blocked by policy change'
+  if (normalized === 'USER_ERROR') return 'Fix selection'
+  return 'Blocked by validation'
+}
+
 function resolveDeploymentKind(kind, rollbackOf) {
   if (kind) return kind
   return rollbackOf ? 'ROLLBACK' : 'ROLL_FORWARD'
@@ -446,6 +453,7 @@ export default function App() {
   const [failures, setFailures] = useState([])
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [errorHeadline, setErrorHeadline] = useState('')
   const [rollbackResult, setRollbackResult] = useState(null)
   const [recipes, setRecipes] = useState([])
   const [recipeId, setRecipeId] = useState('')
@@ -481,10 +489,12 @@ export default function App() {
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
   const [serviceDetailError, setServiceDetailError] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
+  const [deployInlineHeadline, setDeployInlineHeadline] = useState('')
   const [deployStep, setDeployStep] = useState('form')
   const [preflightStatus, setPreflightStatus] = useState('idle')
   const [preflightResult, setPreflightResult] = useState(null)
   const [preflightError, setPreflightError] = useState('')
+  const [preflightErrorHeadline, setPreflightErrorHeadline] = useState('')
   const [policyDeployments, setPolicyDeployments] = useState([])
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
@@ -841,17 +851,20 @@ export default function App() {
 
   async function refreshDeployments() {
     setErrorMessage('')
+    setErrorHeadline('')
     try {
       const data = await api.get('/deployments')
       setDeployments(Array.isArray(data) ? data : [])
     } catch (err) {
       if (isLoginRequiredError(err)) return
+      setErrorHeadline('')
       setErrorMessage('Failed to load deployments')
     }
   }
 
   async function loadServices() {
     setErrorMessage('')
+    setErrorHeadline('')
     try {
       const data = await api.get('/services')
       if (Array.isArray(data)) {
@@ -864,18 +877,21 @@ export default function App() {
       }
     } catch (err) {
       if (isLoginRequiredError(err)) return
+      setErrorHeadline('')
       setErrorMessage('Failed to load services')
     }
   }
 
   async function loadRecipes() {
     setErrorMessage('')
+    setErrorHeadline('')
     try {
       const data = await api.get('/recipes')
       const list = Array.isArray(data) ? data : []
       setRecipes(list)
     } catch (err) {
       if (isLoginRequiredError(err)) return
+      setErrorHeadline('')
       setErrorMessage('Failed to load recipes')
     }
   }
@@ -1453,6 +1469,7 @@ export default function App() {
 
   async function loadInsights() {
     setErrorMessage('')
+    setErrorHeadline('')
     setInsightsError('')
     setInsightsLoading(true)
     try {
@@ -1462,6 +1479,7 @@ export default function App() {
       if (insightsService) params.set('service', insightsService)
       const data = await api.get(`/insights/failures?${params.toString()}`)
       if (data && data.code) {
+        setErrorHeadline('')
         setInsightsError(`${data.code}: ${data.message}`)
         setInsights(null)
         return
@@ -1469,6 +1487,7 @@ export default function App() {
       setInsights(data)
     } catch (err) {
       if (isLoginRequiredError(err)) return
+      setErrorHeadline('')
       setInsightsError('Failed to load insights')
       setInsights(null)
     } finally {
@@ -1478,9 +1497,11 @@ export default function App() {
 
   async function handleDeploy() {
     setErrorMessage('')
+    setErrorHeadline('')
     setStatusMessage('')
     setDeployResult(null)
     setDeployInlineMessage('')
+    setDeployInlineHeadline('')
     if (!validVersion) {
       setErrorMessage('Version format is invalid')
       return
@@ -1511,6 +1532,7 @@ export default function App() {
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
+      const headline = failureCauseHeadline(result.failure_cause)
       const inlineMessages = {
         CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
         QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
@@ -1526,8 +1548,10 @@ export default function App() {
       }
       const inline = inlineMessages[result.code]
       if (inline) {
+        setDeployInlineHeadline(headline)
         setDeployInlineMessage(`${result.code}: ${inline}`)
       } else {
+        setErrorHeadline(headline)
         setErrorMessage(`${result.code}: ${result.message}`)
       }
       return
@@ -1545,10 +1569,12 @@ export default function App() {
     setRollbackResult(null)
     setTimeline([])
     setErrorMessage('')
+    setErrorHeadline('')
     setStatusMessage('')
     try {
       const detail = await api.get(`/deployments/${deployment.id}`)
       if (detail && detail.code) {
+        setErrorHeadline('')
         setErrorMessage(`${detail.code}: ${detail.message}`)
         return
       }
@@ -1560,6 +1586,7 @@ export default function App() {
       setView('detail')
     } catch (err) {
       if (isLoginRequiredError(err)) return
+      setErrorHeadline('')
       setErrorMessage('Failed to load deployment detail')
     }
   }
@@ -1567,12 +1594,14 @@ export default function App() {
   async function handleRollback() {
     if (!selected) return
     setErrorMessage('')
+    setErrorHeadline('')
     setStatusMessage('')
     const ok = window.confirm('Confirm rollback?')
     if (!ok) return
     const key = `rollback-${Date.now()}`
     const result = await api.post(`/deployments/${selected.id}/rollback`, {}, key)
     if (result && result.code) {
+      setErrorHeadline('')
       setErrorMessage(`${result.code}: ${result.message}`)
       return
     }
@@ -1763,6 +1792,7 @@ export default function App() {
         setPreflightStatus('idle')
         setPreflightResult(null)
         setPreflightError('')
+        setPreflightErrorHeadline('')
       }
       preflightKeyRef.current = ''
       return
@@ -1773,6 +1803,7 @@ export default function App() {
     setPreflightStatus('idle')
     setPreflightResult(null)
     setPreflightError('')
+    setPreflightErrorHeadline('')
     preflightKeyRef.current = preflightKey
     if (deployStep === 'confirm') {
       setDeployStep('form')
@@ -1795,6 +1826,7 @@ export default function App() {
       const result = await api.post('/deployments/validate', payload)
       if (cancelled) return
       if (result && result.code) {
+        const headline = failureCauseHeadline(result.failure_cause)
         const messages = {
           CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
           QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
@@ -1811,6 +1843,7 @@ export default function App() {
         }
         const inline = messages[result.code]
         setPreflightStatus('error')
+        setPreflightErrorHeadline(headline)
         setPreflightError(`${result.code}: ${inline || result.message}`)
         return
       }
@@ -1942,7 +1975,10 @@ export default function App() {
         }
       } catch (err) {
         if (isLoginRequiredError(err)) return
-        if (!cancelled) setErrorMessage('Failed to refresh deployment status')
+        if (!cancelled) {
+          setErrorHeadline('')
+          setErrorMessage('Failed to refresh deployment status')
+        }
       }
     }
     const interval = setInterval(tick, intervalMs)
@@ -2070,7 +2106,10 @@ export default function App() {
 
       {errorMessage && (
         <div className="shell">
-          <div className="card">{errorMessage}</div>
+          <div className="card">
+            {errorHeadline && <strong>{errorHeadline}. </strong>}
+            {errorMessage}
+          </div>
         </div>
       )}
 
@@ -2605,6 +2644,7 @@ export default function App() {
                 )}
                 {preflightStatus === 'error' && preflightError && (
                   <div className="helper" style={{ marginTop: '8px' }}>
+                    {preflightErrorHeadline && <strong>{preflightErrorHeadline}. </strong>}
                     {preflightError}
                   </div>
                 )}
@@ -2633,6 +2673,7 @@ export default function App() {
                 )}
                 {deployInlineMessage && (
                   <div className="helper" style={{ marginTop: '8px' }}>
+                    {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                     {deployInlineMessage}
                   </div>
                 )}
@@ -2701,6 +2742,7 @@ export default function App() {
                 </div>
                 {deployInlineMessage && (
                   <div className="helper" style={{ marginTop: '8px' }}>
+                    {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                     {deployInlineMessage}
                   </div>
                 )}

@@ -560,6 +560,7 @@ export async function runAllTests() {
     await view.findByDisplayValue('release')
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
+    await view.findByText(/Blocked by policy change/)
     await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
     await waitForCondition(() => reviewButton.disabled)
     assert.equal(reviewButton.disabled, true)

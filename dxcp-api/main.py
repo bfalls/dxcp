@@ -97,7 +97,13 @@ if os.getenv("DXCP_LAMBDA", "") == "1":
 
 def error_response(status_code: int, code: str, message: str, operator_hint: Optional[str] = None) -> JSONResponse:
     request_id = request_id_ctx.get() or str(uuid.uuid4())
-    payload = {"code": code, "message": message, "request_id": request_id}
+    payload = {
+        "code": code,
+        "error_code": code,
+        "failure_cause": classify_failure_cause(code),
+        "message": message,
+        "request_id": request_id,
+    }
     if operator_hint:
         payload["operator_hint"] = operator_hint
     return JSONResponse(status_code=status_code, content=payload)
@@ -111,11 +117,20 @@ async def policy_error_handler(request: Request, exc: PolicyError):
 async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         payload = dict(exc.detail)
+        code = payload.get("code")
+        payload.setdefault("error_code", code)
+        payload.setdefault("failure_cause", classify_failure_cause(code))
         payload["request_id"] = request_id_ctx.get() or str(uuid.uuid4())
         return JSONResponse(status_code=exc.status_code, content=payload)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"code": "HTTP_ERROR", "message": str(exc.detail), "request_id": request_id_ctx.get() or str(uuid.uuid4())},
+        content={
+            "code": "HTTP_ERROR",
+            "error_code": "HTTP_ERROR",
+            "failure_cause": classify_failure_cause("HTTP_ERROR"),
+            "message": str(exc.detail),
+            "request_id": request_id_ctx.get() or str(uuid.uuid4()),
+        },
     )
 
 
@@ -533,6 +548,47 @@ def _error_code_from_response(response: JSONResponse) -> str:
     return "UNKNOWN"
 
 
+def classify_failure_cause(error_code: Optional[str]) -> str:
+    if not error_code:
+        return "UNKNOWN"
+    user_error_codes = {
+        "INVALID_REQUEST",
+        "RECIPE_ID_REQUIRED",
+        "RECIPE_NAME_REQUIRED",
+        "RECIPE_BEHAVIOR_REQUIRED",
+        "ID_MISMATCH",
+        "MISSING_ENGINE_APP",
+        "MISSING_ENGINE_PIPELINE",
+        "INVALID_STATUS",
+        "INVALID_ENVIRONMENT",
+        "INVALID_VERSION",
+        "INVALID_ARTIFACT",
+        "IDMP_KEY_REQUIRED",
+        "VERSION_NOT_FOUND",
+        "RECIPE_NOT_FOUND",
+    }
+    policy_change_codes = {
+        "SERVICE_NOT_ALLOWLISTED",
+        "SERVICE_NOT_IN_DELIVERY_GROUP",
+        "ENVIRONMENT_NOT_ALLOWED",
+        "RECIPE_NOT_ALLOWED",
+        "RECIPE_INCOMPATIBLE",
+        "RECIPE_DEPRECATED",
+        "CONCURRENCY_LIMIT_REACHED",
+        "QUOTA_EXCEEDED",
+        "RATE_LIMITED",
+        "MUTATIONS_DISABLED",
+        "ROLE_FORBIDDEN",
+        "AUTHZ_ROLE_REQUIRED",
+        "UNAUTHORIZED",
+    }
+    if error_code in user_error_codes:
+        return "USER_ERROR"
+    if error_code in policy_change_codes:
+        return "POLICY_CHANGE"
+    return "UNKNOWN"
+
+
 def _include_operator_hint(actor: Actor) -> bool:
     return actor.role == Role.PLATFORM_ADMIN or SETTINGS.demo_mode
 
@@ -563,7 +619,13 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
         status_code=status,
     )
     request_id = request_id_ctx.get() or str(uuid.uuid4())
-    payload = {"code": code, "message": user_message, "request_id": request_id}
+    payload = {
+        "code": code,
+        "error_code": code,
+        "failure_cause": classify_failure_cause(code),
+        "message": user_message,
+        "request_id": request_id,
+    }
     if operator_hint:
         payload["operator_hint"] = operator_hint
     return JSONResponse(status_code=status, content=payload)

@@ -675,10 +675,15 @@ components:
           type: string
     Error:
       type: object
-      required: [code, message, request_id]
+      required: [code, error_code, failure_cause, message, request_id]
       properties:
         code:
           type: string
+        error_code:
+          type: string
+        failure_cause:
+          type: string
+          enum: [USER_ERROR, POLICY_CHANGE, UNKNOWN]
         message:
           type: string
         request_id:

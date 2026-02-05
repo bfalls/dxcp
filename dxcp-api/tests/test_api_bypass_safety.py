@@ -129,10 +129,13 @@ def _deploy_payload(service: str, version: str = "1.0.0", recipe_id: str = "reci
     }
 
 
-def _assert_error(response: httpx.Response, expected_code: str, expected_status: int) -> None:
+def _assert_error(response: httpx.Response, expected_code: str, expected_status: int, expected_cause: str | None = None) -> None:
     payload = response.json()
     assert response.status_code == expected_status
     assert payload["code"] == expected_code
+    assert payload["error_code"] == expected_code
+    if expected_cause:
+        assert payload["failure_cause"] == expected_cause
     assert isinstance(payload.get("message"), str)
     assert payload.get("request_id")
 
@@ -144,7 +147,7 @@ async def test_invalid_version_rejected(tmp_path: Path, monkeypatch):
             headers={"Idempotency-Key": "deploy-1", **auth_header(["dxcp-platform-admins"])},
             json=_deploy_payload("service-a", version="9.9.9"),
         )
-    _assert_error(response, "VERSION_NOT_FOUND", 400)
+    _assert_error(response, "VERSION_NOT_FOUND", 400, "USER_ERROR")
 
 
 async def test_incompatible_service_recipe_rejected(tmp_path: Path, monkeypatch):
@@ -169,7 +172,7 @@ async def test_incompatible_service_recipe_rejected(tmp_path: Path, monkeypatch)
             headers=auth_header(["dxcp-platform-admins"]),
             json=_deploy_payload("service-b"),
         )
-    _assert_error(response, "RECIPE_INCOMPATIBLE", 400)
+    _assert_error(response, "RECIPE_INCOMPATIBLE", 400, "POLICY_CHANGE")
 
 
 async def test_unauthorized_delivery_group_rejected(tmp_path: Path, monkeypatch):
@@ -179,7 +182,7 @@ async def test_unauthorized_delivery_group_rejected(tmp_path: Path, monkeypatch)
             headers=auth_header(["dxcp-platform-admins"]),
             json=_deploy_payload("service-b"),
         )
-    _assert_error(response, "SERVICE_NOT_IN_DELIVERY_GROUP", 403)
+    _assert_error(response, "SERVICE_NOT_IN_DELIVERY_GROUP", 403, "POLICY_CHANGE")
 
 
 async def test_quota_exceeded_rejected(tmp_path: Path, monkeypatch):
@@ -195,7 +198,7 @@ async def test_quota_exceeded_rejected(tmp_path: Path, monkeypatch):
             headers=auth_header(["dxcp-platform-admins"]),
             json=_deploy_payload("service-a"),
         )
-    _assert_error(response, "QUOTA_EXCEEDED", 429)
+    _assert_error(response, "QUOTA_EXCEEDED", 429, "POLICY_CHANGE")
 
 
 async def test_concurrency_limit_rejected(tmp_path: Path, monkeypatch):
@@ -223,4 +226,9 @@ async def test_concurrency_limit_rejected(tmp_path: Path, monkeypatch):
             headers=auth_header(["dxcp-platform-admins"]),
             json=_deploy_payload("service-a"),
         )
-    _assert_error(response, "CONCURRENCY_LIMIT_REACHED", 409)
+    _assert_error(response, "CONCURRENCY_LIMIT_REACHED", 409, "POLICY_CHANGE")
+
+
+def test_failure_cause_unknown_defaults(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    assert main.classify_failure_cause("SOMETHING_NEW") == "UNKNOWN"
