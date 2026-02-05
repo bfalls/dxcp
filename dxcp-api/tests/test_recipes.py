@@ -161,6 +161,21 @@ def _deployment_payload(recipe_id: str | None = None) -> dict:
     return payload
 
 
+async def test_seeded_strategy_recipes_present(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.get(
+            "/v1/recipes",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    recipes = {recipe["id"]: recipe for recipe in body}
+    for recipe_id in ["default", "canary", "bluegreen"]:
+        assert recipe_id in recipes
+        assert recipes[recipe_id]["recipe_revision"] >= 1
+        assert recipes[recipe_id]["effective_behavior_summary"]
+
+
 async def test_deploy_rejects_unknown_recipe(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
@@ -329,3 +344,27 @@ async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkey
         assert record["recipeRevision"] == 1
         assert record["effectiveBehaviorSummary"] == "Standard roll-forward deploy with rollback support."
         assert record["engine_type"] == "SPINNAKER"
+
+
+async def test_deployment_outcome_and_operation_semantics(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, fake):
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-outcome", **auth_header(["dxcp-platform-admins"])},
+            json=_deployment_payload("default"),
+        )
+        assert response.status_code == 201
+        created = response.json()
+        assert created["deploymentKind"] == "ROLL_FORWARD"
+        assert created["outcome"] is None
+        exec_id = created["engineExecutionId"]
+        fake.executions[exec_id]["state"] = "SUCCEEDED"
+
+        detail = await client.get(
+            f"/v1/deployments/{created['id']}",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        assert detail.status_code == 200
+        record = detail.json()
+        assert record["deploymentKind"] == "ROLL_FORWARD"
+        assert record["outcome"] == "SUCCEEDED"

@@ -665,7 +665,7 @@ components:
           type: string
     RecipeUpsert:
       type: object
-      required: [id, name, effective_behavior_summary]
+      required: [id, name, spinnaker_application, deploy_pipeline, effective_behavior_summary]
       properties:
         id:
           type: string

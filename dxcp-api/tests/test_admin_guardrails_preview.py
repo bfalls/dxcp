@@ -84,5 +84,5 @@ async def test_recipe_preview_warning(tmp_path: Path, monkeypatch):
         )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["validation_status"] == "WARNING"
-    assert any(item["field"] == "spinnaker_application" for item in payload["messages"])
+    assert payload["validation_status"] == "ERROR"
+    assert any(item["field"] == "deploy_pipeline" for item in payload["messages"])

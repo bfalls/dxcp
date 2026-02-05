@@ -335,8 +335,10 @@ def _validate_recipe_preview(recipe: dict) -> dict:
         messages.append({"type": "ERROR", "field": "name", "message": "Recipe name is required."})
         status = "ERROR"
 
-    has_pipeline = bool(deploy_pipeline) or bool(rollback_pipeline)
-    if has_pipeline and not spinnaker_application:
+    if not deploy_pipeline:
+        messages.append({"type": "ERROR", "field": "deploy_pipeline", "message": "Deploy pipeline is required."})
+        status = "ERROR"
+    if (deploy_pipeline or rollback_pipeline) and not spinnaker_application:
         messages.append(
             {
                 "type": "ERROR",
@@ -345,17 +347,17 @@ def _validate_recipe_preview(recipe: dict) -> dict:
             }
         )
         status = "ERROR"
-    if spinnaker_application and (not deploy_pipeline or not rollback_pipeline):
+    if spinnaker_application and not deploy_pipeline:
         messages.append(
             {
                 "type": "ERROR",
                 "field": "deploy_pipeline",
-                "message": "Deploy and rollback pipelines are required when application is set.",
+                "message": "Deploy pipeline is required when application is set.",
             }
         )
         status = "ERROR"
 
-    if not spinnaker_application and not has_pipeline:
+    if not spinnaker_application and not deploy_pipeline:
         messages.append(
             {
                 "type": "WARNING",
@@ -643,18 +645,19 @@ def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> 
     spinnaker_application = payload.get("spinnaker_application")
     deploy_pipeline = payload.get("deploy_pipeline")
     rollback_pipeline = payload.get("rollback_pipeline")
-    has_any_pipeline = bool(deploy_pipeline) or bool(rollback_pipeline)
-    if has_any_pipeline and not spinnaker_application:
+    if not deploy_pipeline:
+        return error_response(400, "RECIPE_DEPLOY_PIPELINE_REQUIRED", "deploy_pipeline is required")
+    if (deploy_pipeline or rollback_pipeline) and not spinnaker_application:
         return error_response(
             400,
             "MISSING_ENGINE_APP",
             "spinnaker_application is required when pipelines are set",
         )
-    if spinnaker_application and (not deploy_pipeline or not rollback_pipeline):
+    if spinnaker_application and not deploy_pipeline:
         return error_response(
             400,
             "MISSING_ENGINE_PIPELINE",
-            "deploy_pipeline and rollback_pipeline are required when spinnaker_application is set",
+            "deploy_pipeline is required when spinnaker_application is set",
         )
     status = payload.get("status") or "active"
     if status not in {"active", "deprecated"}:

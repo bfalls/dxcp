@@ -633,7 +633,7 @@ class Storage:
             "owner": None,
             "services": services,
             "allowed_environments": None,
-            "allowed_recipes": ["default"],
+            "allowed_recipes": ["default", "canary", "bluegreen"],
             "guardrails": None,
             "created_at": now,
             "created_by": "system",
@@ -643,27 +643,68 @@ class Storage:
         return self.insert_delivery_group(group)
 
     def ensure_default_recipe(self) -> Optional[dict]:
-        if self._has_recipes():
-            return None
         now = utc_now()
-        recipe = {
-            "id": "default",
-            "name": "Default Deploy",
-            "description": "Default recipe for demo deployments",
-            "allowed_parameters": [],
-            "engine_type": DEFAULT_ENGINE_TYPE,
-            "spinnaker_application": None,
-            "deploy_pipeline": "demo-deploy",
-            "rollback_pipeline": "rollback-demo-service",
-            "recipe_revision": 1,
-            "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
-            "status": "active",
-            "created_at": now,
-            "created_by": "system",
-            "updated_at": now,
-            "updated_by": "system",
-        }
-        return self.insert_recipe(recipe)
+        recipes = [
+            {
+                "id": "default",
+                "name": "Standard",
+                "description": "Standard deploy recipe for demo deployments",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+            {
+                "id": "canary",
+                "name": "Canary",
+                "description": "Canary deploy recipe with automated verification.",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy-canary",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Progressive rollout with verification and rollback on failed analysis.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+            {
+                "id": "bluegreen",
+                "name": "BlueGreen",
+                "description": "Blue/green deploy recipe with controlled cutover.",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy-bluegreen",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Parallel rollout with cutover and rollback capability.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+        ]
+        created = None
+        for recipe in recipes:
+            if self.get_recipe(recipe["id"]):
+                continue
+            self.insert_recipe(recipe)
+            if created is None:
+                created = recipe
+        return created
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()
@@ -1403,7 +1444,7 @@ class DynamoStorage:
             "owner": None,
             "services": services,
             "allowed_environments": None,
-            "allowed_recipes": ["default"],
+            "allowed_recipes": ["default", "canary", "bluegreen"],
             "guardrails": None,
             "created_at": now,
             "created_by": "system",
@@ -1413,28 +1454,68 @@ class DynamoStorage:
         return self.insert_delivery_group(group)
 
     def ensure_default_recipe(self) -> Optional[dict]:
-        existing = self._scan_recipes(limit=1)
-        if existing:
-            return None
         now = utc_now()
-        recipe = {
-            "id": "default",
-            "name": "Default Deploy",
-            "description": "Default recipe for demo deployments",
-            "allowed_parameters": [],
-            "engine_type": DEFAULT_ENGINE_TYPE,
-            "spinnaker_application": None,
-            "deploy_pipeline": "demo-deploy",
-            "rollback_pipeline": "rollback-demo-service",
-            "recipe_revision": 1,
-            "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
-            "status": "active",
-            "created_at": now,
-            "created_by": "system",
-            "updated_at": now,
-            "updated_by": "system",
-        }
-        return self.insert_recipe(recipe)
+        recipes = [
+            {
+                "id": "default",
+                "name": "Standard",
+                "description": "Standard deploy recipe for demo deployments",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Standard roll-forward deploy with rollback support.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+            {
+                "id": "canary",
+                "name": "Canary",
+                "description": "Canary deploy recipe with automated verification.",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy-canary",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Progressive rollout with verification and rollback on failed analysis.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+            {
+                "id": "bluegreen",
+                "name": "BlueGreen",
+                "description": "Blue/green deploy recipe with controlled cutover.",
+                "allowed_parameters": [],
+                "engine_type": DEFAULT_ENGINE_TYPE,
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy-bluegreen",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Parallel rollout with cutover and rollback capability.",
+                "status": "active",
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            },
+        ]
+        created = None
+        for recipe in recipes:
+            if self.get_recipe(recipe["id"]):
+                continue
+            self.insert_recipe(recipe)
+            if created is None:
+                created = recipe
+        return created
 
     def has_active_deployment(self) -> bool:
         response = self.table.scan(

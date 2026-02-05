@@ -257,3 +257,4 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkey
 
         original = main.storage.get_deployment("dep-b")
         assert original["state"] == "ROLLED_BACK"
+        assert original["outcome"] == "ROLLED_BACK"

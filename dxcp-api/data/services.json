@@ -2,7 +2,7 @@
   {
     "service_name": "demo-service",
     "allowed_environments": ["sandbox"],
-    "allowed_recipes": ["default"],
+    "allowed_recipes": ["default", "canary", "bluegreen"],
     "allowed_artifact_sources": ["s3://dxcp-demo-bucket/"],
     "stable_service_url_template": "ssm:/dxcp/config/runtime/service_url/demo-service"
   },
