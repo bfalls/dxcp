@@ -34,6 +34,8 @@ Fields:
 - environment: resolved environment
 - version: artifact version
 - recipeId: recipe id used
+- recipeRevision: recipe revision used for this deployment (nullable)
+- effectiveBehaviorSummary: frozen recipe behavior summary used at deployment time (nullable)
 - engine_type: execution engine identity (informational; SPINNAKER in v1)
 - state: one of PENDING, ACTIVE, IN_PROGRESS, SUCCEEDED, FAILED, CANCELED, ROLLED_BACK
 - deploymentKind: one of ROLL_FORWARD, ROLLBACK
@@ -130,6 +132,8 @@ Fields:
 - spinnaker_application: engine application identifier
 - deploy_pipeline: engine pipeline identifier for deploy
 - rollback_pipeline: engine pipeline identifier for rollback
+- recipe_revision: monotonic recipe revision
+- effective_behavior_summary: short, user-facing description of effective behavior
 - status: active or deprecated
 - created_at
 - created_by

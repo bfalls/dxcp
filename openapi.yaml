@@ -345,11 +345,11 @@ components:
           type: string
         recipeRevision:
           type: integer
-          description: Recipe revision used for this deployment.
+          description: Recipe revision used for this deployment (frozen at submit time).
           nullable: true
         effectiveBehaviorSummary:
           type: string
-          description: Frozen recipe behavior summary used at deployment time.
+          description: Frozen user-facing recipe behavior summary used at deployment time.
           nullable: true
         state:
           $ref: '#/components/schemas/DeploymentState'
@@ -635,10 +635,13 @@ components:
           $ref: '#/components/schemas/EngineType'
         spinnaker_application:
           type: string
+          description: Admin-only engine mapping.
         deploy_pipeline:
           type: string
+          description: Admin-only engine mapping.
         rollback_pipeline:
           type: string
+          description: Admin-only engine mapping.
         recipe_revision:
           type: integer
           description: Monotonic recipe revision.

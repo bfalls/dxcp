@@ -110,13 +110,16 @@ Fields:
 - environment
 - version
 - recipeId
+- recipeRevision
+- effectiveBehaviorSummary
 - state (PENDING | IN_PROGRESS | ACTIVE | SUCCEEDED | FAILED | CANCELED | ROLLED_BACK)
-- deploymentKind (ROLL_FORWARD | ROLLBACK)
+- deploymentKind (ROLL_FORWARD | ROLLBACK) -> operation semantics
 - outcome (SUCCEEDED | FAILED | ROLLED_BACK | CANCELED | SUPERSEDED; null while in progress)
 - changeSummary
 - createdAt
 - updatedAt
 - deliveryGroupId
+- engine_type (SPINNAKER only; informational)
 - engineExecutionId (admin-only)
 - engineExecutionUrl (admin-only)
 - rollbackOf (optional; deployment id being rolled back)
@@ -203,15 +206,22 @@ Fields:
 - id
 - name
 - description (optional)
+- engine_type (SPINNAKER only; informational)
 - spinnaker_application
 - deploy_pipeline
 - rollback_pipeline
+- recipe_revision
+- effective_behavior_summary
 - status
 - created_at
 - created_by
 - updated_at
 - updated_by
 - last_change_reason
+
+Notes:
+- Engine mapping fields (spinnaker_application, deploy_pipeline, rollback_pipeline)
+  are admin-only diagnostics. Standard users never see engine identifiers.
 
 Notes:
 - Update requests may include change_reason (optional). The API stores the most recent value as last_change_reason.
