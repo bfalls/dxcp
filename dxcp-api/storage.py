@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 
+from delivery_state import base_outcome_from_state, normalize_deployment_kind
+
 try:
     import boto3
     from boto3.dynamodb.conditions import Attr, Key
@@ -70,6 +72,10 @@ class Storage:
                 version TEXT NOT NULL,
                 recipe_id TEXT,
                 state TEXT NOT NULL,
+                deployment_kind TEXT,
+                outcome TEXT,
+                intent_correlation_id TEXT,
+                superseded_by TEXT,
                 change_summary TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -82,6 +88,10 @@ class Storage:
             )
             """
         )
+        self._ensure_column(cur, "deployments", "deployment_kind", "TEXT")
+        self._ensure_column(cur, "deployments", "outcome", "TEXT")
+        self._ensure_column(cur, "deployments", "intent_correlation_id", "TEXT")
+        self._ensure_column(cur, "deployments", "superseded_by", "TEXT")
         self._ensure_column(cur, "deployments", "rollback_of", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_application", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
@@ -641,15 +651,25 @@ class Storage:
         return int(row["total"]) if row else 0
 
     def insert_deployment(self, record: dict, failures: List[dict]) -> None:
+        deployment_kind = normalize_deployment_kind(
+            record.get("deploymentKind"),
+            record.get("rollbackOf"),
+        )
+        outcome = record.get("outcome")
+        if outcome is None:
+            outcome = base_outcome_from_state(record.get("state"))
+        intent_correlation_id = record.get("intentCorrelationId")
+        superseded_by = record.get("supersededBy")
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO deployments (
-                id, service, environment, version, recipe_id, state, change_summary,
-                created_at, updated_at, spinnaker_execution_id, spinnaker_execution_url,
-                spinnaker_application, spinnaker_pipeline, rollback_of, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, service, environment, version, recipe_id, state, deployment_kind, outcome,
+                intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
+                spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
+                rollback_of, delivery_group_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -658,6 +678,10 @@ class Storage:
                 record["version"],
                 record.get("recipeId"),
                 record["state"],
+                deployment_kind,
+                outcome,
+                intent_correlation_id,
+                superseded_by,
                 record["changeSummary"],
                 record["createdAt"],
                 record["updatedAt"],
@@ -672,13 +696,35 @@ class Storage:
         self._replace_failures(cur, record["id"], failures)
         conn.commit()
         conn.close()
+        record["deploymentKind"] = deployment_kind
+        record["outcome"] = outcome
+        record["intentCorrelationId"] = intent_correlation_id
+        record["supersededBy"] = superseded_by
+        if outcome == "SUCCEEDED":
+            self.apply_supersession(record)
 
-    def update_deployment(self, deployment_id: str, state: str, failures: List[dict]) -> None:
+    def update_deployment(
+        self,
+        deployment_id: str,
+        state: str,
+        failures: List[dict],
+        outcome: Optional[str] = None,
+        superseded_by: Optional[str] = None,
+    ) -> None:
         conn = self._connect()
         cur = conn.cursor()
+        updates = ["state = ?", "updated_at = ?"]
+        params = [state, utc_now()]
+        if outcome is not None:
+            updates.append("outcome = ?")
+            params.append(outcome)
+        if superseded_by is not None:
+            updates.append("superseded_by = ?")
+            params.append(superseded_by)
+        params.append(deployment_id)
         cur.execute(
-            "UPDATE deployments SET state = ?, updated_at = ? WHERE id = ?",
-            (state, utc_now(), deployment_id),
+            f"UPDATE deployments SET {', '.join(updates)} WHERE id = ?",
+            tuple(params),
         )
         self._replace_failures(cur, deployment_id, failures)
         conn.commit()
@@ -763,6 +809,10 @@ class Storage:
             "version": row["version"],
             "recipeId": row["recipe_id"],
             "state": row["state"],
+            "deploymentKind": row["deployment_kind"],
+            "outcome": row["outcome"],
+            "intentCorrelationId": row["intent_correlation_id"],
+            "supersededBy": row["superseded_by"],
             "changeSummary": row["change_summary"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
@@ -774,6 +824,40 @@ class Storage:
             "deliveryGroupId": row["delivery_group_id"],
             "failures": failures,
         }
+
+    def apply_supersession(self, record: dict) -> None:
+        if record.get("state") != "SUCCEEDED":
+            return
+        service = record.get("service")
+        if not service:
+            return
+        deployments = self.list_deployments(service, None)
+        latest_success = None
+        for deployment in deployments:
+            if deployment.get("state") == "SUCCEEDED":
+                latest_success = deployment
+                break
+        if not latest_success:
+            return
+        if latest_success.get("id") != record.get("id"):
+            self.update_deployment(
+                record["id"],
+                record["state"],
+                record.get("failures", []),
+                outcome="SUPERSEDED",
+                superseded_by=latest_success.get("id"),
+            )
+            return
+        for deployment in deployments:
+            if deployment.get("state") == "SUCCEEDED" and deployment.get("id") != record.get("id"):
+                self.update_deployment(
+                    deployment["id"],
+                    deployment["state"],
+                    deployment.get("failures", []),
+                    outcome="SUPERSEDED",
+                    superseded_by=record.get("id"),
+                )
+                break
 
     def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:
         conn = self._connect()
@@ -1288,6 +1372,15 @@ class DynamoStorage:
         return int(response.get("Count", 0))
 
     def insert_deployment(self, record: dict, failures: List[dict]) -> None:
+        deployment_kind = normalize_deployment_kind(
+            record.get("deploymentKind"),
+            record.get("rollbackOf"),
+        )
+        outcome = record.get("outcome")
+        if outcome is None:
+            outcome = base_outcome_from_state(record.get("state"))
+        intent_correlation_id = record.get("intentCorrelationId")
+        superseded_by = record.get("supersededBy")
         item = {
             "pk": "DEPLOYMENT",
             "sk": record["id"],
@@ -1297,6 +1390,10 @@ class DynamoStorage:
             "version": record["version"],
             "recipeId": record.get("recipeId"),
             "state": record["state"],
+            "deploymentKind": deployment_kind,
+            "outcome": outcome,
+            "intentCorrelationId": intent_correlation_id,
+            "supersededBy": superseded_by,
             "changeSummary": record["changeSummary"],
             "createdAt": record["createdAt"],
             "updatedAt": record["updatedAt"],
@@ -1309,17 +1406,39 @@ class DynamoStorage:
             "failures": failures,
         }
         self.table.put_item(Item=item)
+        record["deploymentKind"] = deployment_kind
+        record["outcome"] = outcome
+        record["intentCorrelationId"] = intent_correlation_id
+        record["supersededBy"] = superseded_by
+        if outcome == "SUCCEEDED":
+            self.apply_supersession(record)
 
-    def update_deployment(self, deployment_id: str, state: str, failures: List[dict]) -> None:
+    def update_deployment(
+        self,
+        deployment_id: str,
+        state: str,
+        failures: List[dict],
+        outcome: Optional[str] = None,
+        superseded_by: Optional[str] = None,
+    ) -> None:
+        updates = ["#state = :state", "updatedAt = :updatedAt", "failures = :failures"]
+        values = {
+            ":state": state,
+            ":updatedAt": utc_now(),
+            ":failures": failures,
+        }
+        names = {"#state": "state"}
+        if outcome is not None:
+            updates.append("outcome = :outcome")
+            values[":outcome"] = outcome
+        if superseded_by is not None:
+            updates.append("supersededBy = :supersededBy")
+            values[":supersededBy"] = superseded_by
         self.table.update_item(
             Key={"pk": "DEPLOYMENT", "sk": deployment_id},
-            UpdateExpression="SET #state = :state, updatedAt = :updatedAt, failures = :failures",
-            ExpressionAttributeNames={"#state": "state"},
-            ExpressionAttributeValues={
-                ":state": state,
-                ":updatedAt": utc_now(),
-                ":failures": failures,
-            },
+            UpdateExpression=f"SET {', '.join(updates)}",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
         )
 
     def get_deployment(self, deployment_id: str) -> Optional[dict]:
@@ -1334,6 +1453,10 @@ class DynamoStorage:
             "version": item.get("version"),
             "recipeId": item.get("recipeId"),
             "state": item.get("state"),
+            "deploymentKind": item.get("deploymentKind"),
+            "outcome": item.get("outcome"),
+            "intentCorrelationId": item.get("intentCorrelationId"),
+            "supersededBy": item.get("supersededBy"),
             "changeSummary": item.get("changeSummary"),
             "createdAt": item.get("createdAt"),
             "updatedAt": item.get("updatedAt"),
@@ -1362,6 +1485,10 @@ class DynamoStorage:
                     "version": item.get("version"),
                     "recipeId": item.get("recipeId"),
                     "state": item.get("state"),
+                    "deploymentKind": item.get("deploymentKind"),
+                    "outcome": item.get("outcome"),
+                    "intentCorrelationId": item.get("intentCorrelationId"),
+                    "supersededBy": item.get("supersededBy"),
                     "changeSummary": item.get("changeSummary"),
                     "createdAt": item.get("createdAt"),
                     "updatedAt": item.get("updatedAt"),
@@ -1378,6 +1505,40 @@ class DynamoStorage:
             reverse=True,
         )
         return deployments
+
+    def apply_supersession(self, record: dict) -> None:
+        if record.get("state") != "SUCCEEDED":
+            return
+        service = record.get("service")
+        if not service:
+            return
+        deployments = self.list_deployments(service, None)
+        latest_success = None
+        for deployment in deployments:
+            if deployment.get("state") == "SUCCEEDED":
+                latest_success = deployment
+                break
+        if not latest_success:
+            return
+        if latest_success.get("id") != record.get("id"):
+            self.update_deployment(
+                record["id"],
+                record["state"],
+                record.get("failures", []),
+                outcome="SUPERSEDED",
+                superseded_by=latest_success.get("id"),
+            )
+            return
+        for deployment in deployments:
+            if deployment.get("state") == "SUCCEEDED" and deployment.get("id") != record.get("id"):
+                self.update_deployment(
+                    deployment["id"],
+                    deployment["state"],
+                    deployment.get("failures", []),
+                    outcome="SUPERSEDED",
+                    superseded_by=record.get("id"),
+                )
+                break
 
     def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:
         target = self.get_deployment(deployment_id)
@@ -1408,6 +1569,10 @@ class DynamoStorage:
             "version": item.get("version"),
             "recipeId": item.get("recipeId"),
             "state": item.get("state"),
+            "deploymentKind": item.get("deploymentKind"),
+            "outcome": item.get("outcome"),
+            "intentCorrelationId": item.get("intentCorrelationId"),
+            "supersededBy": item.get("supersededBy"),
             "changeSummary": item.get("changeSummary"),
             "createdAt": item.get("createdAt"),
             "updatedAt": item.get("updatedAt"),

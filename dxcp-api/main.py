@@ -33,6 +33,7 @@ from models import (
 )
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
+from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
 from storage import build_storage, utc_now
 
 
@@ -606,24 +607,19 @@ def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
 
 
 def _deployment_kind(deployment: dict) -> str:
-    return "ROLLBACK" if deployment.get("rollbackOf") else "ROLL_FORWARD"
+    return normalize_deployment_kind(
+        deployment.get("deploymentKind"),
+        deployment.get("rollbackOf"),
+    )
 
 
 def _deployment_outcome(deployment: dict, latest_success_id: Optional[str]) -> Optional[str]:
-    state = deployment.get("state")
-    if state in {"PENDING", "ACTIVE", "IN_PROGRESS"}:
-        return None
-    if state == "SUCCEEDED":
-        if latest_success_id and deployment.get("id") != latest_success_id:
-            return "SUPERSEDED"
-        return "SUCCEEDED"
-    if state == "FAILED":
-        return "FAILED"
-    if state == "CANCELED":
-        return "CANCELED"
-    if state == "ROLLED_BACK":
-        return "ROLLED_BACK"
-    return None
+    return resolve_outcome(
+        deployment.get("state"),
+        deployment.get("outcome"),
+        deployment.get("id"),
+        latest_success_id,
+    )
 
 
 def _latest_success_by_service(deployments: list[dict]) -> dict[str, dict]:
@@ -631,15 +627,22 @@ def _latest_success_by_service(deployments: list[dict]) -> dict[str, dict]:
     for deployment in deployments:
         if deployment.get("state") != "SUCCEEDED":
             continue
+        if deployment.get("outcome") == "SUPERSEDED":
+            continue
         service = deployment.get("service")
         if service and service not in latest:
             latest[service] = deployment
     return latest
 
 
-def _current_running_state(service: str, deployments: list[dict]) -> Optional[dict]:
+def _current_running_state(
+    service: str,
+    deployments: list[dict],
+    latest_success_id: Optional[str],
+) -> Optional[dict]:
     for deployment in deployments:
-        if deployment.get("state") == "SUCCEEDED":
+        outcome = _deployment_outcome(deployment, latest_success_id)
+        if outcome == "SUCCEEDED":
             return {
                 "service": service,
                 "environment": deployment.get("environment") or "sandbox",
@@ -744,12 +747,21 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
     state = execution.get("state")
     if state in ["PENDING", "ACTIVE", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]:
         failures = normalize_failures(execution.get("failures"))
-        storage.update_deployment(deployment["id"], state, failures)
+        outcome = base_outcome_from_state(state)
+        storage.update_deployment(deployment["id"], state, failures, outcome=outcome)
         deployment = storage.get_deployment(deployment["id"]) or deployment
-        if deployment.get("rollbackOf") and state == "SUCCEEDED":
+        if state == "SUCCEEDED" and deployment.get("rollbackOf"):
             original = storage.get_deployment(deployment["rollbackOf"])
             if original and original.get("state") != "ROLLED_BACK":
-                storage.update_deployment(original["id"], "ROLLED_BACK", original.get("failures", []))
+                storage.update_deployment(
+                    original["id"],
+                    "ROLLED_BACK",
+                    original.get("failures", []),
+                    outcome=base_outcome_from_state("ROLLED_BACK"),
+                    superseded_by=deployment.get("id"),
+                )
+        if state == "SUCCEEDED":
+            storage.apply_supersession(deployment)
     return deployment
 
 
@@ -1060,6 +1072,10 @@ def create_deployment(
         "version": intent.version,
         "recipeId": recipe.get("id"),
         "state": "IN_PROGRESS",
+        "deploymentKind": "ROLL_FORWARD",
+        "outcome": None,
+        "intentCorrelationId": idempotency_key,
+        "supersededBy": None,
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
@@ -1417,6 +1433,7 @@ def get_service_delivery_status(
         }
     latest = deployments[0]
     latest_success_by_service = _latest_success_by_service(deployments)
+    latest_success_id = latest_success_by_service.get(service, {}).get("id")
     payload = {
         "service": service,
         "hasDeployments": True,
@@ -1431,15 +1448,31 @@ def get_service_delivery_status(
             "deploymentKind": _deployment_kind(latest),
             "outcome": _deployment_outcome(
                 latest,
-                latest_success_by_service.get(service, {}).get("id"),
+                latest_success_id,
             ),
         },
-        "currentRunning": _current_running_state(service, deployments),
+        "currentRunning": _current_running_state(service, deployments, latest_success_id),
     }
     if actor.role == Role.PLATFORM_ADMIN:
         payload["latest"]["engineExecutionId"] = latest.get("spinnakerExecutionId")
         payload["latest"]["engineExecutionUrl"] = latest.get("spinnakerExecutionUrl")
     return payload
+
+
+@app.get("/v1/services/{service}/running")
+def get_service_running(
+    service: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    guardrails.validate_service(service)
+    deployments = storage.list_deployments(service, None)
+    if not deployments:
+        return None
+    latest_success_id = _latest_success_by_service(deployments).get(service, {}).get("id")
+    return _current_running_state(service, deployments, latest_success_id)
 
 
 @app.get("/v1/services/{service}/allowed-actions")
@@ -1827,6 +1860,10 @@ def rollback_deployment(
         "version": prior["version"],
         "recipeId": deployment.get("recipeId") or "default",
         "state": "IN_PROGRESS",
+        "deploymentKind": "ROLLBACK",
+        "outcome": None,
+        "intentCorrelationId": idempotency_key,
+        "supersededBy": None,
         "changeSummary": f"rollback of {deployment_id} to {prior['version']}",
         "rollbackOf": deployment_id,
         "createdAt": utc_now(),

@@ -62,6 +62,8 @@ class DeploymentRecord(BaseModel):
     state: DeploymentState
     deploymentKind: Optional[DeploymentKind] = None
     outcome: Optional[DeploymentOutcome] = None
+    intentCorrelationId: Optional[str] = None
+    supersededBy: Optional[str] = None
     changeSummary: str
     createdAt: str
     updatedAt: str

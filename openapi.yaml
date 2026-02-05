@@ -166,6 +166,30 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /services/{service}/running:
+    get:
+      summary: Current running state for a service
+      operationId: getServiceRunning
+      parameters:
+        - name: service
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current running state for a service
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CurrentRunningState'
+                nullable: true
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /deployments/{deploymentId}/rollback:
     post:
       summary: Trigger rollback
