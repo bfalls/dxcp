@@ -373,12 +373,12 @@ export default function App() {
   const [authAudience, setAuthAudience] = useState(AUTH0_AUDIENCE)
   const [apiBase, setApiBase] = useState(normalizeApiBase(DEFAULT_API_BASE))
   const [rolesClaim, setRolesClaim] = useState(ROLES_CLAIM)
-  const [view, setView] = useState('deploy')
+  const [view, setView] = useState('services')
   const [services, setServices] = useState([])
   const [service, setService] = useState('')
-  const [version, setVersion] = useState('1.0.0')
-  const [versionMode, setVersionMode] = useState('custom')
-  const [versionSelection, setVersionSelection] = useState('auto')
+  const [version, setVersion] = useState('')
+  const [versionMode, setVersionMode] = useState('auto')
+  const [versionSelection, setVersionSelection] = useState('none')
   const [changeSummary, setChangeSummary] = useState('')
   const [deployResult, setDeployResult] = useState(null)
   const [deployments, setDeployments] = useState([])
@@ -389,6 +389,8 @@ export default function App() {
   const [rollbackResult, setRollbackResult] = useState(null)
   const [recipes, setRecipes] = useState([])
   const [recipeId, setRecipeId] = useState('')
+  const [recipeAutoApplied, setRecipeAutoApplied] = useState(false)
+  const [versionAutoApplied, setVersionAutoApplied] = useState(false)
   const [versions, setVersions] = useState([])
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [versionsRefreshing, setVersionsRefreshing] = useState(false)
@@ -419,6 +421,7 @@ export default function App() {
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
   const [serviceDetailError, setServiceDetailError] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
+  const [deployStep, setDeployStep] = useState('form')
   const [policyDeployments, setPolicyDeployments] = useState([])
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
@@ -456,6 +459,12 @@ export default function App() {
   const [auditError, setAuditError] = useState('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
+  const versionInList = useMemo(
+    () => versions.some((item) => item.version === version),
+    [versions, version]
+  )
+  const versionVerified = versionMode === 'auto' ? Boolean(version) : versionInList
+  const versionUnverifiable = versionMode === 'custom' && !versionInList
   const contextService = selected?.service || service
   const findDeliveryGroup = useCallback(
     (serviceName) =>
@@ -531,6 +540,14 @@ export default function App() {
     [recipes, recipeId]
   )
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
+  const canReviewDeploy = Boolean(
+    canDeploy &&
+    recipeId &&
+    changeSummary.trim() &&
+    validVersion &&
+    !selectedRecipeDeprecated &&
+    versionVerified
+  )
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
@@ -746,7 +763,7 @@ export default function App() {
       const data = await api.get('/services')
       if (Array.isArray(data)) {
         setServices(data)
-        if (!service && data.length > 0) {
+        if (!service && data.length === 1) {
           const nextService = data[0].service_name
           setService(nextService)
           loadAllowedActions(nextService)
@@ -764,9 +781,6 @@ export default function App() {
       const data = await api.get('/recipes')
       const list = Array.isArray(data) ? data : []
       setRecipes(list)
-      if (!recipeId && list.length > 0) {
-        setRecipeId(list[0].id)
-      }
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setErrorMessage('Failed to load recipes')
@@ -1375,6 +1389,10 @@ export default function App() {
       setErrorMessage('Version format is invalid')
       return
     }
+    if (!versionVerified) {
+      setErrorMessage('Version must match a registered build.')
+      return
+    }
     if (!recipeId) {
       setErrorMessage('Recipe is required')
       return
@@ -1414,6 +1432,7 @@ export default function App() {
     }
     setDeployResult(result)
     setStatusMessage(`Deployment created with id ${result.id}`)
+    setDeployStep('form')
     await refreshDeployments()
     await openDeployment(result)
   }
@@ -1596,25 +1615,41 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated) return
-    if (!currentDeliveryGroup) {
+    if (!currentDeliveryGroup || filteredRecipes.length === 0) {
       setRecipeId('')
-      return
-    }
-    if (filteredRecipes.length === 0) {
-      setRecipeId('')
+      setRecipeAutoApplied(false)
+      if (deployStep === 'confirm') {
+        setDeployStep('form')
+      }
       return
     }
     const allowedIds = filteredRecipes.map((recipe) => recipe.id)
     if (!allowedIds.includes(recipeId)) {
-      setRecipeId(allowedIds[0])
+      if (allowedIds.length === 1) {
+        setRecipeId(allowedIds[0])
+        setRecipeAutoApplied(true)
+        if (deployStep === 'confirm') {
+          setDeployStep('form')
+        }
+      } else {
+        setRecipeId('')
+        setRecipeAutoApplied(false)
+        if (deployStep === 'confirm') {
+          setDeployStep('form')
+        }
+      }
     }
-  }, [isAuthenticated, currentDeliveryGroup, filteredRecipes, recipeId])
+  }, [isAuthenticated, currentDeliveryGroup, filteredRecipes, recipeId, deployStep])
 
   useEffect(() => {
     if (!isAuthenticated) return
     setVersions([])
+    setVersion('')
+    setVersionMode('auto')
+    setVersionSelection('none')
+    setVersionAutoApplied(false)
+    setDeployStep('form')
     if (service) {
-      setVersionSelection('auto')
       loadVersions()
       loadAllowedActions(service)
     }
@@ -1669,12 +1704,23 @@ export default function App() {
   ])
 
   useEffect(() => {
-    if (versions.length > 0 && versionMode === 'auto') {
-      if (versionSelection === 'auto') {
-        setVersion(versions[0].version)
-      }
+    if (versionMode !== 'auto') return
+    if (versions.length === 1 && versionSelection === 'none') {
+      setVersion(versions[0].version)
+      setVersionSelection('auto')
+      setVersionAutoApplied(true)
+      return
     }
-  }, [versions, versionMode, versionSelection])
+    if (versions.length > 1 && versionSelection === 'none') {
+      setVersion('')
+      setVersionAutoApplied(false)
+    }
+    if (version && versions.length > 0 && !versions.find((item) => item.version === version)) {
+      setVersion('')
+      setVersionAutoApplied(false)
+      setVersionSelection('none')
+    }
+  }, [versions, versionMode, versionSelection, version])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'deploy' || !service) return undefined
@@ -1878,10 +1924,19 @@ export default function App() {
       {authReady && isAuthenticated && view === 'services' && (
         <div className="shell">
           <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <h2>Delivery control plane</h2>
+            <div className="helper" style={{ marginTop: '8px' }}>
+              DXCP is the source of truth for delivery intent and status. It applies platform guardrails by default.
+            </div>
+            <div className="helper" style={{ marginTop: '8px' }}>
+              What you can do depends on your role. Services shown here are allowlisted and scoped by policy.
+            </div>
+          </div>
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h2>Services</h2>
-                <div className="helper">Browse services and their latest delivery status.</div>
+                <div className="helper">Deployable services and their latest delivery status.</div>
               </div>
               <button className="button secondary" onClick={loadServicesList} disabled={servicesViewLoading}>
                 {servicesViewLoading ? 'Refreshing...' : 'Refresh'}
@@ -1890,7 +1945,9 @@ export default function App() {
             {servicesViewError && <div className="helper" style={{ marginTop: '8px' }}>{servicesViewError}</div>}
             {servicesViewLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading services...</div>}
             {!servicesViewLoading && servicesView.length === 0 && (
-              <div className="helper" style={{ marginTop: '8px' }}>No services registered.</div>
+              <div className="helper" style={{ marginTop: '8px' }}>
+                No deployable services available. Services are allowlisted by delivery group policy.
+              </div>
             )}
             {servicesView.length > 0 && (
               <div className="table" style={{ marginTop: '12px' }}>
@@ -2136,132 +2193,234 @@ export default function App() {
                 {refreshing ? 'Refreshing...' : 'Refresh data'}
               </button>
             </div>
-            <div className="field">
-              <label>Service</label>
-              <select
-                value={service}
-                onFocus={() => {
-                  if (services.length === 0) loadServices()
-                }}
-                onChange={(e) => setService(e.target.value)}
-              >
-                {services.length === 0 && <option value="">No services registered</option>}
-                {services.map((svc) => (
-                  <option key={svc.service_name} value={svc.service_name}>
-                    {svc.service_name}
-                  </option>
-                ))}
-              </select>
-              <div className="helper">Allowlisted services only.</div>
-            </div>
-            <div className="field">
-              <label htmlFor="deploy-recipe">Recipe</label>
-              <select
-                id="deploy-recipe"
-                value={recipeId}
-                onChange={(e) => setRecipeId(e.target.value)}
-                disabled={!currentDeliveryGroup || filteredRecipes.length === 0}
-              >
-                {!currentDeliveryGroup && <option value="">No delivery group assigned</option>}
-                {currentDeliveryGroup && filteredRecipes.length === 0 && <option value="">No allowed recipes</option>}
-                {filteredRecipes.map((recipe) => (
-                  <option key={recipe.id} value={recipe.id}>
-                    {recipe.name}
-                    {recipe.status === 'deprecated' ? ' (deprecated)' : ''}
-                  </option>
-                ))}
-              </select>
-              <div className="helper">Recipes are filtered by delivery group policy.</div>
-              {selectedRecipeDeprecated && (
-                <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
-              )}
-            </div>
-            <div className="row">
-              <div className="field">
-                <label>Environment</label>
-                <input value="sandbox" disabled />
-                <div className="helper">Single environment for controlled rollout.</div>
-              </div>
-            <div className="field">
-              <label>Version</label>
-              <select
-                value={versionMode === 'auto' ? version : '__custom__'}
-                onChange={(e) => {
-                  if (e.target.value === '__custom__') {
-                    setVersionMode('custom')
-                    setVersionSelection('user')
-                  } else {
-                    setVersionMode('auto')
-                    setVersion(e.target.value)
-                    setVersionSelection('user')
-                  }
-                }}
-                disabled={versions.length === 0}
-              >
-                {versions.length === 0 && <option value="__custom__">Custom...</option>}
-                {versions.map((item) => (
-                  <option key={item.version} value={item.version}>
-                    {item.version}
-                  </option>
-                ))}
-                <option value="__custom__">Custom...</option>
-              </select>
-              {versionMode === 'custom' && (
-                <input
-                  style={{ marginTop: '8px' }}
-                  value={version}
-                  onChange={(e) => setVersion(e.target.value)}
-                  placeholder="Enter a version"
-                />
-              )}
-              <div className="helper">
-                  Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
-              </div>
-              {versionsLoading && <div className="helper">Loading versions...</div>}
-              {versionsRefreshing && <div className="helper">Refreshing versions...</div>}
-              {versionsError && <div className="helper">{versionsError}</div>}
-              {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
-                <div className="helper">Latest discovered: {versions[0].version}</div>
-              )}
-              <div className="helper">
-                If no build is registered, DXCP auto-registers s3://&lt;runtime-bucket&gt;/{service}/{service}-{version}.zip.
-              </div>
-            </div>
-            </div>
-            <div className="field">
-              <label htmlFor="change-summary">Change summary</label>
-              <input
-                id="change-summary"
-                value={changeSummary}
-                onChange={(e) => setChangeSummary(e.target.value)}
-                onInput={(e) => setChangeSummary(e.target.value)}
-              />
-              {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
-            </div>
-            <button
-              className="button"
-              onClick={handleDeploy}
-              disabled={!canDeploy || !recipeId || !changeSummary.trim() || !validVersion || selectedRecipeDeprecated}
-              title={!canDeploy ? deployDisabledReason : ''}
-            >
-              Deploy now
-            </button>
-            {!canDeploy && (
-              <div className="helper" style={{ marginTop: '8px' }}>
-                Deploy disabled. {deployDisabledReason}
-              </div>
+            {deployStep === 'form' && (
+              <>
+                <div className="field">
+                  <label>Deployable service</label>
+                  <select
+                    value={service}
+                    onFocus={() => {
+                      if (services.length === 0) loadServices()
+                    }}
+                    onChange={(e) => {
+                      setService(e.target.value)
+                      setDeployStep('form')
+                    }}
+                  >
+                    {services.length === 0 && <option value="">No deployable services</option>}
+                    {services.map((svc) => (
+                      <option key={svc.service_name} value={svc.service_name}>
+                        {svc.service_name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="helper">Services are allowlisted and scoped by delivery group policy.</div>
+                </div>
+                <div className="field">
+                  <label htmlFor="deploy-recipe">Recipe</label>
+                  <select
+                    id="deploy-recipe"
+                    value={recipeId}
+                    onChange={(e) => {
+                      setRecipeId(e.target.value)
+                      setRecipeAutoApplied(false)
+                      setDeployStep('form')
+                    }}
+                    disabled={!currentDeliveryGroup || filteredRecipes.length === 0}
+                  >
+                    {!currentDeliveryGroup && <option value="">No delivery group assigned</option>}
+                    {currentDeliveryGroup && filteredRecipes.length === 0 && <option value="">No compatible recipes</option>}
+                    {filteredRecipes.map((recipe) => (
+                      <option key={recipe.id} value={recipe.id}>
+                        {recipe.name}
+                        {recipe.status === 'deprecated' ? ' (deprecated)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="helper">Recipes must be compatible with the service and allowed by the delivery group.</div>
+                  {recipeAutoApplied && selectedRecipe && (
+                    <div className="helper">Default applied: {selectedRecipe.name || selectedRecipe.id}</div>
+                  )}
+                  {currentDeliveryGroup && filteredRecipes.length === 0 && (
+                    <div className="helper">No recipes are allowed for this service in the current delivery group.</div>
+                  )}
+                  {selectedRecipeDeprecated && (
+                    <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
+                  )}
+                </div>
+                <div className="row">
+                  <div className="field">
+                    <label>Environment</label>
+                    <div className="helper">sandbox (fixed)</div>
+                  </div>
+                <div className="field">
+                  <label>Version</label>
+                  <select
+                    value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setVersionMode('custom')
+                        setVersionSelection('user')
+                        setVersionAutoApplied(false)
+                        setDeployStep('form')
+                      } else if (e.target.value === '__select__') {
+                        setVersionMode('auto')
+                        setVersion('')
+                        setVersionSelection('none')
+                        setVersionAutoApplied(false)
+                        setDeployStep('form')
+                      } else {
+                        setVersionMode('auto')
+                        setVersion(e.target.value)
+                        setVersionSelection('user')
+                        setVersionAutoApplied(false)
+                        setDeployStep('form')
+                      }
+                    }}
+                  >
+                    <option value="__select__">Select discovered version</option>
+                    {versions.map((item) => (
+                      <option key={item.version} value={item.version}>
+                        {item.version}
+                      </option>
+                    ))}
+                    <option value="__custom__">Custom (registered)</option>
+                  </select>
+                  {versionMode === 'custom' && (
+                    <input
+                      style={{ marginTop: '8px' }}
+                      value={version}
+                      onChange={(e) => {
+                        setVersion(e.target.value)
+                        setVersionSelection('user')
+                        setVersionAutoApplied(false)
+                        setDeployStep('form')
+                      }}
+                      placeholder="Enter a registered version"
+                    />
+                  )}
+                  <div className="helper">
+                      Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
+                  </div>
+                  {versionAutoApplied && version && <div className="helper">Default applied: {version}</div>}
+                  {versionsLoading && <div className="helper">Loading versions...</div>}
+                  {versionsRefreshing && <div className="helper">Refreshing versions...</div>}
+                  {versionsError && <div className="helper">{versionsError}</div>}
+                  {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
+                    <div className="helper">Latest discovered: {versions[0].version}</div>
+                  )}
+                  {versionMode === 'custom' && versionUnverifiable && (
+                    <div className="helper">Custom versions must already be registered and discoverable.</div>
+                  )}
+                </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="change-summary">Change summary</label>
+                  <input
+                    id="change-summary"
+                    value={changeSummary}
+                    onChange={(e) => {
+                      setChangeSummary(e.target.value)
+                      setDeployStep('form')
+                    }}
+                    onInput={(e) => {
+                      setChangeSummary(e.target.value)
+                      setDeployStep('form')
+                    }}
+                  />
+                  {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
+                </div>
+                <button
+                  className="button"
+                  onClick={() => setDeployStep('confirm')}
+                  disabled={!canReviewDeploy}
+                  title={!canDeploy ? deployDisabledReason : ''}
+                >
+                  Review deploy
+                </button>
+                {!canDeploy && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Deploy disabled. {deployDisabledReason}
+                  </div>
+                )}
+                {canDeploy && !changeSummary.trim() && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Change summary is required.
+                  </div>
+                )}
+                {versionUnverifiable && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Custom versions must match a registered build before you can deploy.
+                  </div>
+                )}
+                {deployInlineMessage && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    {deployInlineMessage}
+                  </div>
+                )}
+                {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+              </>
             )}
-            {canDeploy && !changeSummary.trim() && (
-              <div className="helper" style={{ marginTop: '8px' }}>
-                Change summary is required.
-              </div>
+            {deployStep === 'confirm' && (
+              <>
+                <h3>Confirm deploy</h3>
+                <div className="list" style={{ marginTop: '12px' }}>
+                  <div className="list-item">
+                    <div>Service</div>
+                    <div>{service || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Recipe</div>
+                    <div>{selectedRecipe?.name || selectedRecipe?.id || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Version</div>
+                    <div>{version || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Environment</div>
+                    <div>sandbox</div>
+                  </div>
+                </div>
+                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+                <div className="list">
+                  <div className="list-item">
+                    <div>Max concurrent deployments</div>
+                    <div>{currentDeliveryGroup?.guardrails?.max_concurrent_deployments || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Daily deploy quota</div>
+                    <div>{currentDeliveryGroup?.guardrails?.daily_deploy_quota || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Deploys remaining today</div>
+                    <div>
+                      {currentDeliveryGroup?.guardrails?.daily_deploy_quota
+                        ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+                        : '-'}
+                    </div>
+                  </div>
+                  <div className="list-item">
+                    <div>Daily rollback quota</div>
+                    <div>{currentDeliveryGroup?.guardrails?.daily_rollback_quota || '-'}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button className="button" onClick={handleDeploy} disabled={!canReviewDeploy}>
+                    Confirm deploy
+                  </button>
+                  <button className="button secondary" onClick={() => setDeployStep('form')}>
+                    Back to edit
+                  </button>
+                </div>
+                {deployInlineMessage && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    {deployInlineMessage}
+                  </div>
+                )}
+                {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+              </>
             )}
-            {deployInlineMessage && (
-              <div className="helper" style={{ marginTop: '8px' }}>
-                {deployInlineMessage}
-              </div>
-            )}
-            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
           </div>
           <div className="card">
             <h2>Policy context</h2>

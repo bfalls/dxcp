@@ -19,7 +19,8 @@ const buildFetchMock = ({
   deliveryGroups,
   recipes,
   servicesList,
-  guardrailValidation
+  guardrailValidation,
+  versionsByService
 }) => {
   let groups = deliveryGroups || [
     {
@@ -181,7 +182,11 @@ const buildFetchMock = ({
       return ok(timeline || [])
     }
     if (pathname.endsWith('/versions')) {
-      return ok({ versions: [] })
+      const parts = pathname.split('/')
+      const serviceName = parts.length >= 4 ? parts[3] : ''
+      const rawVersions = versionsByService?.[serviceName] || []
+      const versions = rawVersions.map((item) => (typeof item === 'string' ? { version: item } : item))
+      return ok({ versions })
     }
     if (pathname.endsWith('/allowed-actions')) {
       return ok({
@@ -324,8 +329,9 @@ export async function runAllTests() {
     const view = render(<App />)
 
     await view.findByText('OBSERVER')
-    const deployButton = view.getByRole('button', { name: 'Deploy now' })
-    assert.equal(deployButton.disabled, true)
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    assert.equal(reviewButton.disabled, true)
   })
 
   await runTest('PLATFORM_ADMIN sees all sections', async () => {
@@ -504,11 +510,13 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deployResponse: { code: 'RATE_LIMITED', message: 'Daily quota exceeded' }
+      deployResponse: { code: 'RATE_LIMITED', message: 'Daily quota exceeded' },
+      versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)
 
     await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
     await view.findByRole('option', { name: 'Default Deploy' })
@@ -518,11 +526,14 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
-    const deployButton = view.getByRole('button', { name: 'Deploy now' })
+    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !deployButton.disabled)
-    assert.equal(deployButton.disabled, false)
-    fireEvent.click(deployButton)
+    await waitForCondition(() => !reviewButton.disabled)
+    assert.equal(reviewButton.disabled, false)
+    fireEvent.click(reviewButton)
+    const confirmButton = view.getByRole('button', { name: 'Confirm deploy' })
+    await waitForCondition(() => !confirmButton.disabled)
+    fireEvent.click(confirmButton)
     await view.findByText('RATE_LIMITED: Daily deploy quota exceeded for this delivery group.')
   })
 
@@ -539,11 +550,13 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deployResponse: { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' }
+      deployResponse: { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' },
+      versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)
 
     await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
     await view.findByRole('option', { name: 'Default Deploy' })
@@ -553,11 +566,14 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
-    const deployButton = view.getByRole('button', { name: 'Deploy now' })
+    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !deployButton.disabled)
-    assert.equal(deployButton.disabled, false)
-    fireEvent.click(deployButton)
+    await waitForCondition(() => !reviewButton.disabled)
+    assert.equal(reviewButton.disabled, false)
+    fireEvent.click(reviewButton)
+    const confirmButton = view.getByRole('button', { name: 'Confirm deploy' })
+    await waitForCondition(() => !confirmButton.disabled)
+    fireEvent.click(confirmButton)
     await view.findByText('Deployment detail')
   })
 
@@ -574,11 +590,13 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      recipes: [{ id: 'default', name: 'Default Deploy', status: 'deprecated' }]
+      recipes: [{ id: 'default', name: 'Default Deploy', status: 'deprecated' }],
+      versionsByService: { 'demo-service': ['2.1.0'] }
     })
     const view = render(<App />)
 
     await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
     const changeInput = view.getByLabelText('Change summary')
@@ -587,8 +605,8 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
     await view.findByText('Selected recipe is deprecated and cannot be used for new deployments.')
-    const deployButton = view.getByRole('button', { name: 'Deploy now' })
-    assert.equal(deployButton.disabled, true)
+    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    assert.equal(reviewButton.disabled, true)
   })
 
   await runTest('Admin can create and edit delivery group', async () => {
