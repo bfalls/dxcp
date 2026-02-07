@@ -1,5 +1,5 @@
 {
-  "application": "dxcp-demo",
+  "application": "demo-service",
   "name": "dxcp-standard-deploy",
   "description": "DXCP Standard deploy (single-pass) via runtime-controller webhook",
   "keepWaitingPipelines": false,

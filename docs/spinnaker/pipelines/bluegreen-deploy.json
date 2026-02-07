@@ -1,5 +1,5 @@
 {
-  "application": "dxcp-demo",
+  "application": "demo-service",
   "name": "dxcp-bluegreen-deploy",
   "description": "DXCP Blue/Green deploy with explicit cutover gate (traffic switch placeholder)",
   "keepWaitingPipelines": false,

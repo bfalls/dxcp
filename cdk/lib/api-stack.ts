@@ -46,6 +46,18 @@ export class ApiStack extends Stack {
         resources: [`arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${props.configPrefix}/*`],
       })
     );
+    handler.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:Decrypt"],
+        resources: ["*"],
+        conditions: {
+          StringEquals: {
+            "kms:ViaService": `ssm.${Stack.of(this).region}.amazonaws.com`,
+            "kms:CallerAccount": Stack.of(this).account,
+          },
+        },
+      })
+    );
     if (props.artifactBucket) {
       handler.addToRolePolicy(
         new iam.PolicyStatement({

@@ -30,11 +30,79 @@ Each pipeline accepts these parameters (DXCP contract):
 
 ## Import Pipelines
 
-1. Create or select a Spinnaker application (example: `dxcp-demo`).
-2. Import each pipeline JSON from `docs/spinnaker/pipelines/`.
-3. (Recommended) Import the rollback pipeline from `spinnaker/rollback-demo-service.json`
-   if it is not already present.
-4. Save the pipelines.
+Spinnaker 2025.4.0 Deck does not expose a pipeline import action in the UI.
+Use the Gate API to import pipeline configs.
+
+### Gate API (recommended)
+
+Set the Gate base URL and an Auth0 access token (if required):
+
+```bash
+export SPINNAKER_GATE_URL=http://127.0.0.1:8084
+export SPINNAKER_BEARER_TOKEN="<auth0-access-token>"
+```
+
+Import the pipelines:
+
+```bash
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${SPINNAKER_BEARER_TOKEN}" \
+  "${SPINNAKER_GATE_URL}/pipelines" \
+  --data-binary @docs/spinnaker/pipelines/standard-deploy.json
+
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${SPINNAKER_BEARER_TOKEN}" \
+  "${SPINNAKER_GATE_URL}/pipelines" \
+  --data-binary @docs/spinnaker/pipelines/canary-deploy.json
+
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${SPINNAKER_BEARER_TOKEN}" \
+  "${SPINNAKER_GATE_URL}/pipelines" \
+  --data-binary @docs/spinnaker/pipelines/bluegreen-deploy.json
+
+curl -sS -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${SPINNAKER_BEARER_TOKEN}" \
+  "${SPINNAKER_GATE_URL}/pipelines" \
+  --data-binary @spinnaker/rollback-demo-service.json
+```
+
+Windows PowerShell:
+
+```powershell
+$env:SPINNAKER_GATE_URL = "http://127.0.0.1:8084"
+$env:SPINNAKER_BEARER_TOKEN = "<auth0-access-token>"
+
+Invoke-RestMethod -Method Post `
+  -Uri "$env:SPINNAKER_GATE_URL/pipelines" `
+  -Headers @{ Authorization = "Bearer $env:SPINNAKER_BEARER_TOKEN" } `
+  -ContentType "application/json" `
+  -InFile "docs/spinnaker/pipelines/standard-deploy.json"
+
+Invoke-RestMethod -Method Post `
+  -Uri "$env:SPINNAKER_GATE_URL/pipelines" `
+  -Headers @{ Authorization = "Bearer $env:SPINNAKER_BEARER_TOKEN" } `
+  -ContentType "application/json" `
+  -InFile "docs/spinnaker/pipelines/canary-deploy.json"
+
+Invoke-RestMethod -Method Post `
+  -Uri "$env:SPINNAKER_GATE_URL/pipelines" `
+  -Headers @{ Authorization = "Bearer $env:SPINNAKER_BEARER_TOKEN" } `
+  -ContentType "application/json" `
+  -InFile "docs/spinnaker/pipelines/bluegreen-deploy.json"
+
+Invoke-RestMethod -Method Post `
+  -Uri "$env:SPINNAKER_GATE_URL/pipelines" `
+  -Headers @{ Authorization = "Bearer $env:SPINNAKER_BEARER_TOKEN" } `
+  -ContentType "application/json" `
+  -InFile "spinnaker/rollback-demo-service.json"
+```
+
+After importing, refresh Deck and verify the pipelines appear under your
+application.
 
 ## Configure Parameters
 

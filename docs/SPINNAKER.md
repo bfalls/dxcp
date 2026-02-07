@@ -136,7 +136,7 @@ SSM:
 
 ```bash
 aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_name --type String --value "<header-name>" --overwrite
-aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_value --type String --value "<header-value>" --overwrite
+aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_value --type SecureString --value "<header-value>" --overwrite
 ```
 
 Environment variables:

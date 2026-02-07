@@ -1,5 +1,5 @@
 {
-  "application": "dxcp-demo",
+  "application": "demo-service",
   "name": "dxcp-canary-deploy",
   "description": "DXCP Canary deploy with explicit approval gate for deterministic failure",
   "keepWaitingPipelines": false,
