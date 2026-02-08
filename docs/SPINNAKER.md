@@ -303,6 +303,12 @@ Apps missing after restart:
 2) Fetch the execution JSON from Gate (`/pipelines/{executionId}`).
 3) Confirm the token value is not visible in the execution context.
 
+## UI verification (Auth + Spinnaker connectivity)
+
+1) Log into the DXCP UI with a user that has the `dxcp-platform-admins` role.
+2) Open the Spinnaker admin view and run the status check.
+3) Expected: `status=UP` (DXCP can read SecureString headers and call Gate).
+
 ## Security notes
 
 - Gate does not enforce auth by default. Bind it to `127.0.0.1` or a private network only.
