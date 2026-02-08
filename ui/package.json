@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "preview:e2e": "serve -s dist -l 5173",
     "postinstall": "playwright install",
     "e2e": "playwright test",
     "test": "node --import ./register-loader.mjs ./test-runner.mjs",
@@ -18,15 +19,17 @@
     "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "4.2.1",
     "@babel/core": "7.23.7",
     "@babel/preset-env": "7.23.8",
     "@babel/preset-react": "7.23.3",
     "@babel/register": "7.23.7",
-    "@playwright/test": "^1.43.0",
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "6.4.2",
     "@testing-library/react": "14.2.1",
+    "@types/node": "^25.2.2",
+    "@vitejs/plugin-react": "4.2.1",
     "jsdom": "24.0.0",
+    "serve": "^14.2.5",
     "vite": "5.0.12",
     "vitest": "1.2.2"
   }
