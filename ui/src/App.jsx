@@ -237,6 +237,20 @@ function outcomeTone(outcome, state) {
   return OUTCOME_TONES[resolved] || 'neutral'
 }
 
+function outcomeDisplayLabel(outcome, state, kind, rollbackOf) {
+  const resolved = resolveOutcome(outcome, state)
+  const operation = resolveDeploymentKind(kind, rollbackOf)
+  if (operation === 'ROLLBACK') {
+    if (!resolved) return 'Rollback in progress'
+    if (resolved === 'SUCCEEDED') return 'Rollback succeeded'
+    if (resolved === 'FAILED') return 'Rollback failed'
+    if (resolved === 'CANCELED') return 'Rollback canceled'
+    if (resolved === 'ROLLED_BACK') return 'Rollback completed'
+    if (resolved === 'SUPERSEDED') return 'Rollback superseded'
+  }
+  return outcomeLabel(outcome, state)
+}
+
 function failureCauseHeadline(cause) {
   const normalized = String(cause || '').toUpperCase()
   if (normalized === 'POLICY_CHANGE') return 'Blocked by policy change'
@@ -291,6 +305,45 @@ function applyTemplate(value, serviceName) {
   if (!value) return ''
   if (!serviceName) return value
   return String(value).replace('{service}', serviceName)
+}
+
+function normalizeStrategyKey(recipe) {
+  if (!recipe) return ''
+  const id = String(recipe.id || '').toLowerCase()
+  const name = String(recipe.name || '').toLowerCase()
+  const value = `${id} ${name}`
+  if (value.includes('canary')) return 'CANARY'
+  if (value.includes('bluegreen') || value.includes('blue-green') || value.includes('blue green')) return 'BLUE_GREEN'
+  if (value.includes('standard')) return 'STANDARD'
+  return ''
+}
+
+function strategyNarrative(recipe) {
+  const key = normalizeStrategyKey(recipe)
+  if (key === 'CANARY') {
+    return {
+      success: 'Canary verification completes and the new version becomes current.',
+      rollback:
+        'Failed verification triggers rollback; the original deployment is recorded as Rolled back after rollback succeeds.'
+    }
+  }
+  if (key === 'BLUE_GREEN') {
+    return {
+      success: 'Cutover completes and the new version becomes current.',
+      rollback:
+        'Failed validation or cutover triggers rollback; the original deployment is recorded as Rolled back after rollback succeeds.'
+    }
+  }
+  if (key === 'STANDARD') {
+    return {
+      success: 'Deployment completes and the new version becomes current.',
+      rollback: 'If rollback is triggered, a rollback deployment restores the previous version.'
+    }
+  }
+  return {
+    success: 'Deployment completes and the new version becomes current.',
+    rollback: 'If rollback is triggered, a rollback deployment restores the previous version.'
+  }
 }
 
 function shortId(value) {
@@ -481,6 +534,7 @@ export default function App() {
   const [servicesView, setServicesView] = useState([])
   const [servicesViewLoading, setServicesViewLoading] = useState(false)
   const [servicesViewError, setServicesViewError] = useState('')
+  const [debugDeployGatesEnabled, setDebugDeployGatesEnabled] = useState(ENV.VITE_DEBUG_DEPLOY_GATES === 'true')
   const [serviceDetailName, setServiceDetailName] = useState('')
   const [serviceDetailTab, setServiceDetailTab] = useState('overview')
   const [serviceDetailStatus, setServiceDetailStatus] = useState(null)
@@ -614,11 +668,13 @@ export default function App() {
     () => recipes.find((recipe) => recipe.id === recipeId) || null,
     [recipes, recipeId]
   )
+  const trimmedChangeSummary = useMemo(() => changeSummary.trim(), [changeSummary])
+  const selectedRecipeNarrative = useMemo(() => strategyNarrative(selectedRecipe), [selectedRecipe])
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
     canDeploy &&
     recipeId &&
-    changeSummary.trim() &&
+    trimmedChangeSummary &&
     validVersion &&
     !selectedRecipeDeprecated &&
     versionVerified
@@ -627,6 +683,28 @@ export default function App() {
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
+  )
+  const rollbackLookup = useMemo(() => {
+    const map = new Map()
+    serviceDetailHistory.forEach((item) => {
+      if (item?.rollbackOf && item.id) map.set(item.rollbackOf, item.id)
+    })
+    return map
+  }, [serviceDetailHistory])
+  const recentRollbackLookup = useMemo(() => {
+    const map = new Map()
+    deployments.forEach((item) => {
+      if (item?.rollbackOf && item.id) map.set(item.rollbackOf, item.id)
+    })
+    return map
+  }, [deployments])
+  const getRollbackIdFor = useCallback(
+    (deploymentId) => rollbackLookup.get(deploymentId) || recentRollbackLookup.get(deploymentId) || '',
+    [rollbackLookup, recentRollbackLookup]
+  )
+  const selectedRollbackId = useMemo(
+    () => (selected?.id ? getRollbackIdFor(selected.id) : ''),
+    [selected, getRollbackIdFor]
   )
   const timelineSteps = useMemo(() => normalizeTimelineSteps(timeline), [timeline])
   const selectedValidatedAt = useMemo(
@@ -686,9 +764,9 @@ export default function App() {
       service,
       recipeId,
       version,
-      changeSummary: changeSummary.trim(),
+      changeSummary: trimmedChangeSummary,
     })
-  }, [canRunPreflight, service, recipeId, version, changeSummary])
+  }, [canRunPreflight, service, recipeId, version, trimmedChangeSummary])
   const getRecipeLabel = useCallback(
     (recipeIdValue) => {
       if (!recipeIdValue) return '-'
@@ -744,6 +822,25 @@ export default function App() {
       audience: AUTH0_AUDIENCE,
       rolesClaim: ROLES_CLAIM,
       apiBase: DEFAULT_API_BASE
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadDebugFlags = async () => {
+      const config = await loadUiConfig()
+      if (!config || cancelled) return
+      const flag =
+        config.debugDeployGates ??
+        config.ui?.debugDeployGates ??
+        config.flags?.debugDeployGates ??
+        false
+      if (cancelled) return
+      setDebugDeployGatesEnabled(Boolean(flag))
+    }
+    loadDebugFlags()
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -1539,7 +1636,7 @@ export default function App() {
         VERSION_NOT_FOUND: 'Version must be registered for this service.',
         INVALID_VERSION: 'Version format is invalid.',
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
-        RATE_LIMITED: 'Daily deploy quota exceeded for this delivery group.',
+        RATE_LIMITED: 'Rate limit exceeded. Please retry shortly.',
         RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
         RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
         RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
@@ -1787,6 +1884,14 @@ export default function App() {
   }, [service, isAuthenticated, accessToken])
 
   useEffect(() => {
+    if (!isAuthenticated) return
+    if (service || services.length === 0) return
+    const nextService = services[0]?.service_name
+    if (!nextService) return
+    setService(nextService)
+  }, [isAuthenticated, service, services])
+
+  useEffect(() => {
     if (!canRunPreflight) {
       if (preflightStatus !== 'idle' || preflightResult || preflightError) {
         setPreflightStatus('idle')
@@ -1816,39 +1921,46 @@ export default function App() {
     const run = async () => {
       setPreflightStatus('checking')
       setPreflightError('')
-      const payload = {
-        service,
-        environment: 'sandbox',
-        version,
-        changeSummary,
-        recipeId
-      }
-      const result = await api.post('/deployments/validate', payload)
-      if (cancelled) return
-      if (result && result.code) {
-        const headline = failureCauseHeadline(result.failure_cause)
-        const messages = {
-          CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
-          QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
-          VERSION_NOT_FOUND: 'Version must be registered for this service.',
-          INVALID_VERSION: 'Version format is invalid.',
-          RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
-          RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
-          SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
-          SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
-          ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
-          RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
-          MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
-          RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+      try {
+        const payload = {
+          service,
+          environment: 'sandbox',
+          version,
+          changeSummary: trimmedChangeSummary,
+          recipeId
         }
-        const inline = messages[result.code]
+        const result = await api.post('/deployments/validate', payload)
+        if (cancelled) return
+        if (result && result.code) {
+          const headline = failureCauseHeadline(result.failure_cause)
+          const messages = {
+            CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
+            QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
+            VERSION_NOT_FOUND: 'Version must be registered for this service.',
+            INVALID_VERSION: 'Version format is invalid.',
+            RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+            RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
+            SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+            SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
+            ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
+            RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
+            MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
+            RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+          }
+          const inline = messages[result.code]
+          setPreflightStatus('error')
+          setPreflightErrorHeadline(headline)
+          setPreflightError(`${result.code}: ${inline || result.message}`)
+          return
+        }
+        setPreflightResult(result)
+        setPreflightStatus('ok')
+      } catch (err) {
+        if (cancelled) return
         setPreflightStatus('error')
-        setPreflightErrorHeadline(headline)
-        setPreflightError(`${result.code}: ${inline || result.message}`)
-        return
+        setPreflightErrorHeadline('Validation failed')
+        setPreflightError('Failed to check policy and guardrails.')
       }
-      setPreflightResult(result)
-      setPreflightStatus('ok')
     }
     run()
     return () => {
@@ -1857,11 +1969,10 @@ export default function App() {
   }, [
     api,
     canRunPreflight,
-    changeSummary,
     preflightKey,
-    preflightStatus,
     recipeId,
     service,
+    trimmedChangeSummary,
     version,
   ])
 
@@ -2412,13 +2523,30 @@ export default function App() {
                         <div>Created</div>
                         <div>Deployment</div>
                       </div>
-                      {serviceDetailHistory.map((item) => (
-                        <div className="table-row history" key={item.id}>
-                          <div>
-                            <span className={`badge ${outcomeTone(item.outcome, item.state)}`}>
-                              {outcomeLabel(item.outcome, item.state)}
-                            </span>
-                          </div>
+                      {serviceDetailHistory.map((item) => {
+                        const rollbackId = getRollbackIdFor(item.id)
+                        return (
+                          <div className="table-row history" key={item.id}>
+                            <div>
+                              <span className={`badge ${outcomeTone(item.outcome, item.state)}`}>
+                                {outcomeDisplayLabel(item.outcome, item.state, item.deploymentKind, item.rollbackOf)}
+                              </span>
+                              {resolveDeploymentKind(item.deploymentKind, item.rollbackOf) === 'ROLL_FORWARD' &&
+                                resolveOutcome(item.outcome, item.state) === 'ROLLED_BACK' && (
+                                  <div className="helper" style={{ marginTop: '4px' }}>
+                                    Auto-rollback recorded as a separate rollback deployment.
+                                    {rollbackId && (
+                                      <button
+                                        className="button secondary"
+                                        style={{ marginLeft: '8px' }}
+                                        onClick={() => openDeployment({ id: rollbackId })}
+                                      >
+                                        View rollback {shortId(rollbackId)}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                            </div>
                           <div><span className={statusClass(item.state)}>{item.state}</span></div>
                           <div>{item.version || '-'}</div>
                           <div>{getRecipeDisplay(item.recipeId, item.recipeRevision)}</div>
@@ -2439,7 +2567,8 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                   </div>
                 )}
               </div>
@@ -2496,41 +2625,56 @@ export default function App() {
                   <div className="helper">Services are allowlisted and scoped by delivery group policy.</div>
                 </div>
                 <div className="field">
-                  <label htmlFor="deploy-recipe">Recipe</label>
-                  <select
-                    id="deploy-recipe"
-                    value={recipeId}
-                    onChange={(e) => {
-                      setRecipeId(e.target.value)
-                      setRecipeAutoApplied(false)
-                      setDeployStep('form')
-                    }}
-                    disabled={!currentDeliveryGroup || filteredRecipes.length === 0}
-                  >
-                    {!currentDeliveryGroup && <option value="">No delivery group assigned</option>}
-                    {currentDeliveryGroup && filteredRecipes.length === 0 && <option value="">No compatible recipes</option>}
-                    {filteredRecipes.map((recipe) => (
-                      <option key={recipe.id} value={recipe.id}>
-                        {recipe.name}
-                        {recipe.status === 'deprecated' ? ' (deprecated)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <label>Strategy recipe</label>
                   <div className="helper">Recipes must be compatible with the service and allowed by the delivery group.</div>
-                  {recipeAutoApplied && selectedRecipe && (
-                    <div className="helper">Default applied: {selectedRecipe.name || selectedRecipe.id}</div>
-                  )}
+                  {!currentDeliveryGroup && <div className="helper">No delivery group assigned.</div>}
                   {currentDeliveryGroup && filteredRecipes.length === 0 && (
-                    <div className="helper">No recipes are allowed for this service in the current delivery group.</div>
+                    <div className="helper">No compatible recipes are allowed for this service.</div>
+                  )}
+                  {filteredRecipes.length > 0 && (
+                    <div className="list" style={{ marginTop: '8px' }}>
+                      {filteredRecipes.map((recipe) => {
+                        const revision = recipe.recipe_revision ?? 1
+                        const isSelected = recipeId === recipe.id
+                        return (
+                          <label className="list-item recipe-choice" key={recipe.id}>
+                            <input
+                              type="radio"
+                              name="deploy-recipe"
+                              value={recipe.id}
+                              checked={isSelected}
+                              onChange={(e) => {
+                                setRecipeId(e.target.value)
+                                setRecipeAutoApplied(false)
+                                setDeployStep('form')
+                              }}
+                            />
+                            <div>
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                                <strong>{recipe.name || recipe.id}</strong>
+                                <span className="helper">v{revision}</span>
+                                {recipe.status === 'deprecated' && <span className="helper">Deprecated</span>}
+                              </div>
+                              <div className="helper">
+                                {recipe.effective_behavior_summary || 'No behavior summary provided.'}
+                              </div>
+                            </div>
+                            <div className="helper" style={{ textAlign: 'right' }}>
+                              {recipe.description || 'Strategy recipe'}
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {recipeAutoApplied && selectedRecipe && (
+                    <div className="helper">Default applied (only option): {selectedRecipe.name || selectedRecipe.id}</div>
+                  )}
+                  {filteredRecipes.length > 1 && !recipeId && (
+                    <div className="helper">Select a strategy to continue.</div>
                   )}
                   {selectedRecipeDeprecated && (
                     <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
-                  )}
-                  {selectedRecipe && (
-                    <div className="helper">Recipe revision: v{selectedRecipe.recipe_revision ?? 1}</div>
-                  )}
-                  {selectedRecipe?.effective_behavior_summary && (
-                    <div className="helper">Behavior: {selectedRecipe.effective_behavior_summary}</div>
                   )}
                 </div>
                 <div className="row">
@@ -2648,6 +2792,20 @@ export default function App() {
                     {preflightError}
                   </div>
                 )}
+                {debugDeployGatesEnabled && (
+                  <div className="helper" style={{ marginTop: '8px' }}>
+                    Deploy gates:{' '}
+                    {[
+                      `canDeploy=${String(canDeploy)}`,
+                      `canRunPreflight=${String(canRunPreflight)}`,
+                      `preflightStatus=${preflightStatus}`,
+                      `validVersion=${String(validVersion)}`,
+                      `versionVerified=${String(versionVerified)}`,
+                      `recipeId=${recipeId || '-'}`,
+                      `changeSummary=${trimmedChangeSummary ? 'set' : 'empty'}`
+                    ].join(', ')}
+                  </div>
+                )}
                 <button
                   className="button"
                   onClick={() => setDeployStep('confirm')}
@@ -2699,6 +2857,14 @@ export default function App() {
                   <div className="list-item">
                     <div>Behavior summary</div>
                     <div>{selectedRecipe?.effective_behavior_summary || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Success means</div>
+                    <div>{selectedRecipeNarrative.success}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Rollback means</div>
+                    <div>{selectedRecipeNarrative.rollback}</div>
                   </div>
                   <div className="list-item">
                     <div>Version</div>
@@ -2885,14 +3051,35 @@ export default function App() {
                       <div>Outcome</div>
                       <div>
                         <span className={`badge ${outcomeTone(selected.outcome, selected.state)}`}>
-                          {outcomeLabel(selected.outcome, selected.state)}
+                          {outcomeDisplayLabel(selected.outcome, selected.state, selected.deploymentKind, selected.rollbackOf)}
                         </span>
+                        {resolveDeploymentKind(selected.deploymentKind, selected.rollbackOf) === 'ROLL_FORWARD' &&
+                          resolveOutcome(selected.outcome, selected.state) === 'ROLLED_BACK' && (
+                            <div className="helper" style={{ marginTop: '4px' }}>
+                              Auto-rollback recorded as a separate rollback deployment.
+                              {selectedRollbackId && (
+                                <button
+                                  className="button secondary"
+                                  style={{ marginLeft: '8px' }}
+                                  onClick={() => openDeployment({ id: selectedRollbackId })}
+                                >
+                                  View rollback {shortId(selectedRollbackId)}
+                                </button>
+                              )}
+                            </div>
+                          )}
                       </div>
                     </div>
                     <div className="list-item admin-detail">
                       <div>Operation</div>
                       <div>{deploymentKindLabel(selected.deploymentKind, selected.rollbackOf)}</div>
                     </div>
+                    {selected.rollbackOf && (
+                      <div className="list-item admin-detail">
+                        <div>Rollback of</div>
+                        <div>{selected.rollbackOf}</div>
+                      </div>
+                    )}
                     <div className="list-item admin-detail">
                       <div>Recipe</div>
                       <div>{getRecipeDisplay(selected.recipeId, selected.recipeRevision)}</div>

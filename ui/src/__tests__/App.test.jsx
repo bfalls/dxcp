@@ -529,6 +529,40 @@ export async function runAllTests() {
     await view.findByText('INFRASTRUCTURE')
   })
 
+  await runTest('Deploy view auto-selects first service and loads strategies', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'demo-service-2' }],
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [{ id: 'default', name: 'Default Deploy' }]
+    })
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    assert.ok(view.queryByText('No delivery group assigned.') === null)
+  })
+
   await runTest('Blocked deploy shows correct message', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
@@ -550,9 +584,7 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
-    await view.findByRole('option', { name: 'Default Deploy' })
-    fireEvent.change(view.getByLabelText('Recipe'), { target: { value: 'default' } })
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const changeInput = view.getByLabelText('Change summary')
     changeInput.value = 'release'
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
@@ -587,9 +619,7 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
-    await view.findByRole('option', { name: 'Default Deploy' })
-    fireEvent.change(view.getByLabelText('Recipe'), { target: { value: 'default' } })
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const changeInput = view.getByLabelText('Change summary')
     changeInput.value = 'release'
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
@@ -627,7 +657,7 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText('Recipe').value === 'default')
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const changeInput = view.getByLabelText('Change summary')
     changeInput.value = 'release'
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))

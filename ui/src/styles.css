@@ -289,6 +289,15 @@ body {
   background: #0d1919;
 }
 
+.list-item.recipe-choice {
+  grid-template-columns: 28px 1.4fr 1fr;
+  align-items: start;
+}
+
+.list-item.recipe-choice input {
+  margin-top: 4px;
+}
+
 .list-item.admin-group {
   grid-template-columns: 1.2fr 1fr 0.7fr 1.4fr 1fr;
   align-items: center;

@@ -371,6 +371,7 @@ config = {
         "audience": os.environ["DXCP_UI_AUTH0_AUDIENCE"],
         "rolesClaim": os.environ["DXCP_UI_AUTH0_ROLES_CLAIM"],
     },
+    "debugDeployGates": False,
 }
 with open(path, "w", encoding="ascii") as handle:
     json.dump(config, handle, indent=2)
