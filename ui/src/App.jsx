@@ -1970,6 +1970,7 @@ export default function App() {
     api,
     canRunPreflight,
     preflightKey,
+    preflightStatus,
     recipeId,
     service,
     trimmedChangeSummary,
