@@ -563,6 +563,85 @@ export async function runAllTests() {
     assert.ok(view.queryByText('No delivery group assigned.') === null)
   })
 
+  await runTest('Change summary typing does not trigger validate', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    let validateCalls = 0
+    const baseFetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }],
+      recipes: [{ id: 'default', name: 'Default Deploy' }],
+      versionsByService: { 'demo-service': ['2.1.0'] }
+    })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/deployments/validate' && options.method === 'POST') {
+        validateCalls += 1
+      }
+      return baseFetch(url, options)
+    }
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    const changeInput = view.getByLabelText('Change summary')
+    changeInput.value = 'Release notes'
+    changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await waitForCondition(() => validateCalls === 0)
+  })
+
+  await runTest('Review deploy validates once and blocks on failure', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    let validateCalls = 0
+    const baseFetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded', failure_cause: 'POLICY_CHANGE' },
+      versionsByService: { 'demo-service': ['2.1.0'] }
+    })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/deployments/validate' && options.method === 'POST') {
+        validateCalls += 1
+      }
+      return baseFetch(url, options)
+    }
+    const view = render(<App />)
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    await view.findAllByText('Default Delivery Group')
+    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    const changeInput = view.getByLabelText('Change summary')
+    changeInput.value = 'release'
+    changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+    changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    fireEvent.click(reviewButton)
+    await waitForCondition(() => validateCalls === 1)
+    await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
+    assert.equal(view.queryByText('Confirm deploy'), null)
+  })
+
   await runTest('Blocked deploy shows correct message', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
@@ -592,10 +671,10 @@ export async function runAllTests() {
     await view.findByDisplayValue('release')
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await view.findByText(/Blocked by policy change/)
+    fireEvent.click(reviewButton)
+    await view.findByText(/Fix these issues to continue/)
     await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
-    await waitForCondition(() => reviewButton.disabled)
-    assert.equal(reviewButton.disabled, true)
+    assert.equal(view.queryByText('Confirm deploy'), null)
   })
 
   await runTest('Allowed deploy redirects to detail page', async () => {
@@ -630,7 +709,7 @@ export async function runAllTests() {
     await waitForCondition(() => !reviewButton.disabled)
     assert.equal(reviewButton.disabled, false)
     fireEvent.click(reviewButton)
-    const confirmButton = view.getByRole('button', { name: 'Confirm deploy' })
+    const confirmButton = await view.findByRole('button', { name: 'Confirm deploy' })
     await waitForCondition(() => !confirmButton.disabled)
     fireEvent.click(confirmButton)
     await view.findByText('Deployment detail')

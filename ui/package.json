@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "postinstall": "playwright install",
+    "e2e": "playwright test",
     "test": "node --import ./register-loader.mjs ./test-runner.mjs",
     "test:run": "node --import ./register-loader.mjs ./test-runner.mjs"
   },
@@ -21,6 +23,7 @@
     "@babel/preset-env": "7.23.8",
     "@babel/preset-react": "7.23.3",
     "@babel/register": "7.23.7",
+    "@playwright/test": "^1.43.0",
     "@testing-library/jest-dom": "6.4.2",
     "@testing-library/react": "14.2.1",
     "jsdom": "24.0.0",

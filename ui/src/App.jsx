@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { createApiClient } from './apiClient.js'
 import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
@@ -584,7 +584,6 @@ export default function App() {
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
-  const preflightKeyRef = useRef('')
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const versionInList = useMemo(
@@ -679,7 +678,7 @@ export default function App() {
     !selectedRecipeDeprecated &&
     versionVerified
   )
-  const canReviewDeploy = Boolean(canRunPreflight && preflightStatus === 'ok')
+  const canReviewDeploy = Boolean(canRunPreflight)
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
@@ -758,15 +757,6 @@ export default function App() {
     if (adminGroupMode !== 'edit' || !activeAdminGroup) return null
     return diffLists(adminGroupDraft.allowed_recipes, activeAdminGroup.allowed_recipes || [])
   }, [adminGroupMode, adminGroupDraft.allowed_recipes, activeAdminGroup])
-  const preflightKey = useMemo(() => {
-    if (!canRunPreflight) return ''
-    return JSON.stringify({
-      service,
-      recipeId,
-      version,
-      changeSummary: trimmedChangeSummary,
-    })
-  }, [canRunPreflight, service, recipeId, version, trimmedChangeSummary])
   const getRecipeLabel = useCallback(
     (recipeIdValue) => {
       if (!recipeIdValue) return '-'
@@ -1709,6 +1699,52 @@ export default function App() {
     await refreshDeployments()
   }
 
+  async function handleReviewDeploy() {
+    if (!canRunPreflight || preflightStatus === 'checking') return
+    setPreflightStatus('checking')
+    setPreflightError('')
+    setPreflightErrorHeadline('')
+    try {
+      // Validate only when the user requests review to avoid burning read RPM on every keystroke.
+      const payload = {
+        service,
+        environment: 'sandbox',
+        version,
+        changeSummary: trimmedChangeSummary,
+        recipeId
+      }
+      const result = await api.post('/deployments/validate', payload)
+      if (result && result.code) {
+        const messages = {
+          CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
+          QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
+          VERSION_NOT_FOUND: 'Version must be registered for this service.',
+          INVALID_VERSION: 'Version format is invalid.',
+          RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+          RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
+          SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+          SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
+          ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
+          RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
+          MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
+          RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+        }
+        const inline = messages[result.code]
+        setPreflightStatus('error')
+        setPreflightErrorHeadline('Fix these issues to continue')
+        setPreflightError(`${result.code}: ${inline || result.message}`)
+        return
+      }
+      setPreflightResult(result)
+      setPreflightStatus('ok')
+      setDeployStep('confirm')
+    } catch (err) {
+      setPreflightStatus('error')
+      setPreflightErrorHeadline('Fix these issues to continue')
+      setPreflightError('Failed to check policy and guardrails.')
+    }
+  }
+
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
     loadServices()
@@ -1899,83 +1935,18 @@ export default function App() {
         setPreflightError('')
         setPreflightErrorHeadline('')
       }
-      preflightKeyRef.current = ''
       return
     }
-    if (preflightKeyRef.current && preflightKeyRef.current === preflightKey) {
-      return
+    if (!service || !recipeId || !version) return
+    if (preflightStatus === 'checking') return
+    if (deployStep === 'confirm') {
+      setDeployStep('form')
     }
     setPreflightStatus('idle')
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
-    preflightKeyRef.current = preflightKey
-    if (deployStep === 'confirm') {
-      setDeployStep('form')
-    }
-  }, [canRunPreflight, preflightKey, preflightStatus, preflightResult, preflightError, deployStep])
-
-  useEffect(() => {
-    if (!canRunPreflight || !preflightKey || preflightStatus !== 'idle') return
-    let cancelled = false
-    const run = async () => {
-      setPreflightStatus('checking')
-      setPreflightError('')
-      try {
-        const payload = {
-          service,
-          environment: 'sandbox',
-          version,
-          changeSummary: trimmedChangeSummary,
-          recipeId
-        }
-        const result = await api.post('/deployments/validate', payload)
-        if (cancelled) return
-        if (result && result.code) {
-          const headline = failureCauseHeadline(result.failure_cause)
-          const messages = {
-            CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
-            QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
-            VERSION_NOT_FOUND: 'Version must be registered for this service.',
-            INVALID_VERSION: 'Version format is invalid.',
-            RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
-            RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
-            SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
-            SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
-            ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
-            RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
-            MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
-            RATE_LIMITED: 'Rate limit exceeded while checking policy.'
-          }
-          const inline = messages[result.code]
-          setPreflightStatus('error')
-          setPreflightErrorHeadline(headline)
-          setPreflightError(`${result.code}: ${inline || result.message}`)
-          return
-        }
-        setPreflightResult(result)
-        setPreflightStatus('ok')
-      } catch (err) {
-        if (cancelled) return
-        setPreflightStatus('error')
-        setPreflightErrorHeadline('Validation failed')
-        setPreflightError('Failed to check policy and guardrails.')
-      }
-    }
-    run()
-    return () => {
-      cancelled = true
-    }
-  }, [
-    api,
-    canRunPreflight,
-    preflightKey,
-    preflightStatus,
-    recipeId,
-    service,
-    trimmedChangeSummary,
-    version,
-  ])
+  }, [canRunPreflight, service, recipeId, version, deployStep, preflightStatus, preflightResult, preflightError])
 
   useEffect(() => {
     if (!isAuthenticated || !service || !accessToken) return
@@ -2809,11 +2780,11 @@ export default function App() {
                 )}
                 <button
                   className="button"
-                  onClick={() => setDeployStep('confirm')}
-                  disabled={!canReviewDeploy}
+                  onClick={handleReviewDeploy}
+                  disabled={!canReviewDeploy || preflightStatus === 'checking'}
                   title={!canDeploy ? deployDisabledReason : ''}
                 >
-                  Review deploy
+                  {preflightStatus === 'checking' ? 'Checking policy...' : 'Review deploy'}
                 </button>
                 {!canDeploy && (
                   <div className="helper" style={{ marginTop: '8px' }}>
