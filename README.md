@@ -66,6 +66,8 @@ This repository contains:
   - docs/ENVIRONMENTS.md
 - CI
   - GitHub Actions runs lint and tests on every push and PR.
+- Tests
+  - dxcp-api/README.md (test harness + invariant suite)
 
 ---
 

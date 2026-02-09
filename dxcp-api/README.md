@@ -69,14 +69,24 @@ Spinnaker adapter:
 
 ## Tests
 
+DXCP tests are safe-by-default and runnable without tribal knowledge. The default
+test harness uses local SQLite and a fake engine adapter (no real Spinnaker or
+AWS calls).
+
 Install dev dependencies (from repo root):
 
 ```
 pip install -r dxcp-api/requirements.txt -r requirements-dev.txt
 ```
 
-Run tests (from repo root):
+Run the same API tests CI runs (from repo root):
 
 ```
-python -m pytest dxcp-api/tests spinnaker-adapter/tests
+npm test
+```
+
+API invariant suite only (from repo root):
+
+```
+pytest dxcp-api/tests/test_*_invariants.py
 ```
