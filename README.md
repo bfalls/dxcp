@@ -51,6 +51,8 @@ This repository contains:
   - docs/ARCHITECTURE.md
   - docs/DOMAIN_MODEL.md
   - docs/SERVICES.md
+- Extensibility & evolution
+  - docs/EXTENSIBILITY_AND_EVOLUTION.md
 - API & integrations
   - docs/API_DESIGN.md
   - docs/OBSERVABILITY.md
