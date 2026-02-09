@@ -558,6 +558,11 @@ export default function App() {
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [versionsRefreshing, setVersionsRefreshing] = useState(false)
   const [versionsError, setVersionsError] = useState('')
+  const [deployQueryParams, setDeployQueryParams] = useState(null)
+  const [deployUrlSyncEnabled, setDeployUrlSyncEnabled] = useState(false)
+  const [deploymentsQueryService, setDeploymentsQueryService] = useState('')
+  const [deploymentsFilterService, setDeploymentsFilterService] = useState('')
+  const [deploymentsUrlSyncEnabled, setDeploymentsUrlSyncEnabled] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
@@ -635,6 +640,8 @@ export default function App() {
   const lastRouteKeyRef = useRef('')
   const deploymentsScrollRef = useRef(0)
   const invalidationRef = useRef({ recipe: '', version: '' })
+  const queryAlertRef = useRef({ deployService: '', deployRecipe: '', deployVersion: '', deploymentsService: '' })
+  const urlSyncRef = useRef({ deploy: '', deployments: '' })
   const previousServiceRef = useRef('')
   const view = useMemo(() => resolveViewFromPath(currentPath), [currentPath])
   const deploymentMatch = useMemo(() => matchPath('/deployments/:deploymentId', currentPath), [currentPath])
@@ -748,6 +755,10 @@ export default function App() {
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
   )
+  const visibleDeployments = useMemo(() => {
+    if (!deploymentsFilterService) return deployments
+    return deployments.filter((item) => item.service === deploymentsFilterService)
+  }, [deployments, deploymentsFilterService])
   const rollbackLookup = useMemo(() => {
     const map = new Map()
     serviceDetailHistory.forEach((item) => {
@@ -945,6 +956,7 @@ export default function App() {
     let active = true
     async function initAuth() {
       const runtimeConfig = await getRuntimeConfig()
+      if (!active) return
       if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
         if (active) {
           setAuthError('Auth0 configuration is missing.')
@@ -952,11 +964,13 @@ export default function App() {
         }
         return
       }
-      if (runtimeConfig.apiBase) {
+      if (active && runtimeConfig.apiBase) {
         setApiBase(normalizeApiBase(runtimeConfig.apiBase))
       }
-      setAuthAudience(runtimeConfig.audience)
-      setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
+      if (active) {
+        setAuthAudience(runtimeConfig.audience)
+        setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
+      }
       try {
         const factory =
           typeof window !== 'undefined' && window.__DXCP_AUTH0_FACTORY__
@@ -2291,10 +2305,169 @@ export default function App() {
   }, [view, isAuthenticated, insightsDefaultsApplied, isPlatformAdmin, loadInsights])
 
   useEffect(() => {
+    if (!isAuthenticated || view !== 'deploy' || !deployQueryParams) return
+    const queryService = deployQueryParams.service
+    const queryRecipe = deployQueryParams.recipe
+    const queryVersion = deployQueryParams.version
+
+    if (queryService) {
+      if (services.length === 0) return
+      const exists = services.some((svc) => svc.service_name === queryService)
+      if (!exists) {
+        const alertKey = `deploy:service:${queryService}`
+        if (queryAlertRef.current.deployService !== alertKey) {
+          queryAlertRef.current.deployService = alertKey
+          setErrorHeadline('Invalid URL parameter')
+          setErrorMessage(`Service "${queryService}" is not available for deployment. Clearing selection.`)
+        }
+        setService('')
+        setDeployQueryParams((prev) => (prev ? { ...prev, service: '' } : prev))
+        return
+      }
+      if (service !== queryService) {
+        setService(queryService)
+        return
+      }
+    }
+
+    if (queryRecipe) {
+      if (!service) return
+      if (queryService && service !== queryService) return
+      if (!deployEntryReady && (recipes.length === 0 || deliveryGroups.length === 0)) return
+      const match = filteredRecipes.find((recipe) => recipe.id === queryRecipe)
+      const invalidRecipe = !match || match.status === 'deprecated'
+      if (invalidRecipe) {
+        const alertKey = `deploy:recipe:${queryRecipe}`
+        if (queryAlertRef.current.deployRecipe !== alertKey) {
+          queryAlertRef.current.deployRecipe = alertKey
+          setErrorHeadline('Invalid URL parameter')
+          setErrorMessage(`Recipe "${queryRecipe}" is not available for this service. Clearing selection.`)
+        }
+        setRecipeId('')
+        setRecipeAutoApplied(false)
+        setDeployQueryParams((prev) => (prev ? { ...prev, recipe: '' } : prev))
+        return
+      }
+      if (recipeId !== queryRecipe) {
+        setRecipeId(queryRecipe)
+        setRecipeAutoApplied(false)
+        return
+      }
+    }
+
+    if (queryVersion) {
+      if (!service) return
+      if (queryService && service !== queryService) return
+      if (versionsLoading || versionsRefreshing) return
+      const match = versions.find((item) => item.version === queryVersion)
+      if (!match) {
+        const alertKey = `deploy:version:${queryVersion}`
+        if (queryAlertRef.current.deployVersion !== alertKey) {
+          queryAlertRef.current.deployVersion = alertKey
+          setErrorHeadline('Invalid URL parameter')
+          setErrorMessage(`Version "${queryVersion}" is not available for this service. Clearing selection.`)
+        }
+        setVersion('')
+        setVersionMode('auto')
+        setVersionSelection('none')
+        setVersionAutoApplied(false)
+        setDeployQueryParams((prev) => (prev ? { ...prev, version: '' } : prev))
+        return
+      }
+      if (version !== queryVersion || versionMode !== 'auto') {
+        setVersionMode('auto')
+        setVersion(queryVersion)
+        setVersionSelection('user')
+        setVersionAutoApplied(false)
+        return
+      }
+    }
+
+    setDeployUrlSyncEnabled(true)
+  }, [
+    isAuthenticated,
+    view,
+    deployQueryParams,
+    deployEntryReady,
+    services,
+    service,
+    recipes,
+    deliveryGroups,
+    filteredRecipes,
+    recipeId,
+    versions,
+    versionsLoading,
+    versionsRefreshing,
+    version,
+    versionMode
+  ])
+
+  useEffect(() => {
+    if (!isAuthenticated || view !== 'deployments') return
+    if (!deploymentsQueryService) {
+      if (deploymentsFilterService) {
+        setDeploymentsFilterService('')
+      }
+      setDeploymentsUrlSyncEnabled(true)
+      return
+    }
+    if (services.length === 0) return
+    const exists = services.some((svc) => svc.service_name === deploymentsQueryService)
+    if (!exists) {
+      const alertKey = `deployments:service:${deploymentsQueryService}`
+      if (queryAlertRef.current.deploymentsService !== alertKey) {
+        queryAlertRef.current.deploymentsService = alertKey
+        setErrorHeadline('Invalid URL parameter')
+        setErrorMessage(`Service "${deploymentsQueryService}" is not available. Showing all deployments.`)
+      }
+      setDeploymentsFilterService('')
+      setDeploymentsUrlSyncEnabled(true)
+      return
+    }
+    if (deploymentsFilterService !== deploymentsQueryService) {
+      setDeploymentsFilterService(deploymentsQueryService)
+    }
+    setDeploymentsUrlSyncEnabled(true)
+  }, [isAuthenticated, view, deploymentsQueryService, deploymentsFilterService, services])
+
+  useEffect(() => {
     if (!authReady || !isAuthenticated) return
     const routeKey = location.key || currentPath
     if (lastRouteKeyRef.current === routeKey) return
     lastRouteKeyRef.current = routeKey
+    if (view === 'deploy') {
+      const currentSearch = location.search || ''
+      const syncKey = `${currentPath}${currentSearch}`
+      if (urlSyncRef.current.deploy === syncKey) {
+        urlSyncRef.current.deploy = ''
+      } else {
+        const params = new URLSearchParams(currentSearch)
+        const query = {
+          service: (params.get('service') || '').trim(),
+          recipe: (params.get('recipe') || '').trim(),
+          version: (params.get('version') || '').trim()
+        }
+        const hasQuery = Boolean(query.service || query.recipe || query.version)
+        setDeployQueryParams(hasQuery ? query : null)
+        setDeployUrlSyncEnabled(!hasQuery)
+      }
+    } else if (view === 'deployments') {
+      const currentSearch = location.search || ''
+      const syncKey = `${currentPath}${currentSearch}`
+      if (urlSyncRef.current.deployments === syncKey) {
+        urlSyncRef.current.deployments = ''
+      } else {
+        const params = new URLSearchParams(currentSearch)
+        const queryService = (params.get('service') || '').trim()
+        setDeploymentsQueryService(queryService)
+        setDeploymentsUrlSyncEnabled(false)
+      }
+    } else {
+      setDeployQueryParams(null)
+      setDeployUrlSyncEnabled(false)
+      setDeploymentsQueryService('')
+      setDeploymentsUrlSyncEnabled(false)
+    }
 
     // Deterministic refresh rules on route entry (TTL-based, in-memory cache only).
     if (view === 'services') {
@@ -2370,6 +2543,32 @@ export default function App() {
     loadDeploymentDetail,
     loadServiceDetail
   ])
+
+  useEffect(() => {
+    if (!deployUrlSyncEnabled || view !== 'deploy') return
+    const params = new URLSearchParams()
+    if (service) params.set('service', service)
+    if (recipeId) params.set('recipe', recipeId)
+    if (version) params.set('version', version)
+    const nextSearch = params.toString()
+    const currentSearch = (location.search || '').replace(/^\?/, '')
+    if (nextSearch === currentSearch) return
+    const nextPath = nextSearch ? `${location.pathname}?${nextSearch}` : location.pathname
+    urlSyncRef.current.deploy = nextPath
+    navigate(nextPath)
+  }, [deployUrlSyncEnabled, view, service, recipeId, version, location.pathname, location.search, navigate])
+
+  useEffect(() => {
+    if (!deploymentsUrlSyncEnabled || view !== 'deployments') return
+    const params = new URLSearchParams()
+    if (deploymentsFilterService) params.set('service', deploymentsFilterService)
+    const nextSearch = params.toString()
+    const currentSearch = (location.search || '').replace(/^\?/, '')
+    if (nextSearch === currentSearch) return
+    const nextPath = nextSearch ? `${location.pathname}?${nextSearch}` : location.pathname
+    urlSyncRef.current.deployments = nextPath
+    navigate(nextPath)
+  }, [deploymentsUrlSyncEnabled, view, deploymentsFilterService, location.pathname, location.search, navigate])
 
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
@@ -2494,7 +2693,7 @@ export default function App() {
   }
 
   const deploymentsPageProps = {
-    deployments,
+    deployments: visibleDeployments,
     refreshDeployments,
     openDeployment,
     statusClass,
