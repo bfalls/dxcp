@@ -1,6 +1,7 @@
 import { render, cleanup, fireEvent } from '@testing-library/react'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
+import { MemoryRouter } from 'react-router-dom'
 import App from '../App.jsx'
 import { createApiClient } from '../apiClient.js'
 
@@ -8,6 +9,13 @@ const ok = (data) =>
   Promise.resolve({
     json: () => Promise.resolve(data)
   })
+
+const renderApp = (initialPath = '/services') =>
+  render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <App />
+    </MemoryRouter>
+  )
 
 const buildFetchMock = ({
   role,
@@ -338,10 +346,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'OBSERVER', deployAllowed: false, rollbackAllowed: false })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('OBSERVER')
-    const adminButton = view.getByRole('button', { name: 'Admin' })
+    const adminButton = view.getByRole('link', { name: 'Admin' })
     fireEvent.click(adminButton)
     await view.findByText('Only Platform Admins can modify this.')
     const createButton = view.getByRole('button', { name: 'Create group' })
@@ -358,10 +366,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'OBSERVER', deployAllowed: false, rollbackAllowed: false })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('OBSERVER')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     assert.equal(reviewButton.disabled, true)
   })
@@ -376,15 +384,14 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    assert.ok(view.getAllByRole('button', { name: 'Deploy' })[0])
-    assert.ok(view.getByRole('button', { name: 'Deployments' }))
-    assert.ok(view.getByRole('button', { name: 'Detail' }))
-    assert.ok(view.getByRole('button', { name: 'Insights' }))
-    assert.ok(view.getByRole('button', { name: 'Settings' }))
-    assert.ok(view.getByRole('button', { name: 'Admin' }))
+    assert.ok(view.getByRole('link', { name: 'Deploy' }))
+    assert.ok(view.getByRole('link', { name: 'Deployments' }))
+    assert.ok(view.getByRole('link', { name: 'Insights' }))
+    assert.ok(view.getByRole('link', { name: 'Settings' }))
+    assert.ok(view.getByRole('link', { name: 'Admin' }))
   })
 
   await runTest('Settings page shows default refresh interval', async () => {
@@ -397,10 +404,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'OBSERVER', deployAllowed: false, rollbackAllowed: false })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('OBSERVER')
-    fireEvent.click(view.getByRole('button', { name: 'Settings' }))
+    fireEvent.click(view.getByRole('link', { name: 'Settings' }))
     const input = view.getByLabelText('Auto-refresh interval (minutes)')
     assert.equal(input.value, '5')
     await view.findByText('Resolved refresh interval: 5 minutes.')
@@ -417,10 +424,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Settings' }))
+    fireEvent.click(view.getByRole('link', { name: 'Settings' }))
     await view.findByText('Resolved refresh interval: 5 minutes.')
     const input = await view.findByLabelText('Auto-refresh interval (minutes)')
     await view.findByDisplayValue('5')
@@ -474,10 +481,10 @@ export async function runAllTests() {
         }
       ]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Insights' }))
+    fireEvent.click(view.getByRole('link', { name: 'Insights' }))
     await view.findByText('Rollback rate')
     await view.findByText('Deployments: 10')
     await view.findByText('Rollbacks: 1')
@@ -515,10 +522,10 @@ export async function runAllTests() {
         }
       ]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Insights' }))
+    fireEvent.click(view.getByRole('link', { name: 'Insights' }))
     await view.findByText('Rollback rate')
     fireEvent.change(view.getByLabelText('Service'), { target: { value: 'payments-service' } })
     fireEvent.change(view.getByLabelText('Delivery group'), { target: { value: 'payments' } })
@@ -554,10 +561,10 @@ export async function runAllTests() {
       ],
       recipes: [{ id: 'default', name: 'Default Deploy' }]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     assert.ok(view.queryByText('No delivery group assigned.') === null)
@@ -588,10 +595,10 @@ export async function runAllTests() {
       }
       return baseFetch(url, options)
     }
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const versionSelect = view.container.querySelector('#deploy-version')
@@ -628,10 +635,10 @@ export async function runAllTests() {
       }
       return baseFetch(url, options)
     }
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const versionSelect = view.container.querySelector('#deploy-version')
@@ -668,10 +675,10 @@ export async function runAllTests() {
       preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded', failure_cause: 'POLICY_CHANGE' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const versionSelect = view.container.querySelector('#deploy-version')
@@ -708,10 +715,10 @@ export async function runAllTests() {
       deployResponse: { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const versionSelect = view.container.querySelector('#deploy-version')
@@ -750,10 +757,10 @@ export async function runAllTests() {
       recipes: [{ id: 'default', name: 'Default Deploy', status: 'deprecated' }],
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deploy' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     const changeInput = view.getByLabelText('Change summary')
@@ -794,10 +801,10 @@ export async function runAllTests() {
         { id: 'canary', name: 'Canary Deploy' }
       ]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     await view.findByText('Delivery groups')
     fireEvent.click(view.getByRole('button', { name: 'Create group' }))
     const idInput = await view.findByLabelText('Group id')
@@ -846,10 +853,10 @@ export async function runAllTests() {
         messages: [{ type: 'WARNING', field: 'services', message: 'No services selected; this group will be inert.' }]
       }
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'Create group' }))
     fireEvent.input(await view.findByLabelText('Group id'), { target: { value: 'warn-group' } })
     fireEvent.input(view.getByLabelText('Name'), { target: { value: 'Warn Group' } })
@@ -881,10 +888,10 @@ export async function runAllTests() {
         messages: [{ type: 'ERROR', field: 'guardrails', message: 'Invalid guardrail.' }]
       }
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'Create group' }))
     fireEvent.input(await view.findByLabelText('Group id'), { target: { value: 'error-group' } })
     fireEvent.input(view.getByLabelText('Name'), { target: { value: 'Error Group' } })
@@ -918,10 +925,10 @@ export async function runAllTests() {
       ],
       servicesList: [{ service_name: 'demo-service' }]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     await view.findByText('Delivery groups')
     fireEvent.click(view.getByRole('button', { name: 'Create group' }))
     const conflictId = await view.findByLabelText('Group id')
@@ -967,10 +974,10 @@ export async function runAllTests() {
       rollbackAllowed: true,
       timeline
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deployments' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deployments' }))
     await view.findByText('SUCCEEDED')
     fireEvent.click(view.getAllByRole('button', { name: 'Details' })[0])
     await view.findByText('Deployment detail')
@@ -1003,10 +1010,10 @@ export async function runAllTests() {
       rollbackAllowed: true,
       failures
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Deployments' }))
+    fireEvent.click(view.getByRole('link', { name: 'Deployments' }))
     await view.findByText('SUCCEEDED')
     fireEvent.click(view.getAllByRole('button', { name: 'Details' })[0])
     await view.findByText('Failures')
@@ -1027,10 +1034,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    fireEvent.click(view.getByRole('link', { name: 'Services' }))
     await view.findByText('demo-service')
     await view.findByText('SUCCEEDED')
   })
@@ -1045,10 +1052,10 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    fireEvent.click(view.getByRole('link', { name: 'Services' }))
     await view.findByText('demo-service')
     fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
     await view.findByText('Service detail')
@@ -1076,10 +1083,10 @@ export async function runAllTests() {
         }
       ]
     })
-    const view = render(<App />)
+    const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
-    fireEvent.click(view.getByRole('button', { name: 'Services' }))
+    fireEvent.click(view.getByRole('link', { name: 'Services' }))
     await view.findByText('demo-service')
     fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
     await view.findByText('Integrations')

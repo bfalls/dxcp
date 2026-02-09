@@ -7,9 +7,10 @@ export default function ServicesPage({
   servicesViewLoading,
   servicesViewError,
   loadServicesList,
-  setServiceDetailName,
   setServiceDetailTab,
-  setView,
+  navigateToService,
+  navigateToServices,
+  navigateToDeploy,
   statusClass,
   formatTime,
   serviceDetailName,
@@ -81,9 +82,7 @@ export default function ServicesPage({
                   key={row.name}
                   className="table-row button-row"
                   onClick={() => {
-                    setServiceDetailName(row.name)
-                    setServiceDetailTab('overview')
-                    setView('service')
+                    navigateToService(row.name)
                   }}
                 >
                   <div>{row.name}</div>
@@ -107,7 +106,7 @@ export default function ServicesPage({
           title="Service detail"
           subtitle={serviceDetailName || 'Unknown service'}
           actions={
-            <button className="button secondary" onClick={() => setView('services')}>
+            <button className="button secondary" onClick={navigateToServices}>
               Back to services
             </button>
           }
@@ -292,7 +291,7 @@ export default function ServicesPage({
             style={{ marginTop: '12px' }}
             onClick={() => {
               if (serviceDetailName) setService(serviceDetailName)
-              setView('deploy')
+              navigateToDeploy()
             }}
           >
             Go to Deploy

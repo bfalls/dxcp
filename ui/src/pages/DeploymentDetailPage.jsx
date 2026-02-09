@@ -24,13 +24,15 @@ export default function DeploymentDetailPage({
   rollbackResult,
   timelineSteps,
   failures,
-  renderFailures
+  renderFailures,
+  deploymentLoading
 }) {
   return (
     <div className="shell">
       <div className="card">
         <h2>Deployment detail</h2>
-        {!selected && <div className="helper">Select a deployment from the list.</div>}
+        {deploymentLoading && <div className="helper">Loading deployment detail...</div>}
+        {!deploymentLoading && !selected && <div className="helper">Select a deployment from the list.</div>}
         {selected && (
           <div>
             <div className={statusClass(selected.state)}>{selected.state}</div>

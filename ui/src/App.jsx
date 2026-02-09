@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
+import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { createApiClient } from './apiClient.js'
 import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
 import AppShell from './components/AppShell.jsx'
@@ -436,6 +437,18 @@ function formatAuditValue(by, at) {
   return `${who} at ${when}`
 }
 
+function resolveViewFromPath(pathname) {
+  if (matchPath('/deployments/:deploymentId', pathname)) return 'detail'
+  if (matchPath('/services/:serviceName', pathname)) return 'service'
+  if (pathname.startsWith('/deployments')) return 'deployments'
+  if (pathname.startsWith('/deploy')) return 'deploy'
+  if (pathname.startsWith('/insights')) return 'insights'
+  if (pathname.startsWith('/settings')) return 'settings'
+  if (pathname.startsWith('/admin')) return 'admin'
+  if (pathname.startsWith('/services')) return 'services'
+  return 'services'
+}
+
 
 function recipeStatusLabel(value) {
   const status = String(value || 'active').toLowerCase()
@@ -501,7 +514,6 @@ export default function App() {
   const [authAudience, setAuthAudience] = useState(AUTH0_AUDIENCE)
   const [apiBase, setApiBase] = useState(normalizeApiBase(DEFAULT_API_BASE))
   const [rolesClaim, setRolesClaim] = useState(ROLES_CLAIM)
-  const [view, setView] = useState('services')
   const [services, setServices] = useState([])
   const [service, setService] = useState('')
   const [version, setVersion] = useState('')
@@ -529,6 +541,7 @@ export default function App() {
   const [insights, setInsights] = useState(null)
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [insightsError, setInsightsError] = useState('')
+  const [deploymentDetailLoading, setDeploymentDetailLoading] = useState(false)
   const [insightsWindowDays, setInsightsWindowDays] = useState(INSIGHTS_WINDOW_DAYS)
   const [insightsGroupId, setInsightsGroupId] = useState('')
   const [insightsService, setInsightsService] = useState('')
@@ -592,6 +605,14 @@ export default function App() {
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentPath = location.pathname || '/'
+  const view = useMemo(() => resolveViewFromPath(currentPath), [currentPath])
+  const deploymentMatch = useMemo(() => matchPath('/deployments/:deploymentId', currentPath), [currentPath])
+  const deploymentId = deploymentMatch?.params?.deploymentId || ''
+  const serviceMatch = useMemo(() => matchPath('/services/:serviceName', currentPath), [currentPath])
+  const routeServiceName = serviceMatch?.params?.serviceName || ''
 
   const validVersion = useMemo(() => VERSION_RE.test(version), [version])
   const versionInList = useMemo(
@@ -1663,33 +1684,52 @@ export default function App() {
     await openDeployment(result)
   }
 
-  async function openDeployment(deployment) {
-    setSelected(null)
-    setFailures([])
-    setRollbackResult(null)
-    setTimeline([])
-    setErrorMessage('')
-    setErrorHeadline('')
-    setStatusMessage('')
-    try {
-      const detail = await api.get(`/deployments/${deployment.id}`)
-      if (detail && detail.code) {
-        setErrorHeadline('')
-        setErrorMessage(`${detail.code}: ${detail.message}`)
-        return
-      }
-      setSelected(detail)
-      const failureData = await api.get(`/deployments/${deployment.id}/failures`)
-      setFailures(Array.isArray(failureData) ? failureData : [])
-      const timelineData = await api.get(`/deployments/${deployment.id}/timeline`)
-      setTimeline(Array.isArray(timelineData) ? timelineData : [])
-      setView('detail')
-    } catch (err) {
-      if (isLoginRequiredError(err)) return
+  const loadDeploymentDetail = useCallback(
+    async (deploymentId) => {
+      if (!deploymentId) return
+      setDeploymentDetailLoading(true)
+      setSelected(null)
+      setFailures([])
+      setRollbackResult(null)
+      setTimeline([])
+      setErrorMessage('')
       setErrorHeadline('')
-      setErrorMessage('Failed to load deployment detail')
-    }
-  }
+      setStatusMessage('')
+      try {
+        const detail = await api.get(`/deployments/${deploymentId}`)
+        if (detail && detail.code) {
+          setErrorHeadline('')
+          setErrorMessage(`${detail.code}: ${detail.message}`)
+          return
+        }
+        setSelected(detail)
+        const failureData = await api.get(`/deployments/${deploymentId}/failures`)
+        setFailures(Array.isArray(failureData) ? failureData : [])
+        const timelineData = await api.get(`/deployments/${deploymentId}/timeline`)
+        setTimeline(Array.isArray(timelineData) ? timelineData : [])
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setErrorHeadline('')
+        setErrorMessage('Failed to load deployment detail')
+      } finally {
+        setDeploymentDetailLoading(false)
+      }
+    },
+    [api]
+  )
+
+  const openDeployment = useCallback(
+    (deployment) => {
+      if (!deployment?.id) return
+      setDeploymentDetailLoading(true)
+      setSelected(null)
+      setFailures([])
+      setRollbackResult(null)
+      setTimeline([])
+      navigate(`/deployments/${encodeURIComponent(deployment.id)}`)
+    },
+    [navigate]
+  )
 
   async function handleRollback() {
     if (!selected) return
@@ -1863,6 +1903,7 @@ export default function App() {
       setSelected(null)
       setFailures([])
       setTimeline([])
+      setDeploymentDetailLoading(false)
       setInsights(null)
         setServicesView([])
         setServicesViewError('')
@@ -2110,6 +2151,32 @@ export default function App() {
   }, [view, selected?.id, isAuthenticated, refreshIntervalSeconds, api])
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated) return
+    if (!deploymentId) {
+      setDeploymentDetailLoading(false)
+      return
+    }
+    loadDeploymentDetail(deploymentId)
+  }, [authReady, isAuthenticated, deploymentId, loadDeploymentDetail])
+
+  useEffect(() => {
+    if (view !== 'service') return
+    if (!routeServiceName) return
+    const decodedName = decodeURIComponent(routeServiceName)
+    if (decodedName !== serviceDetailName) {
+      setServiceDetailName(decodedName)
+      setServiceDetailTab('overview')
+    }
+  }, [view, routeServiceName, serviceDetailName])
+
+  useEffect(() => {
+    if (view === 'service') return
+    if (serviceDetailName) {
+      setServiceDetailName('')
+    }
+  }, [view, serviceDetailName])
+
+  useEffect(() => {
     if (!isAuthenticated || view !== 'insights') return
     if (!isPlatformAdmin && !insightsDefaultsApplied) return
     loadInsights()
@@ -2126,6 +2193,11 @@ export default function App() {
   }, [authReady, isAuthenticated, view, currentDeliveryGroup?.id, loadPolicyDeployments])
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated || view !== 'deployments') return
+    refreshDeployments()
+  }, [authReady, isAuthenticated, view, refreshDeployments])
+
+  useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'service' || !serviceDetailName) return
     loadServiceDetail(serviceDetailName)
   }, [authReady, isAuthenticated, view, serviceDetailName, loadServiceDetail])
@@ -2140,14 +2212,31 @@ export default function App() {
     serviceUrl = `${SERVICE_URL_BASE}/${selected.service}`
   }
 
+  const navigateToServices = useCallback(() => {
+    navigate('/services')
+  }, [navigate])
+
+  const navigateToService = useCallback(
+    (serviceName) => {
+      if (!serviceName) return
+      navigate(`/services/${encodeURIComponent(serviceName)}`)
+    },
+    [navigate]
+  )
+
+  const navigateToDeploy = useCallback(() => {
+    navigate('/deploy')
+  }, [navigate])
+
   const servicesPageProps = {
     servicesView,
     servicesViewLoading,
     servicesViewError,
     loadServicesList,
-    setServiceDetailName,
     setServiceDetailTab,
-    setView,
+    navigateToService,
+    navigateToServices,
+    navigateToDeploy,
     statusClass,
     formatTime,
     serviceDetailName,
@@ -2267,7 +2356,8 @@ export default function App() {
     rollbackResult,
     timelineSteps,
     failures,
-    renderFailures
+    renderFailures,
+    deploymentLoading: deploymentDetailLoading
   }
 
   const settingsPageProps = {
@@ -2353,10 +2443,6 @@ export default function App() {
 
   return (
     <AppShell
-      view={view}
-      setView={setView}
-      services={services}
-      loadServices={loadServices}
       refreshDeployments={refreshDeployments}
       loadInsights={loadInsights}
       user={user}
@@ -2387,134 +2473,122 @@ export default function App() {
         </div>
       )}
 
-      {authReady && isAuthenticated && view === 'services' && (
-        <ServicesPage mode="list" {...servicesPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'service' && (
-        <ServicesPage mode="detail" {...servicesPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'deploy' && (
-        <DeployPage {...deployPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'deployments' && (
-        <DeploymentsPage {...deploymentsPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'detail' && (
-        <DeploymentDetailPage {...deploymentDetailPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'insights' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Insights</h2>
-              <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
-                {insightsLoading ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-            <div className="row" style={{ marginTop: '12px' }}>
-              <div className="field">
-                <label htmlFor="insights-service">Service</label>
-                <select
-                  id="insights-service"
-                  value={insightsService}
-                  onChange={(e) => setInsightsService(e.target.value)}
-                >
-                  <option value="">All services</option>
-                  {sortedServiceNames.map((svc) => (
-                    <option key={svc} value={svc}>{svc}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="insights-group">Delivery group</label>
-                <select
-                  id="insights-group"
-                  value={insightsGroupId}
-                  onChange={(e) => setInsightsGroupId(e.target.value)}
-                >
-                  <option value="">All delivery groups</option>
-                  {deliveryGroups.map((group) => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="insights-window">Time window (days)</label>
-                <select
-                  id="insights-window"
-                  value={String(insightsWindowDays)}
-                  onChange={(e) => setInsightsWindowDays(Number(e.target.value))}
-                >
-                  {[7, 14, 30].map((value) => (
-                    <option key={value} value={value}>{value}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field" style={{ alignSelf: 'flex-end' }}>
-                <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
-                  Apply filters
-                </button>
-              </div>
-            </div>
-            {insightsError && <div className="helper" style={{ marginTop: '8px' }}>{insightsError}</div>}
-            {!insights && !insightsLoading && !insightsError && (
-              <div className="helper">No insights available for the selected filters.</div>
-            )}
-            {insights && (
-              <div className="list">
-                <div className="list-item">
-                  <div><strong>Rollback rate</strong></div>
-                  <div>{formatPercent(insights.rollbackRate)}</div>
-                  <div>Deployments: {insights.totalDeployments}</div>
-                  <div>Rollbacks: {insights.totalRollbacks}</div>
-                </div>
-                <div style={{ marginTop: '16px' }}>
-                  <strong>Top failure categories</strong>
-                  {insights.failuresByCategory?.length === 0 && <div className="helper">No failures in window.</div>}
-                  {insights.failuresByCategory?.map((item) => (
-                    <div className="list-item" key={item.key}>
-                      <div>{item.key}</div>
-                      <div>{item.count}</div>
+      {authReady && isAuthenticated && (
+        <Routes>
+          <Route path="/" element={<Navigate to="/services" replace />} />
+          <Route path="/services" element={<ServicesPage mode="list" {...servicesPageProps} />} />
+          <Route path="/services/:serviceName" element={<ServicesPage mode="detail" {...servicesPageProps} />} />
+          <Route path="/deploy" element={<DeployPage {...deployPageProps} />} />
+          <Route path="/deployments" element={<DeploymentsPage {...deploymentsPageProps} />} />
+          <Route path="/deployments/:deploymentId" element={<DeploymentDetailPage {...deploymentDetailPageProps} />} />
+          <Route
+            path="/insights"
+            element={
+              <div className="shell">
+                <div className="card" style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h2>Insights</h2>
+                    <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
+                      {insightsLoading ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                  </div>
+                  <div className="row" style={{ marginTop: '12px' }}>
+                    <div className="field">
+                      <label htmlFor="insights-service">Service</label>
+                      <select
+                        id="insights-service"
+                        value={insightsService}
+                        onChange={(e) => setInsightsService(e.target.value)}
+                      >
+                        <option value="">All services</option>
+                        {sortedServiceNames.map((svc) => (
+                          <option key={svc} value={svc}>{svc}</option>
+                        ))}
+                      </select>
                     </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '16px' }}>
-                  <strong>Deployments by recipe</strong>
-                  {insights.deploymentsByRecipe?.length === 0 && <div className="helper">No deployments in window.</div>}
-                  {insights.deploymentsByRecipe?.map((item) => (
-                    <div className="list-item" key={item.key}>
-                      <div>{item.key}</div>
-                      <div>{item.count}</div>
+                    <div className="field">
+                      <label htmlFor="insights-group">Delivery group</label>
+                      <select
+                        id="insights-group"
+                        value={insightsGroupId}
+                        onChange={(e) => setInsightsGroupId(e.target.value)}
+                      >
+                        <option value="">All delivery groups</option>
+                        {deliveryGroups.map((group) => (
+                          <option key={group.id} value={group.id}>{group.name}</option>
+                        ))}
+                      </select>
                     </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '16px' }}>
-                  <strong>Deployments by delivery group</strong>
-                  {insights.deploymentsByGroup?.length === 0 && <div className="helper">No deployments in window.</div>}
-                  {insights.deploymentsByGroup?.map((item) => (
-                    <div className="list-item" key={item.key}>
-                      <div>{item.key}</div>
-                      <div>{item.count}</div>
+                    <div className="field">
+                      <label htmlFor="insights-window">Time window (days)</label>
+                      <select
+                        id="insights-window"
+                        value={String(insightsWindowDays)}
+                        onChange={(e) => setInsightsWindowDays(Number(e.target.value))}
+                      >
+                        {[7, 14, 30].map((value) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
                     </div>
-                  ))}
+                    <div className="field" style={{ alignSelf: 'flex-end' }}>
+                      <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
+                        Apply filters
+                      </button>
+                    </div>
+                  </div>
+                  {insightsError && <div className="helper" style={{ marginTop: '8px' }}>{insightsError}</div>}
+                  {!insights && !insightsLoading && !insightsError && (
+                    <div className="helper">No insights available for the selected filters.</div>
+                  )}
+                  {insights && (
+                    <div className="list">
+                      <div className="list-item">
+                        <div><strong>Rollback rate</strong></div>
+                        <div>{formatPercent(insights.rollbackRate)}</div>
+                        <div>Deployments: {insights.totalDeployments}</div>
+                        <div>Rollbacks: {insights.totalRollbacks}</div>
+                      </div>
+                      <div style={{ marginTop: '16px' }}>
+                        <strong>Top failure categories</strong>
+                        {insights.failuresByCategory?.length === 0 && <div className="helper">No failures in window.</div>}
+                        {insights.failuresByCategory?.map((item) => (
+                          <div className="list-item" key={item.key}>
+                            <div>{item.key}</div>
+                            <div>{item.count}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: '16px' }}>
+                        <strong>Deployments by recipe</strong>
+                        {insights.deploymentsByRecipe?.length === 0 && <div className="helper">No deployments in window.</div>}
+                        {insights.deploymentsByRecipe?.map((item) => (
+                          <div className="list-item" key={item.key}>
+                            <div>{item.key}</div>
+                            <div>{item.count}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: '16px' }}>
+                        <strong>Deployments by delivery group</strong>
+                        {insights.deploymentsByGroup?.length === 0 && <div className="helper">No deployments in window.</div>}
+                        {insights.deploymentsByGroup?.map((item) => (
+                          <div className="list-item" key={item.key}>
+                            <div>{item.key}</div>
+                            <div>{item.count}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {authReady && isAuthenticated && view === 'settings' && (
-        <SettingsPage {...settingsPageProps} />
-      )}
-
-      {authReady && isAuthenticated && view === 'admin' && (
-        <AdminPage {...adminPageProps} />
+            }
+          />
+          <Route path="/settings" element={<SettingsPage {...settingsPageProps} />} />
+          <Route path="/admin" element={<AdminPage {...adminPageProps} />} />
+          <Route path="*" element={<Navigate to="/services" replace />} />
+        </Routes>
       )}
 
       <footer className="footer">

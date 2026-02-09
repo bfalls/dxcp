@@ -1,10 +1,7 @@
 import React from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 
 export default function AppShell({
-  view,
-  setView,
-  services,
-  loadServices,
   refreshDeployments,
   loadInsights,
   user,
@@ -16,6 +13,17 @@ export default function AppShell({
   currentDeliveryGroup,
   children
 }) {
+  const location = useLocation()
+  const onDeploymentsClick = () => {
+    if (location.pathname.startsWith('/deployments')) {
+      refreshDeployments()
+    }
+  }
+  const onInsightsClick = () => {
+    if (location.pathname.startsWith('/insights')) {
+      loadInsights()
+    }
+  }
   return (
     <div className="app">
       <header className="header">
@@ -51,53 +59,42 @@ export default function AppShell({
         </div>
         <nav className="nav">
           {/* Stable E2E selectors for primary navigation */}
-          <button
-            className={view === 'services' ? 'active' : ''}
+          <NavLink
+            className={({ isActive }) => (isActive ? 'active' : '')}
             data-testid="nav-services"
-            onClick={() => setView('services')}
+            to="/services"
           >
             Services
-          </button>
-          <button
-            className={view === 'deploy' ? 'active' : ''}
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => (isActive ? 'active' : '')}
             data-testid="nav-deploy"
-            onClick={() => setView('deploy')}
+            to="/deploy"
+            end
           >
             Deploy
-          </button>
-          <button
-            className={view === 'deployments' ? 'active' : ''}
-            onClick={() => {
-              setView('deployments')
-              refreshDeployments()
-            }}
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            to="/deployments"
+            onClick={onDeploymentsClick}
           >
             Deployments
-          </button>
-          <button
-            className={view === 'detail' ? 'active' : ''}
-            onClick={() => {
-              setView('detail')
-              if (services.length === 0) loadServices()
-            }}
-          >
-            Detail
-          </button>
-          <button
-            className={view === 'insights' ? 'active' : ''}
-            onClick={() => {
-              setView('insights')
-              loadInsights()
-            }}
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => (isActive ? 'active' : '')}
+            to="/insights"
+            end
+            onClick={onInsightsClick}
           >
             Insights
-          </button>
-          <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
+          </NavLink>
+          <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/settings" end>
             Settings
-          </button>
-          <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
+          </NavLink>
+          <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/admin" end>
             Admin
-          </button>
+          </NavLink>
         </nav>
       </header>
       {children}
