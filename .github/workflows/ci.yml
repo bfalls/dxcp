@@ -32,17 +32,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
+
       - name: Install UI dependencies
         run: |
           cd ui
-          npm install
           npm ci
+
+      - name: Install Playwright browsers + OS deps
+        run: |
+          cd ui
+          npx playwright install --with-deps
+
       - name: UI tests
         run: |
           cd ui
