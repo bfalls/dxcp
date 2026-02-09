@@ -6,7 +6,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-import rate_limit
 from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
