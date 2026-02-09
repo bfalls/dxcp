@@ -1868,6 +1868,8 @@ def rollback_deployment(
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
+    if deployment.get("rollbackOf") or deployment.get("deploymentKind") == "ROLLBACK":
+        return error_response(400, "ROLLBACK_OF_ROLLBACK", "Cannot roll back a rollback deployment")
 
     group, group_error = resolve_delivery_group(deployment["service"], actor)
     if group_error:
