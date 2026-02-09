@@ -28,6 +28,7 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +42,22 @@ jobs:
         run: |
           cd ui
           npm install
+          npm ci
       - name: UI tests
         run: |
           cd ui
           npm run test -- app:test
+
+      - name: UI E2E tests (Playwright)
+        env:
+          CI: "true"
+        run: |
+          cd ui
+          npm run e2e
+
+      - name: Upload Playwright report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: ui/playwright-report
