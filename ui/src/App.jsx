@@ -669,6 +669,11 @@ export default function App() {
   )
   const trimmedChangeSummary = useMemo(() => changeSummary.trim(), [changeSummary])
   const selectedRecipeNarrative = useMemo(() => strategyNarrative(selectedRecipe), [selectedRecipe])
+  const selectionKey = useMemo(
+    () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version }) : ''),
+    [service, recipeId, version]
+  )
+  const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
     canDeploy &&
@@ -1737,6 +1742,7 @@ export default function App() {
       }
       setPreflightResult(result)
       setPreflightStatus('ok')
+      setValidatedIntentKey(selectionKey)
       setDeployStep('confirm')
     } catch (err) {
       setPreflightStatus('error')
@@ -1935,18 +1941,27 @@ export default function App() {
         setPreflightError('')
         setPreflightErrorHeadline('')
       }
+      setValidatedIntentKey('')
       return
     }
     if (!service || !recipeId || !version) return
-    if (preflightStatus === 'checking') return
     if (deployStep === 'confirm') {
+      if (validatedIntentKey && validatedIntentKey === selectionKey) {
+        return
+      }
       setDeployStep('form')
+      setPreflightStatus('idle')
+      setPreflightResult(null)
+      setPreflightError('')
+      setPreflightErrorHeadline('')
+      setValidatedIntentKey('')
+      return
     }
     setPreflightStatus('idle')
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
-  }, [canRunPreflight, service, recipeId, version, deployStep, preflightStatus, preflightResult, preflightError])
+  }, [canRunPreflight, service, recipeId, version, deployStep, selectionKey, validatedIntentKey])
 
   useEffect(() => {
     if (!isAuthenticated || !service || !accessToken) return
@@ -2655,8 +2670,9 @@ export default function App() {
                     <div className="helper">sandbox (fixed)</div>
                   </div>
                 <div className="field">
-                  <label>Version</label>
+                  <label htmlFor="deploy-version">Version</label>
                   <select
+                    id="deploy-version"
                     value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
                     onChange={(e) => {
                       if (e.target.value === '__custom__') {
