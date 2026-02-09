@@ -837,7 +837,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [getRuntimeConfig])
 
   const ensureAuthClient = useCallback(async () => {
     if (authClient) return authClient
@@ -921,7 +921,7 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [])
+  }, [getRuntimeConfig])
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -941,7 +941,7 @@ export default function App() {
     }
   }, [authClient, isAuthenticated, authAudience])
 
-  async function refreshDeployments() {
+  const refreshDeployments = useCallback(async () => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
@@ -952,9 +952,37 @@ export default function App() {
       setErrorHeadline('')
       setErrorMessage('Failed to load deployments')
     }
-  }
+  }, [api])
 
-  async function loadServices() {
+  const loadAllowedActions = useCallback(async (serviceName) => {
+    if (!serviceName) return
+    setActionInfo((prev) => ({ ...prev, loading: true, error: '' }))
+    try {
+      const data = await api.get(`/services/${encodeURIComponent(serviceName)}/allowed-actions`)
+      if (data && data.code) {
+        setActionInfo({
+          actions: { view: true, deploy: false, rollback: false },
+          loading: false,
+          error: data.message || 'Access check failed'
+        })
+        return
+      }
+      setActionInfo({
+        actions: data?.actions || { view: true, deploy: false, rollback: false },
+        loading: false,
+        error: ''
+      })
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setActionInfo({
+        actions: { view: true, deploy: false, rollback: false },
+        loading: false,
+        error: 'Access check failed'
+      })
+    }
+  }, [api])
+
+  const loadServices = useCallback(async () => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
@@ -972,9 +1000,9 @@ export default function App() {
       setErrorHeadline('')
       setErrorMessage('Failed to load services')
     }
-  }
+  }, [api, service, loadAllowedActions])
 
-  async function loadRecipes() {
+  const loadRecipes = useCallback(async () => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
@@ -986,9 +1014,9 @@ export default function App() {
       setErrorHeadline('')
       setErrorMessage('Failed to load recipes')
     }
-  }
+  }, [api])
 
-  async function loadDeliveryGroups() {
+  const loadDeliveryGroups = useCallback(async () => {
     try {
       const data = await api.get('/delivery-groups')
       const list = Array.isArray(data) ? data : []
@@ -999,9 +1027,9 @@ export default function App() {
       setDeliveryGroups([])
     }
     return []
-  }
+  }, [api])
 
-  async function loadAuditEvents() {
+  const loadAuditEvents = useCallback(async () => {
     setAuditError('')
     setAuditLoading(true)
     try {
@@ -1013,9 +1041,9 @@ export default function App() {
     } finally {
       setAuditLoading(false)
     }
-  }
+  }, [api])
 
-  async function loadServicesList() {
+  const loadServicesList = useCallback(async () => {
     setServicesViewError('')
     setServicesViewLoading(true)
     try {
@@ -1048,9 +1076,9 @@ export default function App() {
     } finally {
       setServicesViewLoading(false)
     }
-  }
+  }, [api, deliveryGroups, loadDeliveryGroups])
 
-  async function loadServiceDetail(serviceName) {
+  const loadServiceDetail = useCallback(async (serviceName) => {
     if (!serviceName) return
     setServiceDetailError('')
     setServiceDetailLoading(true)
@@ -1078,9 +1106,9 @@ export default function App() {
     } finally {
       setServiceDetailLoading(false)
     }
-  }
+  }, [api])
 
-  async function loadPublicSettings() {
+  const loadPublicSettings = useCallback(async () => {
     try {
       const data = await api.get('/settings/public')
       if (!data || data.code) return
@@ -1092,9 +1120,9 @@ export default function App() {
     } catch (err) {
       if (isLoginRequiredError(err)) return
     }
-  }
+  }, [api])
 
-  async function loadAdminSettings() {
+  const loadAdminSettings = useCallback(async () => {
     try {
       const data = await api.get('/settings/admin')
       if (!data || data.code) return
@@ -1109,37 +1137,9 @@ export default function App() {
       if (isLoginRequiredError(err)) return
       setAdminSettings(null)
     }
-  }
+  }, [api])
 
-  async function loadAllowedActions(serviceName) {
-    if (!serviceName) return
-    setActionInfo((prev) => ({ ...prev, loading: true, error: '' }))
-    try {
-      const data = await api.get(`/services/${encodeURIComponent(serviceName)}/allowed-actions`)
-      if (data && data.code) {
-        setActionInfo({
-          actions: { view: true, deploy: false, rollback: false },
-          loading: false,
-          error: data.message || 'Access check failed'
-        })
-        return
-      }
-      setActionInfo({
-        actions: data?.actions || { view: true, deploy: false, rollback: false },
-        loading: false,
-        error: ''
-      })
-    } catch (err) {
-      if (isLoginRequiredError(err)) return
-      setActionInfo({
-        actions: { view: true, deploy: false, rollback: false },
-        loading: false,
-        error: 'Access check failed'
-      })
-    }
-  }
-
-  async function loadPolicyDeployments() {
+  const loadPolicyDeployments = useCallback(async () => {
     setPolicyDeploymentsError('')
     setPolicyDeploymentsLoading(true)
     try {
@@ -1152,7 +1152,7 @@ export default function App() {
     } finally {
       setPolicyDeploymentsLoading(false)
     }
-  }
+  }, [api])
 
   function startAdminGroupCreate() {
     setAdminGroupMode('create')
@@ -1527,7 +1527,7 @@ export default function App() {
     )
   }
 
-  async function loadVersions(refresh = false) {
+  const loadVersions = useCallback(async (refresh = false) => {
     if (!service) return
     if (refresh) {
       setVersionsRefreshing(true)
@@ -1550,7 +1550,7 @@ export default function App() {
         setVersionsLoading(false)
       }
     }
-  }
+  }, [api, service])
 
   async function refreshData() {
     setRefreshing(true)
@@ -1559,7 +1559,7 @@ export default function App() {
     setRefreshing(false)
   }
 
-  async function loadInsights() {
+  const loadInsights = useCallback(async () => {
     setErrorMessage('')
     setErrorHeadline('')
     setInsightsError('')
@@ -1585,7 +1585,7 @@ export default function App() {
     } finally {
       setInsightsLoading(false)
     }
-  }
+  }, [api, insightsWindowDays, insightsGroupId, insightsService])
 
   async function handleDeploy() {
     setErrorMessage('')
@@ -1756,7 +1756,7 @@ export default function App() {
     loadServices()
     loadRecipes()
     loadDeliveryGroups()
-  }, [authReady, isAuthenticated])
+  }, [authReady, isAuthenticated, loadServices, loadRecipes, loadDeliveryGroups])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || !isPlatformAdmin) {
@@ -1768,7 +1768,7 @@ export default function App() {
     if (view === 'admin' && adminTab === 'audit') {
       loadAuditEvents()
     }
-  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab])
+  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadAuditEvents])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
@@ -1778,7 +1778,7 @@ export default function App() {
     } else {
       setAdminSettings(null)
     }
-  }, [authReady, isAuthenticated, isPlatformAdmin])
+  }, [authReady, isAuthenticated, isPlatformAdmin, loadPublicSettings, loadAdminSettings])
 
   useEffect(() => {
     if (isPlatformAdmin) return
@@ -1923,7 +1923,7 @@ export default function App() {
       loadVersions()
       loadAllowedActions(service)
     }
-  }, [service, isAuthenticated, accessToken])
+  }, [service, isAuthenticated, accessToken, loadVersions, loadAllowedActions])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -1935,12 +1935,10 @@ export default function App() {
 
   useEffect(() => {
     if (!canRunPreflight) {
-      if (preflightStatus !== 'idle' || preflightResult || preflightError) {
-        setPreflightStatus('idle')
-        setPreflightResult(null)
-        setPreflightError('')
-        setPreflightErrorHeadline('')
-      }
+      setPreflightStatus('idle')
+      setPreflightResult(null)
+      setPreflightError('')
+      setPreflightErrorHeadline('')
       setValidatedIntentKey('')
       return
     }
@@ -1961,14 +1959,22 @@ export default function App() {
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
-  }, [canRunPreflight, service, recipeId, version, deployStep, selectionKey, validatedIntentKey])
+  }, [
+    canRunPreflight,
+    service,
+    recipeId,
+    version,
+    deployStep,
+    selectionKey,
+    validatedIntentKey
+  ])
 
   useEffect(() => {
     if (!isAuthenticated || !service || !accessToken) return
     if (actionInfo.loading) {
       loadAllowedActions(service)
     }
-  }, [accessToken, actionInfo.loading, isAuthenticated, service])
+  }, [accessToken, actionInfo.loading, isAuthenticated, service, loadAllowedActions])
 
   useEffect(() => {
     if (!isPlatformAdmin) return
@@ -1978,7 +1984,7 @@ export default function App() {
     } else if (!adminGroupId) {
       setAdminGroupDraft(buildGroupDraft(null, adminGuardrailDefaults))
     }
-  }, [isPlatformAdmin, activeAdminGroup, adminGroupId, adminGroupMode])
+  }, [isPlatformAdmin, activeAdminGroup, adminGroupId, adminGroupMode, adminGuardrailDefaults])
 
   useEffect(() => {
     if (!isPlatformAdmin) return
@@ -2053,7 +2059,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [view, service, isAuthenticated, refreshIntervalSeconds])
+  }, [view, service, isAuthenticated, refreshIntervalSeconds, loadVersions])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'detail' || !selected?.id) return undefined
@@ -2093,28 +2099,28 @@ export default function App() {
         document.removeEventListener('visibilitychange', onVisibility)
       }
     }
-  }, [view, selected?.id, isAuthenticated, refreshIntervalSeconds])
+  }, [view, selected?.id, isAuthenticated, refreshIntervalSeconds, api])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'insights') return
     if (!isPlatformAdmin && !insightsDefaultsApplied) return
     loadInsights()
-  }, [view, isAuthenticated, insightsDefaultsApplied, isPlatformAdmin])
+  }, [view, isAuthenticated, insightsDefaultsApplied, isPlatformAdmin, loadInsights])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'services') return
     loadServicesList()
-  }, [authReady, isAuthenticated, view])
+  }, [authReady, isAuthenticated, view, loadServicesList])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'deploy') return
     loadPolicyDeployments()
-  }, [authReady, isAuthenticated, view, currentDeliveryGroup?.id])
+  }, [authReady, isAuthenticated, view, currentDeliveryGroup?.id, loadPolicyDeployments])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'service' || !serviceDetailName) return
     loadServiceDetail(serviceDetailName)
-  }, [authReady, isAuthenticated, view, serviceDetailName])
+  }, [authReady, isAuthenticated, view, serviceDetailName, loadServiceDetail])
 
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
@@ -2160,10 +2166,19 @@ export default function App() {
           )}
         </div>
         <nav className="nav">
-          <button className={view === 'services' ? 'active' : ''} onClick={() => setView('services')}>
+          {/* Stable E2E selectors for primary navigation */}
+          <button
+            className={view === 'services' ? 'active' : ''}
+            data-testid="nav-services"
+            onClick={() => setView('services')}
+          >
             Services
           </button>
-          <button className={view === 'deploy' ? 'active' : ''} onClick={() => setView('deploy')}>
+          <button
+            className={view === 'deploy' ? 'active' : ''}
+            data-testid="nav-deploy"
+            onClick={() => setView('deploy')}
+          >
             Deploy
           </button>
           <button
@@ -2590,9 +2605,11 @@ export default function App() {
             </div>
             {deployStep === 'form' && (
               <>
+                {/* Stable E2E selectors for deploy flow inputs */}
                 <div className="field">
                   <label>Deployable service</label>
                   <select
+                    data-testid="deploy-service-select"
                     value={service}
                     onFocus={() => {
                       if (services.length === 0) loadServices()
@@ -2611,7 +2628,7 @@ export default function App() {
                   </select>
                   <div className="helper">Services are allowlisted and scoped by delivery group policy.</div>
                 </div>
-                <div className="field">
+                <div className="field" data-testid="deploy-recipe-select">
                   <label>Strategy recipe</label>
                   <div className="helper">Recipes must be compatible with the service and allowed by the delivery group.</div>
                   {!currentDeliveryGroup && <div className="helper">No delivery group assigned.</div>}
@@ -2673,6 +2690,7 @@ export default function App() {
                   <label htmlFor="deploy-version">Version</label>
                   <select
                     id="deploy-version"
+                    data-testid="deploy-version-select"
                     value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
                     onChange={(e) => {
                       if (e.target.value === '__custom__') {
@@ -2735,6 +2753,7 @@ export default function App() {
                   <label htmlFor="change-summary">Change summary</label>
                   <input
                     id="change-summary"
+                    data-testid="deploy-change-summary"
                     value={changeSummary}
                     onChange={(e) => {
                       setChangeSummary(e.target.value)
@@ -2796,6 +2815,7 @@ export default function App() {
                 )}
                 <button
                   className="button"
+                  data-testid="deploy-review-button"
                   onClick={handleReviewDeploy}
                   disabled={!canReviewDeploy || preflightStatus === 'checking'}
                   title={!canDeploy ? deployDisabledReason : ''}
@@ -2887,7 +2907,12 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button className="button" onClick={handleDeploy} disabled={!canReviewDeploy}>
+                  <button
+                    className="button"
+                    data-testid="deploy-confirm-button"
+                    onClick={handleDeploy}
+                    disabled={!canReviewDeploy}
+                  >
                     Confirm deploy
                   </button>
                   <button className="button secondary" onClick={() => setDeployStep('form')}>
@@ -2995,10 +3020,11 @@ export default function App() {
               <h2>Recent deployments</h2>
               <button className="button secondary" onClick={refreshDeployments}>Refresh</button>
             </div>
-            <div className="list">
+            {/* Stable E2E selectors for deployment history list */}
+            <div className="list" data-testid="deployment-list">
               {deployments.length === 0 && <div className="helper">No deployments yet.</div>}
               {deployments.map((d) => (
-                <div className="list-item" key={d.id}>
+                <div className="list-item" data-testid="deployment-item" key={d.id}>
                   <div className={statusClass(d.state)}>{d.state}</div>
                   <div>{d.service}</div>
                   <div>{d.version}</div>

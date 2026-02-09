@@ -34,7 +34,7 @@ export function loadUserSettings(key) {
     const refresh = Number(data.refresh_interval_seconds)
     if (!Number.isFinite(refresh) || refresh <= 0) return null
     return { refresh_interval_seconds: Math.floor(refresh) }
-  } catch (err) {
+  } catch {
     return null
   }
 }

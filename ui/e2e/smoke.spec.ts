@@ -7,6 +7,6 @@ test("smoke: DXCP loads", async ({ page }) => {
   await expect(page).toHaveTitle(/DXCP/i);
 
   // Assert a stable, always-present nav/tab
-  await expect(page.getByRole("button", { name: /^Services$/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Deploy$/i })).toBeVisible();
+  await expect(page.getByTestId("nav-services")).toBeVisible();
+  await expect(page.getByTestId("nav-deploy")).toBeVisible();
 });
