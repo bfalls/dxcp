@@ -1,0 +1,481 @@
+import React from 'react'
+import PageHeader from '../components/PageHeader.jsx'
+
+export default function DeployPage({
+  refreshData,
+  refreshing,
+  deployStep,
+  service,
+  services,
+  loadServices,
+  setService,
+  setDeployStep,
+  currentDeliveryGroup,
+  filteredRecipes,
+  recipeId,
+  setRecipeId,
+  setRecipeAutoApplied,
+  selectedRecipe,
+  recipeAutoApplied,
+  selectedRecipeDeprecated,
+  versionMode,
+  version,
+  setVersion,
+  setVersionMode,
+  setVersionSelection,
+  setVersionAutoApplied,
+  versions,
+  versionsLoading,
+  versionsRefreshing,
+  versionsError,
+  validVersion,
+  versionAutoApplied,
+  versionUnverifiable,
+  changeSummary,
+  setChangeSummary,
+  preflightResult,
+  preflightStatus,
+  preflightError,
+  preflightErrorHeadline,
+  debugDeployGatesEnabled,
+  canDeploy,
+  canRunPreflight,
+  deployDisabledReason,
+  canReviewDeploy,
+  handleReviewDeploy,
+  statusMessage,
+  deployInlineMessage,
+  deployInlineHeadline,
+  selectedRecipeNarrative,
+  policyQuotaStats,
+  handleDeploy,
+  policyDeploymentsLoading,
+  policyDeploymentsError,
+  deployResult,
+  statusClass,
+  isPlatformAdmin,
+  openDeployment,
+  versionVerified,
+  trimmedChangeSummary
+}) {
+  return (
+    <div className="shell">
+      <div className="card">
+        <PageHeader
+          title="Deploy intent"
+          actions={
+            <button className="button secondary" onClick={refreshData} disabled={refreshing}>
+              {refreshing ? 'Refreshing...' : 'Refresh data'}
+            </button>
+          }
+        />
+        {deployStep === 'form' && (
+          <>
+            {/* Stable E2E selectors for deploy flow inputs */}
+            <div className="field">
+              <label>Deployable service</label>
+              <select
+                data-testid="deploy-service-select"
+                value={service}
+                onFocus={() => {
+                  if (services.length === 0) loadServices()
+                }}
+                onChange={(e) => {
+                  setService(e.target.value)
+                  setDeployStep('form')
+                }}
+              >
+                {services.length === 0 && <option value="">No deployable services</option>}
+                {services.map((svc) => (
+                  <option key={svc.service_name} value={svc.service_name}>
+                    {svc.service_name}
+                  </option>
+                ))}
+              </select>
+              <div className="helper">Services are allowlisted and scoped by delivery group policy.</div>
+            </div>
+            <div className="field" data-testid="deploy-recipe-select">
+              <label>Strategy recipe</label>
+              <div className="helper">Recipes must be compatible with the service and allowed by the delivery group.</div>
+              {!currentDeliveryGroup && <div className="helper">No delivery group assigned.</div>}
+              {currentDeliveryGroup && filteredRecipes.length === 0 && (
+                <div className="helper">No compatible recipes are allowed for this service.</div>
+              )}
+              {filteredRecipes.length > 0 && (
+                <div className="list" style={{ marginTop: '8px' }}>
+                  {filteredRecipes.map((recipe) => {
+                    const revision = recipe.recipe_revision ?? 1
+                    const isSelected = recipeId === recipe.id
+                    return (
+                      <label className="list-item recipe-choice" key={recipe.id}>
+                        <input
+                          type="radio"
+                          name="deploy-recipe"
+                          value={recipe.id}
+                          checked={isSelected}
+                          onChange={(e) => {
+                            setRecipeId(e.target.value)
+                            setRecipeAutoApplied(false)
+                            setDeployStep('form')
+                          }}
+                        />
+                        <div>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                            <strong>{recipe.name || recipe.id}</strong>
+                            <span className="helper">v{revision}</span>
+                            {recipe.status === 'deprecated' && <span className="helper">Deprecated</span>}
+                          </div>
+                          <div className="helper">
+                            {recipe.effective_behavior_summary || 'No behavior summary provided.'}
+                          </div>
+                        </div>
+                        <div className="helper" style={{ textAlign: 'right' }}>
+                          {recipe.description || 'Strategy recipe'}
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+              {recipeAutoApplied && selectedRecipe && (
+                <div className="helper">Default applied (only option): {selectedRecipe.name || selectedRecipe.id}</div>
+              )}
+              {filteredRecipes.length > 1 && !recipeId && (
+                <div className="helper">Select a strategy to continue.</div>
+              )}
+              {selectedRecipeDeprecated && (
+                <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
+              )}
+            </div>
+            <div className="row">
+              <div className="field">
+                <label>Environment</label>
+                <div className="helper">sandbox (fixed)</div>
+              </div>
+              <div className="field">
+                <label htmlFor="deploy-version">Version</label>
+                <select
+                  id="deploy-version"
+                  data-testid="deploy-version-select"
+                  value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setVersionMode('custom')
+                      setVersionSelection('user')
+                      setVersionAutoApplied(false)
+                      setDeployStep('form')
+                    } else if (e.target.value === '__select__') {
+                      setVersionMode('auto')
+                      setVersion('')
+                      setVersionSelection('none')
+                      setVersionAutoApplied(false)
+                      setDeployStep('form')
+                    } else {
+                      setVersionMode('auto')
+                      setVersion(e.target.value)
+                      setVersionSelection('user')
+                      setVersionAutoApplied(false)
+                      setDeployStep('form')
+                    }
+                  }}
+                >
+                  <option value="__select__">Select discovered version</option>
+                  {versions.map((item) => (
+                    <option key={item.version} value={item.version}>
+                      {item.version}
+                    </option>
+                  ))}
+                  <option value="__custom__">Custom (registered)</option>
+                </select>
+                {versionMode === 'custom' && (
+                  <input
+                    style={{ marginTop: '8px' }}
+                    value={version}
+                    onChange={(e) => {
+                      setVersion(e.target.value)
+                      setVersionSelection('user')
+                      setVersionAutoApplied(false)
+                      setDeployStep('form')
+                    }}
+                    placeholder="Enter a registered version"
+                  />
+                )}
+                <div className="helper">
+                  Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
+                </div>
+                {versionAutoApplied && version && <div className="helper">Default applied: {version}</div>}
+                {versionsLoading && <div className="helper">Loading versions...</div>}
+                {versionsRefreshing && <div className="helper">Refreshing versions...</div>}
+                {versionsError && <div className="helper">{versionsError}</div>}
+                {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
+                  <div className="helper">Latest discovered: {versions[0].version}</div>
+                )}
+                {versionMode === 'custom' && versionUnverifiable && (
+                  <div className="helper">Custom versions must already be registered and discoverable.</div>
+                )}
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="change-summary">Change summary</label>
+              <input
+                id="change-summary"
+                data-testid="deploy-change-summary"
+                value={changeSummary}
+                onChange={(e) => {
+                  setChangeSummary(e.target.value)
+                  setDeployStep('form')
+                }}
+                onInput={(e) => {
+                  setChangeSummary(e.target.value)
+                  setDeployStep('form')
+                }}
+              />
+              {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
+            </div>
+            <div className="helper" style={{ marginTop: '12px' }}>Policy checks</div>
+            <div className="list" style={{ marginTop: '8px' }}>
+              <div className="list-item admin-detail">
+                <div>Deploys remaining today</div>
+                <div>{preflightResult?.policy?.deployments_remaining ?? '-'}</div>
+                <div />
+              </div>
+              <div className="list-item admin-detail">
+                <div>Concurrent deployments</div>
+                <div>
+                  {preflightResult?.policy
+                    ? `${preflightResult.policy.current_concurrent_deployments} / ${preflightResult.policy.max_concurrent_deployments}`
+                    : '-'}
+                </div>
+                <div />
+              </div>
+              <div className="list-item admin-detail">
+                <div>Version status</div>
+                <div>{preflightResult?.versionRegistered ? 'Registered' : '-'}</div>
+                <div />
+              </div>
+            </div>
+            {preflightStatus === 'checking' && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Checking policy and guardrails...
+              </div>
+            )}
+            {preflightStatus === 'error' && preflightError && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                {preflightErrorHeadline && <strong>{preflightErrorHeadline}. </strong>}
+                {preflightError}
+              </div>
+            )}
+            {debugDeployGatesEnabled && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Deploy gates:{' '}
+                {[
+                  `canDeploy=${String(canDeploy)}`,
+                  `canRunPreflight=${String(canRunPreflight)}`,
+                  `preflightStatus=${preflightStatus}`,
+                  `validVersion=${String(validVersion)}`,
+                  `versionVerified=${String(versionVerified)}`,
+                  `recipeId=${recipeId || '-'}`,
+                  `changeSummary=${trimmedChangeSummary ? 'set' : 'empty'}`
+                ].join(', ')}
+              </div>
+            )}
+            <button
+              className="button"
+              data-testid="deploy-review-button"
+              onClick={handleReviewDeploy}
+              disabled={!canReviewDeploy || preflightStatus === 'checking'}
+              title={!canDeploy ? deployDisabledReason : ''}
+            >
+              {preflightStatus === 'checking' ? 'Checking policy...' : 'Review deploy'}
+            </button>
+            {!canDeploy && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Deploy disabled. {deployDisabledReason}
+              </div>
+            )}
+            {canDeploy && !changeSummary.trim() && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Change summary is required.
+              </div>
+            )}
+            {versionUnverifiable && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                Custom versions must match a registered build before you can deploy.
+              </div>
+            )}
+            {deployInlineMessage && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
+                {deployInlineMessage}
+              </div>
+            )}
+            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+          </>
+        )}
+        {deployStep === 'confirm' && (
+          <>
+            <h3>Confirm deploy</h3>
+            <div className="list" style={{ marginTop: '12px' }}>
+              <div className="list-item">
+                <div>Service</div>
+                <div>{service || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Recipe</div>
+                <div>{selectedRecipe?.name || selectedRecipe?.id || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Recipe revision</div>
+                <div>{selectedRecipe?.recipe_revision ? `v${selectedRecipe.recipe_revision}` : '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Behavior summary</div>
+                <div>{selectedRecipe?.effective_behavior_summary || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Success means</div>
+                <div>{selectedRecipeNarrative.success}</div>
+              </div>
+              <div className="list-item">
+                <div>Rollback means</div>
+                <div>{selectedRecipeNarrative.rollback}</div>
+              </div>
+              <div className="list-item">
+                <div>Version</div>
+                <div>{version || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Environment</div>
+                <div>sandbox</div>
+              </div>
+            </div>
+            <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+            <div className="list">
+              <div className="list-item">
+                <div>Max concurrent deployments</div>
+                <div>{currentDeliveryGroup?.guardrails?.max_concurrent_deployments || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Daily deploy quota</div>
+                <div>{currentDeliveryGroup?.guardrails?.daily_deploy_quota || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Deploys remaining today</div>
+                <div>
+                  {currentDeliveryGroup?.guardrails?.daily_deploy_quota
+                    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+                    : '-'}
+                </div>
+              </div>
+              <div className="list-item">
+                <div>Daily rollback quota</div>
+                <div>{currentDeliveryGroup?.guardrails?.daily_rollback_quota || '-'}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button
+                className="button"
+                data-testid="deploy-confirm-button"
+                onClick={handleDeploy}
+                disabled={!canReviewDeploy}
+              >
+                Confirm deploy
+              </button>
+              <button className="button secondary" onClick={() => setDeployStep('form')}>
+                Back to edit
+              </button>
+            </div>
+            {deployInlineMessage && (
+              <div className="helper" style={{ marginTop: '8px' }}>
+                {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
+                {deployInlineMessage}
+              </div>
+            )}
+            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+          </>
+        )}
+      </div>
+      <div className="card">
+        <h2>Policy context</h2>
+        {!currentDeliveryGroup && <div className="helper">Service is not assigned to a delivery group.</div>}
+        {currentDeliveryGroup && (
+          <>
+            <div className="list">
+              <div className="list-item">
+                <div>Delivery group</div>
+                <div>{currentDeliveryGroup.name}</div>
+              </div>
+              <div className="list-item">
+                <div>Owner</div>
+                <div>{currentDeliveryGroup.owner || 'Unassigned'}</div>
+              </div>
+            </div>
+            <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+            <div className="list">
+              <div className="list-item">
+                <div>Max concurrent deployments</div>
+                <div>{currentDeliveryGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Daily deploy quota</div>
+                <div>{currentDeliveryGroup.guardrails?.daily_deploy_quota || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Deploys remaining today</div>
+                <div>
+                  {currentDeliveryGroup.guardrails?.daily_deploy_quota
+                    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+                    : '-'}
+                </div>
+              </div>
+              <div className="list-item">
+                <div>Daily rollback quota</div>
+                <div>{currentDeliveryGroup.guardrails?.daily_rollback_quota || '-'}</div>
+              </div>
+              <div className="list-item">
+                <div>Rollbacks remaining today</div>
+                <div>
+                  {currentDeliveryGroup.guardrails?.daily_rollback_quota
+                    ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
+                    : '-'}
+                </div>
+              </div>
+            </div>
+            {policyDeploymentsLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading quota usage...</div>}
+            {policyDeploymentsError && <div className="helper" style={{ marginTop: '8px' }}>{policyDeploymentsError}</div>}
+            <div className="helper" style={{ marginTop: '12px' }}>Recipe</div>
+            <div className="list">
+              <div className="list-item">
+                <div>Selected</div>
+                <div>{selectedRecipe?.name || 'None'}</div>
+              </div>
+              <div className="list-item">
+                <div>Description</div>
+                <div>{selectedRecipe?.description || 'No description'}</div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <h2>Latest deployment</h2>
+        {deployResult ? (
+          <div>
+            <div className={statusClass(deployResult.state)}>{deployResult.state}</div>
+            <p>Service: {deployResult.service}</p>
+            <p>Version: {deployResult.version}</p>
+            <p>Deployment id: {deployResult.id}</p>
+            {isPlatformAdmin && deployResult.engineExecutionId && (
+              <p>Execution id: {deployResult.engineExecutionId}</p>
+            )}
+            <button className="button secondary" onClick={() => openDeployment(deployResult)}>
+              View detail
+            </button>
+          </div>
+        ) : (
+          <div className="helper">No deployment created yet.</div>
+        )}
+      </div>
+    </div>
+  )
+}

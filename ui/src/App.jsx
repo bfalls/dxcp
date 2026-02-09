@@ -2,6 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { createApiClient } from './apiClient.js'
 import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
+import AppShell from './components/AppShell.jsx'
+import AlertRail from './components/AlertRail.jsx'
+import ServicesPage from './pages/ServicesPage.jsx'
+import DeployPage from './pages/DeployPage.jsx'
+import DeploymentsPage from './pages/DeploymentsPage.jsx'
+import DeploymentDetailPage from './pages/DeploymentDetailPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
+import AdminPage from './pages/AdminPage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -2132,105 +2140,234 @@ export default function App() {
     serviceUrl = `${SERVICE_URL_BASE}/${selected.service}`
   }
 
+  const servicesPageProps = {
+    servicesView,
+    servicesViewLoading,
+    servicesViewError,
+    loadServicesList,
+    setServiceDetailName,
+    setServiceDetailTab,
+    setView,
+    statusClass,
+    formatTime,
+    serviceDetailName,
+    serviceDetailTab,
+    serviceDetailError,
+    serviceDetailLoading,
+    serviceDetailRunning,
+    serviceDetailLatest,
+    serviceDetailGroup,
+    serviceDetailFailures,
+    serviceDetailHistory,
+    serviceDetailStatus,
+    backstageEntityRef,
+    backstageEntityUrl,
+    isPlatformAdmin,
+    openDeployment,
+    deploymentKindLabel,
+    shortId,
+    outcomeTone,
+    outcomeLabel,
+    outcomeDisplayLabel,
+    resolveDeploymentKind,
+    resolveOutcome,
+    getRecipeDisplay,
+    getRollbackIdFor,
+    renderFailures,
+    setService
+  }
+
+  const deployPageProps = {
+    refreshData,
+    refreshing,
+    deployStep,
+    service,
+    services,
+    loadServices,
+    setService,
+    setDeployStep,
+    currentDeliveryGroup,
+    filteredRecipes,
+    recipeId,
+    setRecipeId,
+    setRecipeAutoApplied,
+    selectedRecipe,
+    recipeAutoApplied,
+    selectedRecipeDeprecated,
+    versionMode,
+    version,
+    setVersion,
+    setVersionMode,
+    setVersionSelection,
+    setVersionAutoApplied,
+    versions,
+    versionsLoading,
+    versionsRefreshing,
+    versionsError,
+    validVersion,
+    versionAutoApplied,
+    versionUnverifiable,
+    changeSummary,
+    setChangeSummary,
+    preflightResult,
+    preflightStatus,
+    preflightError,
+    preflightErrorHeadline,
+    debugDeployGatesEnabled,
+    canDeploy,
+    canRunPreflight,
+    deployDisabledReason,
+    canReviewDeploy,
+    handleReviewDeploy,
+    statusMessage,
+    deployInlineMessage,
+    deployInlineHeadline,
+    selectedRecipeNarrative,
+    policyQuotaStats,
+    handleDeploy,
+    policyDeploymentsLoading,
+    policyDeploymentsError,
+    deployResult,
+    statusClass,
+    isPlatformAdmin,
+    openDeployment,
+    versionVerified,
+    trimmedChangeSummary
+  }
+
+  const deploymentsPageProps = {
+    deployments,
+    refreshDeployments,
+    openDeployment,
+    statusClass,
+    formatTime
+  }
+
+  const deploymentDetailPageProps = {
+    selected,
+    statusClass,
+    statusMessage,
+    selectedValidatedAt,
+    selectedExecutionAt,
+    outcomeTone,
+    outcomeDisplayLabel,
+    resolveDeploymentKind,
+    resolveOutcome,
+    selectedRollbackId,
+    shortId,
+    openDeployment,
+    deploymentKindLabel,
+    getRecipeDisplay,
+    formatTime,
+    serviceUrl,
+    isPlatformAdmin,
+    handleRollback,
+    canRollback,
+    rollbackDisabledReason,
+    rollbackResult,
+    timelineSteps,
+    failures,
+    renderFailures
+  }
+
+  const settingsPageProps = {
+    minRefreshSeconds,
+    maxRefreshSeconds,
+    refreshMinutesInput,
+    handleRefreshMinutesChange,
+    userSettingsKey,
+    defaultRefreshSeconds,
+    refreshInputError,
+    refreshClampNote,
+    refreshIntervalMinutes,
+    isPlatformAdmin,
+    adminSettings
+  }
+
+  const adminPageProps = {
+    adminReadOnly,
+    adminTab,
+    setAdminTab,
+    isPlatformAdmin,
+    startAdminGroupCreate,
+    deliveryGroups,
+    summarizeGuardrails,
+    setAdminGroupMode,
+    setAdminGroupId,
+    setAdminGroupError,
+    setAdminGroupNote,
+    startAdminGroupEdit,
+    adminGroupMode,
+    activeAdminGroup,
+    formatAuditValue,
+    getRecipeLabel,
+    adminGroupDraft,
+    handleAdminGroupDraftChange,
+    adminGroupSaving,
+    validateAdminGroupDraft,
+    adminGroupValidation,
+    adminGroupConfirmWarning,
+    setAdminGroupConfirmWarning,
+    sortedServiceNames,
+    toggleAdminGroupService,
+    sortedRecipes,
+    toggleAdminGroupRecipe,
+    handleAdminGuardrailChange,
+    adminSettings,
+    adminServiceDiff,
+    adminRecipeDiff,
+    adminServiceConflicts,
+    adminGroupError,
+    adminGroupNote,
+    saveAdminGroup,
+    buildGroupDraft,
+    adminGuardrailDefaults,
+    startAdminRecipeCreate,
+    recipes,
+    recipeUsageCounts,
+    recipeStatusLabel,
+    setAdminRecipeMode,
+    setAdminRecipeId,
+    setAdminRecipeError,
+    setAdminRecipeNote,
+    startAdminRecipeEdit,
+    adminRecipeMode,
+    activeAdminRecipe,
+    activeAdminRecipeUsage,
+    adminRecipeDraft,
+    handleAdminRecipeDraftChange,
+    adminRecipeSaving,
+    validateAdminRecipeDraft,
+    adminRecipeValidation,
+    adminRecipeConfirmWarning,
+    setAdminRecipeConfirmWarning,
+    adminRecipeError,
+    adminRecipeNote,
+    saveAdminRecipe,
+    buildRecipeDraft,
+    loadAuditEvents,
+    auditLoading,
+    auditError,
+    auditEvents
+  }
+
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brand">
-          <h1>DXCP Control Plane</h1>
-          <span>Deploy intent, see normalized status, and recover fast.</span>
-        </div>
-        <div className="context">
-          <div className="context-item">
-            <span className="context-label">Role</span>
-            <span className="context-value">{derivedRole}</span>
-          </div>
-          {currentDeliveryGroup && (
-            <div className="context-item">
-              <span className="context-label">Delivery Group</span>
-              <span className="context-value">{currentDeliveryGroup.name}</span>
-            </div>
-          )}
-        </div>
-        <div className="session">
-          <div className="session-user">
-            {user?.email || user?.name || (isAuthenticated ? 'Authenticated' : 'Not signed in')}
-          </div>
-          {isAuthenticated ? (
-            <button className="button secondary" onClick={handleLogout}>
-              Logout
-            </button>
-          ) : (
-            <button className="button" onClick={handleLogin} disabled={!authReady}>
-              Login
-            </button>
-          )}
-        </div>
-        <nav className="nav">
-          {/* Stable E2E selectors for primary navigation */}
-          <button
-            className={view === 'services' ? 'active' : ''}
-            data-testid="nav-services"
-            onClick={() => setView('services')}
-          >
-            Services
-          </button>
-          <button
-            className={view === 'deploy' ? 'active' : ''}
-            data-testid="nav-deploy"
-            onClick={() => setView('deploy')}
-          >
-            Deploy
-          </button>
-          <button
-            className={view === 'deployments' ? 'active' : ''}
-            onClick={() => {
-              setView('deployments')
-              refreshDeployments()
-            }}
-          >
-            Deployments
-          </button>
-          <button
-            className={view === 'detail' ? 'active' : ''}
-            onClick={() => {
-              setView('detail')
-              if (services.length === 0) loadServices()
-            }}
-          >
-            Detail
-          </button>
-            <button
-              className={view === 'insights' ? 'active' : ''}
-              onClick={() => {
-                setView('insights')
-                loadInsights()
-              }}
-            >
-              Insights
-            </button>
-            <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
-              Settings
-            </button>
-            <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}>
-              Admin
-            </button>
-        </nav>
-      </header>
-
-      {errorMessage && (
-        <div className="shell">
-          <div className="card">
-            {errorHeadline && <strong>{errorHeadline}. </strong>}
-            {errorMessage}
-          </div>
-        </div>
-      )}
-
-      {authError && (
-        <div className="shell">
-          <div className="card">{authError}</div>
-        </div>
-      )}
+    <AppShell
+      view={view}
+      setView={setView}
+      services={services}
+      loadServices={loadServices}
+      refreshDeployments={refreshDeployments}
+      loadInsights={loadInsights}
+      user={user}
+      isAuthenticated={isAuthenticated}
+      authReady={authReady}
+      handleLogin={handleLogin}
+      handleLogout={handleLogout}
+      derivedRole={derivedRole}
+      currentDeliveryGroup={currentDeliveryGroup}
+    >
+      <AlertRail errorMessage={errorMessage} errorHeadline={errorHeadline} authError={authError} />
 
       {!authReady && (
         <div className="shell">
@@ -2251,920 +2388,23 @@ export default function App() {
       )}
 
       {authReady && isAuthenticated && view === 'services' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <h2>Delivery control plane</h2>
-            <div className="helper" style={{ marginTop: '8px' }}>
-              DXCP is the source of truth for delivery intent and status. It applies platform guardrails by default.
-            </div>
-            <div className="helper" style={{ marginTop: '8px' }}>
-              What you can do depends on your role. Services shown here are allowlisted and scoped by policy.
-            </div>
-          </div>
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2>Services</h2>
-                <div className="helper">Deployable services and their latest delivery status.</div>
-              </div>
-              <button className="button secondary" onClick={loadServicesList} disabled={servicesViewLoading}>
-                {servicesViewLoading ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-            {servicesViewError && <div className="helper" style={{ marginTop: '8px' }}>{servicesViewError}</div>}
-            {servicesViewLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading services...</div>}
-            {!servicesViewLoading && servicesView.length === 0 && (
-              <div className="helper" style={{ marginTop: '8px' }}>
-                No deployable services available. Services are allowlisted by delivery group policy.
-              </div>
-            )}
-            {servicesView.length > 0 && (
-              <div className="table" style={{ marginTop: '12px' }}>
-                <div className="table-row header">
-                  <div>Service</div>
-                  <div>Delivery group</div>
-                  <div>Latest version</div>
-                  <div>Latest state</div>
-                  <div>Updated</div>
-                </div>
-                {servicesView.map((row) => (
-                  <button
-                    key={row.name}
-                    className="table-row button-row"
-                    onClick={() => {
-                      setServiceDetailName(row.name)
-                      setServiceDetailTab('overview')
-                      setView('service')
-                    }}
-                  >
-                    <div>{row.name}</div>
-                    <div>{row.deliveryGroup}</div>
-                    <div>{row.latestVersion}</div>
-                    <div><span className={statusClass(row.latestState)}>{row.latestState}</span></div>
-                    <div>{row.updatedAt ? formatTime(row.updatedAt) : '-'}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <ServicesPage mode="list" {...servicesPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'service' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2>Service detail</h2>
-                <div className="helper">{serviceDetailName || 'Unknown service'}</div>
-              </div>
-              <button className="button secondary" onClick={() => setView('services')}>
-                Back to services
-              </button>
-            </div>
-            <div className="tabs" style={{ marginTop: '12px' }}>
-              {['overview', 'deploy', 'history', 'failures', 'insights'].map((tab) => (
-                <button
-                  key={tab}
-                  className={serviceDetailTab === tab ? 'active' : ''}
-                  onClick={() => setServiceDetailTab(tab)}
-                >
-                  {tab[0].toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {serviceDetailError && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              {serviceDetailError}
-            </div>
-          )}
-
-          {serviceDetailLoading && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              Loading service detail...
-            </div>
-          )}
-
-            {!serviceDetailLoading && serviceDetailTab === 'overview' && (
-              <>
-                <div className="card">
-                  <h2>What is running</h2>
-                  {serviceDetailRunning ? (
-                    <div>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span className="badge info">Source: Authoritative</span>
-                        <span className="badge neutral">
-                          Operation: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}
-                        </span>
-                      </div>
-                      <p style={{ marginTop: '8px' }}>
-                        Version: <strong>{serviceDetailRunning.version || '-'}</strong>
-                      </p>
-                      <p>Environment: {serviceDetailRunning.environment || 'sandbox'}</p>
-                      <p>
-                        Established by: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}{' '}
-                        {serviceDetailRunning.deploymentId ? (
-                          <>
-                            <span className="helper">deployment {shortId(serviceDetailRunning.deploymentId)}</span>
-                            <button
-                              className="button secondary"
-                              style={{ marginLeft: '8px' }}
-                              onClick={() => openDeployment({ id: serviceDetailRunning.deploymentId })}
-                            >
-                              View deployment
-                            </button>
-                          </>
-                        ) : (
-                          ''
-                        )}
-                      </p>
-                      {serviceDetailRunning.derivedAt && (
-                        <p>Derived: {formatTime(serviceDetailRunning.derivedAt)}</p>
-                      )}
-                      <div className="helper" style={{ marginTop: '8px' }}>
-                        Derived from DXCP deployment records.
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="helper">No running version recorded yet.</div>
-                  )}
-                </div>
-                <div className="card">
-                  <h2>Latest delivery status</h2>
-                  {serviceDetailLatest ? (
-                    <div>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span className={`badge ${outcomeTone(serviceDetailLatest.outcome, serviceDetailLatest.state)}`}>
-                          Outcome: {outcomeLabel(serviceDetailLatest.outcome, serviceDetailLatest.state)}
-                        </span>
-                        <span className="badge neutral">
-                          Operation: {deploymentKindLabel(serviceDetailLatest.deploymentKind, serviceDetailLatest.rollbackOf)}
-                        </span>
-                        <span className="badge neutral">State: {serviceDetailLatest.state}</span>
-                      </div>
-                      <p>Version: {serviceDetailLatest.version || '-'}</p>
-                      <p>Updated: {formatTime(serviceDetailLatest.updatedAt || serviceDetailLatest.createdAt)}</p>
-                      {serviceDetailLatest.rollbackOf && (
-                        <p>Rollback of: {serviceDetailLatest.rollbackOf}</p>
-                    )}
-                    <div className="links" style={{ marginTop: '8px' }}>
-                      <button
-                        className="button secondary"
-                        onClick={() => openDeployment({ id: serviceDetailLatest.id })}
-                      >
-                        Open deployment detail
-                      </button>
-                      {isPlatformAdmin && serviceDetailLatest.engineExecutionUrl && (
-                        <a
-                          className="link"
-                          href={serviceDetailLatest.engineExecutionUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Execution detail
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="helper">No deployments recorded yet.</div>
-                )}
-              </div>
-              <div className="card">
-                <h2>Delivery group</h2>
-                {serviceDetailGroup ? (
-                  <>
-                    <p>{serviceDetailGroup.name}</p>
-                    <div className="helper">Owner: {serviceDetailGroup.owner || 'Unassigned'}</div>
-                    <div className="guardrails" style={{ marginTop: '12px' }}>
-                      <div className="helper" style={{ marginBottom: '6px' }}>Guardrails</div>
-                      <div className="list">
-                        <div className="list-item">
-                          <div>Max concurrent deployments</div>
-                          <div>{serviceDetailGroup.guardrails?.max_concurrent_deployments || '-'}</div>
-                        </div>
-                        <div className="list-item">
-                          <div>Daily deploy quota</div>
-                          <div>{serviceDetailGroup.guardrails?.daily_deploy_quota || '-'}</div>
-                        </div>
-                        <div className="list-item">
-                          <div>Daily rollback quota</div>
-                          <div>{serviceDetailGroup.guardrails?.daily_rollback_quota || '-'}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="helper">Service is not assigned to a delivery group.</div>
-                )}
-              </div>
-              <div className="card">
-                <h2>Integrations</h2>
-                {!backstageEntityRef && !backstageEntityUrl && (
-                  <div className="helper">No integrations configured for this service.</div>
-                )}
-                {(backstageEntityRef || backstageEntityUrl) && (
-                  <div className="list">
-                    {backstageEntityRef && (
-                      <div className="list-item admin-detail">
-                        <div>Backstage entity</div>
-                        <div>{backstageEntityRef}</div>
-                      </div>
-                    )}
-                    <div className="list-item admin-detail">
-                      <div>Backstage</div>
-                      <div>
-                        {backstageEntityUrl ? (
-                          <a className="link" href={backstageEntityUrl} target="_blank" rel="noreferrer">
-                            Open in Backstage
-                          </a>
-                        ) : (
-                          'Not linked'
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {!serviceDetailLoading && serviceDetailTab === 'deploy' && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              <h2>Deploy</h2>
-              <div className="helper">
-                Deployment intent stays in the Deploy view for now.
-              </div>
-              <button
-                className="button secondary"
-                style={{ marginTop: '12px' }}
-                onClick={() => {
-                  if (serviceDetailName) setService(serviceDetailName)
-                  setView('deploy')
-                }}
-              >
-                Go to Deploy
-              </button>
-            </div>
-          )}
-
-            {!serviceDetailLoading && serviceDetailTab === 'history' && (
-              <div className="card" style={{ gridColumn: '1 / -1' }}>
-                <h2>Deployment history</h2>
-                {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
-                  {serviceDetailHistory.length > 0 && (
-                    <div className="table" style={{ marginTop: '12px' }}>
-                      <div className="table-row header history">
-                        <div>Outcome</div>
-                        <div>State</div>
-                        <div>Version</div>
-                        <div>Recipe</div>
-                        <div>Operation</div>
-                        <div>Created</div>
-                        <div>Deployment</div>
-                      </div>
-                      {serviceDetailHistory.map((item) => {
-                        const rollbackId = getRollbackIdFor(item.id)
-                        return (
-                          <div className="table-row history" key={item.id}>
-                            <div>
-                              <span className={`badge ${outcomeTone(item.outcome, item.state)}`}>
-                                {outcomeDisplayLabel(item.outcome, item.state, item.deploymentKind, item.rollbackOf)}
-                              </span>
-                              {resolveDeploymentKind(item.deploymentKind, item.rollbackOf) === 'ROLL_FORWARD' &&
-                                resolveOutcome(item.outcome, item.state) === 'ROLLED_BACK' && (
-                                  <div className="helper" style={{ marginTop: '4px' }}>
-                                    Auto-rollback recorded as a separate rollback deployment.
-                                    {rollbackId && (
-                                      <button
-                                        className="button secondary"
-                                        style={{ marginLeft: '8px' }}
-                                        onClick={() => openDeployment({ id: rollbackId })}
-                                      >
-                                        View rollback {shortId(rollbackId)}
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                            </div>
-                          <div><span className={statusClass(item.state)}>{item.state}</span></div>
-                          <div>{item.version || '-'}</div>
-                          <div>{getRecipeDisplay(item.recipeId, item.recipeRevision)}</div>
-                          <div>
-                            <span className="badge neutral">
-                              {deploymentKindLabel(item.deploymentKind, item.rollbackOf)}
-                            </span>
-                            {item.rollbackOf && (
-                              <div className="helper" style={{ marginTop: '4px' }}>
-                                of {item.rollbackOf}
-                              </div>
-                            )}
-                          </div>
-                          <div>{formatTime(item.createdAt)}</div>
-                          <div>
-                            <button className="button secondary" onClick={() => openDeployment({ id: item.id })}>
-                              Open detail
-                            </button>
-                          </div>
-                        </div>
-                        )
-                      })}
-                  </div>
-                )}
-              </div>
-            )}
-
-          {!serviceDetailLoading && serviceDetailTab === 'failures' && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              <h2>Latest failures</h2>
-            {renderFailures(serviceDetailFailures, serviceDetailStatus?.latest?.engineExecutionUrl)}
-            </div>
-          )}
-
-          {!serviceDetailLoading && serviceDetailTab === 'insights' && (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              <h2>Insights</h2>
-              <div className="helper">
-                Service-level insights are not available yet. Use the Insights view for system-wide trends.
-              </div>
-            </div>
-          )}
-        </div>
+        <ServicesPage mode="detail" {...servicesPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'deploy' && (
-        <div className="shell">
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Deploy intent</h2>
-              <button className="button secondary" onClick={refreshData} disabled={refreshing}>
-                {refreshing ? 'Refreshing...' : 'Refresh data'}
-              </button>
-            </div>
-            {deployStep === 'form' && (
-              <>
-                {/* Stable E2E selectors for deploy flow inputs */}
-                <div className="field">
-                  <label>Deployable service</label>
-                  <select
-                    data-testid="deploy-service-select"
-                    value={service}
-                    onFocus={() => {
-                      if (services.length === 0) loadServices()
-                    }}
-                    onChange={(e) => {
-                      setService(e.target.value)
-                      setDeployStep('form')
-                    }}
-                  >
-                    {services.length === 0 && <option value="">No deployable services</option>}
-                    {services.map((svc) => (
-                      <option key={svc.service_name} value={svc.service_name}>
-                        {svc.service_name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="helper">Services are allowlisted and scoped by delivery group policy.</div>
-                </div>
-                <div className="field" data-testid="deploy-recipe-select">
-                  <label>Strategy recipe</label>
-                  <div className="helper">Recipes must be compatible with the service and allowed by the delivery group.</div>
-                  {!currentDeliveryGroup && <div className="helper">No delivery group assigned.</div>}
-                  {currentDeliveryGroup && filteredRecipes.length === 0 && (
-                    <div className="helper">No compatible recipes are allowed for this service.</div>
-                  )}
-                  {filteredRecipes.length > 0 && (
-                    <div className="list" style={{ marginTop: '8px' }}>
-                      {filteredRecipes.map((recipe) => {
-                        const revision = recipe.recipe_revision ?? 1
-                        const isSelected = recipeId === recipe.id
-                        return (
-                          <label className="list-item recipe-choice" key={recipe.id}>
-                            <input
-                              type="radio"
-                              name="deploy-recipe"
-                              value={recipe.id}
-                              checked={isSelected}
-                              onChange={(e) => {
-                                setRecipeId(e.target.value)
-                                setRecipeAutoApplied(false)
-                                setDeployStep('form')
-                              }}
-                            />
-                            <div>
-                              <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                                <strong>{recipe.name || recipe.id}</strong>
-                                <span className="helper">v{revision}</span>
-                                {recipe.status === 'deprecated' && <span className="helper">Deprecated</span>}
-                              </div>
-                              <div className="helper">
-                                {recipe.effective_behavior_summary || 'No behavior summary provided.'}
-                              </div>
-                            </div>
-                            <div className="helper" style={{ textAlign: 'right' }}>
-                              {recipe.description || 'Strategy recipe'}
-                            </div>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {recipeAutoApplied && selectedRecipe && (
-                    <div className="helper">Default applied (only option): {selectedRecipe.name || selectedRecipe.id}</div>
-                  )}
-                  {filteredRecipes.length > 1 && !recipeId && (
-                    <div className="helper">Select a strategy to continue.</div>
-                  )}
-                  {selectedRecipeDeprecated && (
-                    <div className="helper">Selected recipe is deprecated and cannot be used for new deployments.</div>
-                  )}
-                </div>
-                <div className="row">
-                  <div className="field">
-                    <label>Environment</label>
-                    <div className="helper">sandbox (fixed)</div>
-                  </div>
-                <div className="field">
-                  <label htmlFor="deploy-version">Version</label>
-                  <select
-                    id="deploy-version"
-                    data-testid="deploy-version-select"
-                    value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
-                    onChange={(e) => {
-                      if (e.target.value === '__custom__') {
-                        setVersionMode('custom')
-                        setVersionSelection('user')
-                        setVersionAutoApplied(false)
-                        setDeployStep('form')
-                      } else if (e.target.value === '__select__') {
-                        setVersionMode('auto')
-                        setVersion('')
-                        setVersionSelection('none')
-                        setVersionAutoApplied(false)
-                        setDeployStep('form')
-                      } else {
-                        setVersionMode('auto')
-                        setVersion(e.target.value)
-                        setVersionSelection('user')
-                        setVersionAutoApplied(false)
-                        setDeployStep('form')
-                      }
-                    }}
-                  >
-                    <option value="__select__">Select discovered version</option>
-                    {versions.map((item) => (
-                      <option key={item.version} value={item.version}>
-                        {item.version}
-                      </option>
-                    ))}
-                    <option value="__custom__">Custom (registered)</option>
-                  </select>
-                  {versionMode === 'custom' && (
-                    <input
-                      style={{ marginTop: '8px' }}
-                      value={version}
-                      onChange={(e) => {
-                        setVersion(e.target.value)
-                        setVersionSelection('user')
-                        setVersionAutoApplied(false)
-                        setDeployStep('form')
-                      }}
-                      placeholder="Enter a registered version"
-                    />
-                  )}
-                  <div className="helper">
-                      Format: 1.2.3 or 1.2.3-suffix. {validVersion ? 'Valid' : 'Invalid'}
-                  </div>
-                  {versionAutoApplied && version && <div className="helper">Default applied: {version}</div>}
-                  {versionsLoading && <div className="helper">Loading versions...</div>}
-                  {versionsRefreshing && <div className="helper">Refreshing versions...</div>}
-                  {versionsError && <div className="helper">{versionsError}</div>}
-                  {!versionsLoading && !versionsRefreshing && !versionsError && versions.length > 0 && (
-                    <div className="helper">Latest discovered: {versions[0].version}</div>
-                  )}
-                  {versionMode === 'custom' && versionUnverifiable && (
-                    <div className="helper">Custom versions must already be registered and discoverable.</div>
-                  )}
-                </div>
-                </div>
-                <div className="field">
-                  <label htmlFor="change-summary">Change summary</label>
-                  <input
-                    id="change-summary"
-                    data-testid="deploy-change-summary"
-                    value={changeSummary}
-                    onChange={(e) => {
-                      setChangeSummary(e.target.value)
-                      setDeployStep('form')
-                    }}
-                    onInput={(e) => {
-                      setChangeSummary(e.target.value)
-                      setDeployStep('form')
-                    }}
-                  />
-                  {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
-                </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Policy checks</div>
-                <div className="list" style={{ marginTop: '8px' }}>
-                  <div className="list-item admin-detail">
-                    <div>Deploys remaining today</div>
-                    <div>{preflightResult?.policy?.deployments_remaining ?? '-'}</div>
-                    <div />
-                  </div>
-                  <div className="list-item admin-detail">
-                    <div>Concurrent deployments</div>
-                    <div>
-                      {preflightResult?.policy
-                        ? `${preflightResult.policy.current_concurrent_deployments} / ${preflightResult.policy.max_concurrent_deployments}`
-                        : '-'}
-                    </div>
-                    <div />
-                  </div>
-                  <div className="list-item admin-detail">
-                    <div>Version status</div>
-                    <div>{preflightResult?.versionRegistered ? 'Registered' : '-'}</div>
-                    <div />
-                  </div>
-                </div>
-                {preflightStatus === 'checking' && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Checking policy and guardrails...
-                  </div>
-                )}
-                {preflightStatus === 'error' && preflightError && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    {preflightErrorHeadline && <strong>{preflightErrorHeadline}. </strong>}
-                    {preflightError}
-                  </div>
-                )}
-                {debugDeployGatesEnabled && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Deploy gates:{' '}
-                    {[
-                      `canDeploy=${String(canDeploy)}`,
-                      `canRunPreflight=${String(canRunPreflight)}`,
-                      `preflightStatus=${preflightStatus}`,
-                      `validVersion=${String(validVersion)}`,
-                      `versionVerified=${String(versionVerified)}`,
-                      `recipeId=${recipeId || '-'}`,
-                      `changeSummary=${trimmedChangeSummary ? 'set' : 'empty'}`
-                    ].join(', ')}
-                  </div>
-                )}
-                <button
-                  className="button"
-                  data-testid="deploy-review-button"
-                  onClick={handleReviewDeploy}
-                  disabled={!canReviewDeploy || preflightStatus === 'checking'}
-                  title={!canDeploy ? deployDisabledReason : ''}
-                >
-                  {preflightStatus === 'checking' ? 'Checking policy...' : 'Review deploy'}
-                </button>
-                {!canDeploy && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Deploy disabled. {deployDisabledReason}
-                  </div>
-                )}
-                {canDeploy && !changeSummary.trim() && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Change summary is required.
-                  </div>
-                )}
-                {versionUnverifiable && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Custom versions must match a registered build before you can deploy.
-                  </div>
-                )}
-                {deployInlineMessage && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
-                    {deployInlineMessage}
-                  </div>
-                )}
-                {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
-              </>
-            )}
-            {deployStep === 'confirm' && (
-              <>
-                <h3>Confirm deploy</h3>
-                <div className="list" style={{ marginTop: '12px' }}>
-                  <div className="list-item">
-                    <div>Service</div>
-                    <div>{service || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Recipe</div>
-                    <div>{selectedRecipe?.name || selectedRecipe?.id || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Recipe revision</div>
-                    <div>{selectedRecipe?.recipe_revision ? `v${selectedRecipe.recipe_revision}` : '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Behavior summary</div>
-                    <div>{selectedRecipe?.effective_behavior_summary || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Success means</div>
-                    <div>{selectedRecipeNarrative.success}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Rollback means</div>
-                    <div>{selectedRecipeNarrative.rollback}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Version</div>
-                    <div>{version || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Environment</div>
-                    <div>sandbox</div>
-                  </div>
-                </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
-                <div className="list">
-                  <div className="list-item">
-                    <div>Max concurrent deployments</div>
-                    <div>{currentDeliveryGroup?.guardrails?.max_concurrent_deployments || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Daily deploy quota</div>
-                    <div>{currentDeliveryGroup?.guardrails?.daily_deploy_quota || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Deploys remaining today</div>
-                    <div>
-                      {currentDeliveryGroup?.guardrails?.daily_deploy_quota
-                        ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
-                        : '-'}
-                    </div>
-                  </div>
-                  <div className="list-item">
-                    <div>Daily rollback quota</div>
-                    <div>{currentDeliveryGroup?.guardrails?.daily_rollback_quota || '-'}</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button
-                    className="button"
-                    data-testid="deploy-confirm-button"
-                    onClick={handleDeploy}
-                    disabled={!canReviewDeploy}
-                  >
-                    Confirm deploy
-                  </button>
-                  <button className="button secondary" onClick={() => setDeployStep('form')}>
-                    Back to edit
-                  </button>
-                </div>
-                {deployInlineMessage && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
-                    {deployInlineMessage}
-                  </div>
-                )}
-                {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
-              </>
-            )}
-          </div>
-          <div className="card">
-            <h2>Policy context</h2>
-            {!currentDeliveryGroup && <div className="helper">Service is not assigned to a delivery group.</div>}
-            {currentDeliveryGroup && (
-              <>
-                <div className="list">
-                  <div className="list-item">
-                    <div>Delivery group</div>
-                    <div>{currentDeliveryGroup.name}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Owner</div>
-                    <div>{currentDeliveryGroup.owner || 'Unassigned'}</div>
-                  </div>
-                </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
-                <div className="list">
-                  <div className="list-item">
-                    <div>Max concurrent deployments</div>
-                    <div>{currentDeliveryGroup.guardrails?.max_concurrent_deployments || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Daily deploy quota</div>
-                    <div>{currentDeliveryGroup.guardrails?.daily_deploy_quota || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Deploys remaining today</div>
-                    <div>
-                      {currentDeliveryGroup.guardrails?.daily_deploy_quota
-                        ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
-                        : '-'}
-                    </div>
-                  </div>
-                  <div className="list-item">
-                    <div>Daily rollback quota</div>
-                    <div>{currentDeliveryGroup.guardrails?.daily_rollback_quota || '-'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Rollbacks remaining today</div>
-                    <div>
-                      {currentDeliveryGroup.guardrails?.daily_rollback_quota
-                        ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
-                        : '-'}
-                    </div>
-                  </div>
-                </div>
-                {policyDeploymentsLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading quota usage...</div>}
-                {policyDeploymentsError && <div className="helper" style={{ marginTop: '8px' }}>{policyDeploymentsError}</div>}
-                <div className="helper" style={{ marginTop: '12px' }}>Recipe</div>
-                <div className="list">
-                  <div className="list-item">
-                    <div>Selected</div>
-                    <div>{selectedRecipe?.name || 'None'}</div>
-                  </div>
-                  <div className="list-item">
-                    <div>Description</div>
-                    <div>{selectedRecipe?.description || 'No description'}</div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <h2>Latest deployment</h2>
-            {deployResult ? (
-              <div>
-                <div className={statusClass(deployResult.state)}>{deployResult.state}</div>
-                <p>Service: {deployResult.service}</p>
-                <p>Version: {deployResult.version}</p>
-                <p>Deployment id: {deployResult.id}</p>
-                {isPlatformAdmin && deployResult.engineExecutionId && (
-                  <p>Execution id: {deployResult.engineExecutionId}</p>
-                )}
-                <button className="button secondary" onClick={() => openDeployment(deployResult)}>
-                  View detail
-                </button>
-              </div>
-            ) : (
-              <div className="helper">No deployment created yet.</div>
-            )}
-          </div>
-        </div>
+        <DeployPage {...deployPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'deployments' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Recent deployments</h2>
-              <button className="button secondary" onClick={refreshDeployments}>Refresh</button>
-            </div>
-            {/* Stable E2E selectors for deployment history list */}
-            <div className="list" data-testid="deployment-list">
-              {deployments.length === 0 && <div className="helper">No deployments yet.</div>}
-              {deployments.map((d) => (
-                <div className="list-item" data-testid="deployment-item" key={d.id}>
-                  <div className={statusClass(d.state)}>{d.state}</div>
-                  <div>{d.service}</div>
-                  <div>{d.version}</div>
-                  <div>{formatTime(d.createdAt)}</div>
-                  <button className="button secondary" onClick={() => openDeployment(d)}>
-                    Details
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <DeploymentsPage {...deploymentsPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'detail' && (
-        <div className="shell">
-          <div className="card">
-            <h2>Deployment detail</h2>
-              {!selected && <div className="helper">Select a deployment from the list.</div>}
-              {selected && (
-                <div>
-                  <div className={statusClass(selected.state)}>{selected.state}</div>
-                  {statusMessage && <div className="helper" style={{ marginTop: '8px' }}>{statusMessage}</div>}
-                  <div className="list" style={{ marginTop: '12px' }}>
-                    <div className="list-item admin-detail">
-                      <div>Intent id</div>
-                      <div>{selected.intentCorrelationId || 'Not captured'}</div>
-                    </div>
-                    <div className="list-item admin-detail">
-                      <div>Validated at</div>
-                      <div>{selectedValidatedAt ? formatTime(selectedValidatedAt) : 'Not recorded'}</div>
-                    </div>
-                    <div className="list-item admin-detail">
-                      <div>Execution</div>
-                      <div>{selectedExecutionAt ? `Started ${formatTime(selectedExecutionAt)}` : 'Not started yet'}</div>
-                    </div>
-                    <div className="list-item admin-detail">
-                      <div>Outcome</div>
-                      <div>
-                        <span className={`badge ${outcomeTone(selected.outcome, selected.state)}`}>
-                          {outcomeDisplayLabel(selected.outcome, selected.state, selected.deploymentKind, selected.rollbackOf)}
-                        </span>
-                        {resolveDeploymentKind(selected.deploymentKind, selected.rollbackOf) === 'ROLL_FORWARD' &&
-                          resolveOutcome(selected.outcome, selected.state) === 'ROLLED_BACK' && (
-                            <div className="helper" style={{ marginTop: '4px' }}>
-                              Auto-rollback recorded as a separate rollback deployment.
-                              {selectedRollbackId && (
-                                <button
-                                  className="button secondary"
-                                  style={{ marginLeft: '8px' }}
-                                  onClick={() => openDeployment({ id: selectedRollbackId })}
-                                >
-                                  View rollback {shortId(selectedRollbackId)}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                    <div className="list-item admin-detail">
-                      <div>Operation</div>
-                      <div>{deploymentKindLabel(selected.deploymentKind, selected.rollbackOf)}</div>
-                    </div>
-                    {selected.rollbackOf && (
-                      <div className="list-item admin-detail">
-                        <div>Rollback of</div>
-                        <div>{selected.rollbackOf}</div>
-                      </div>
-                    )}
-                    <div className="list-item admin-detail">
-                      <div>Recipe</div>
-                      <div>{getRecipeDisplay(selected.recipeId, selected.recipeRevision)}</div>
-                    </div>
-                    <div className="list-item admin-detail">
-                      <div>Behavior summary</div>
-                      <div>{selected.effectiveBehaviorSummary || 'Not recorded'}</div>
-                    </div>
-                  </div>
-                  <p>Service: {selected.service}</p>
-                  <p>Version: {selected.version}</p>
-                  <p>Created: {formatTime(selected.createdAt)}</p>
-                  <p>Updated: {formatTime(selected.updatedAt)}</p>
-                {isPlatformAdmin && selected.engineExecutionId && <p>Execution id: {selected.engineExecutionId}</p>}
-                <div className="links">
-                  {isPlatformAdmin && selected.engineExecutionUrl && (
-                    <a className="link" href={selected.engineExecutionUrl} target="_blank" rel="noreferrer">
-                      Execution detail
-                    </a>
-                  )}
-                  {serviceUrl && (
-                    <a className="link" href={serviceUrl} target="_blank" rel="noreferrer">
-                      Service URL
-                    </a>
-                  )}
-                </div>
-                <button
-                  className="button danger"
-                  onClick={handleRollback}
-                  style={{ marginTop: '12px' }}
-                  disabled={!canRollback}
-                  title={!canRollback ? rollbackDisabledReason : ''}
-                >
-                  Rollback
-                </button>
-                {!canRollback && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Rollback disabled. {rollbackDisabledReason}
-                  </div>
-                )}
-                {selected.rollbackOf && (
-                  <button className="button secondary" onClick={() => openDeployment({ id: selected.rollbackOf })} style={{ marginTop: '8px' }}>
-                    View original deployment
-                  </button>
-                )}
-                {rollbackResult && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
-                    Rollback created: {rollbackResult.id}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="card">
-            <h2>Timeline</h2>
-            <div className="timeline">
-              {timelineSteps.length === 0 && <div className="helper">No timeline events available.</div>}
-              {timelineSteps.map((step) => (
-                <div key={step.key} className="timeline-step active">
-                  <strong>{step.label}</strong>
-                  <div className="helper">Event time: {formatTime(step.occurredAt)}</div>
-                  {step.detail && <div className="helper">{step.detail}</div>}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="card">
-            <h2>Failures</h2>
-            {renderFailures(failures, selected?.engineExecutionUrl)}
-          </div>
-        </div>
+        <DeploymentDetailPage {...deploymentDetailPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'insights' && (
@@ -3270,821 +2510,16 @@ export default function App() {
       )}
 
       {authReady && isAuthenticated && view === 'settings' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <h2>Settings</h2>
-            <div className="helper">Control auto-refresh behavior for the UI.</div>
-          </div>
-          <div className="card">
-            <h2>User settings</h2>
-            <div className="field">
-              <label htmlFor="refresh-interval-minutes">Auto-refresh interval (minutes)</label>
-              <input
-                id="refresh-interval-minutes"
-                type="number"
-                min={Math.ceil(minRefreshSeconds / 60)}
-                max={Math.floor(maxRefreshSeconds / 60)}
-                step="1"
-                value={refreshMinutesInput}
-                onChange={(e) => handleRefreshMinutesChange(e.target.value)}
-                onInput={(e) => handleRefreshMinutesChange(e.target.value)}
-                disabled={!userSettingsKey}
-              />
-              <div className="helper">Default is {Math.round(defaultRefreshSeconds / 60)} minutes.</div>
-              <div className="helper">Applies to versions and deployment detail refresh.</div>
-              {refreshInputError && <div className="helper">{refreshInputError}</div>}
-              {refreshClampNote && <div className="helper">{refreshClampNote}</div>}
-              <div className="helper">Resolved refresh interval: {refreshIntervalMinutes} minutes.</div>
-            </div>
-          </div>
-          {isPlatformAdmin && (
-            <div className="card">
-              <h2>Admin defaults</h2>
-              <div className="helper">Config-driven defaults and guardrails.</div>
-              <div className="list" style={{ marginTop: '8px' }}>
-                <div className="list-item">
-                  <div>Default</div>
-                  <div>{Math.round((adminSettings?.default_refresh_interval_seconds ?? defaultRefreshSeconds) / 60)} minutes</div>
-                </div>
-                <div className="list-item">
-                  <div>Minimum</div>
-                  <div>{Math.round((adminSettings?.min_refresh_interval_seconds ?? minRefreshSeconds) / 60)} minutes</div>
-                </div>
-                <div className="list-item">
-                  <div>Maximum</div>
-                  <div>{Math.round((adminSettings?.max_refresh_interval_seconds ?? maxRefreshSeconds) / 60)} minutes</div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        <SettingsPage {...settingsPageProps} />
       )}
 
       {authReady && isAuthenticated && view === 'admin' && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Admin</h2>
-              {adminReadOnly && <div className="helper">Only Platform Admins can modify this.</div>}
-            </div>
-            <div className="tabs" style={{ marginTop: '12px' }}>
-              <button
-                className={adminTab === 'delivery-groups' ? 'active' : ''}
-                onClick={() => setAdminTab('delivery-groups')}
-              >
-                Delivery Groups
-              </button>
-              <button
-                className={adminTab === 'recipes' ? 'active' : ''}
-                onClick={() => setAdminTab('recipes')}
-              >
-                Recipes
-              </button>
-              {isPlatformAdmin && (
-                <button
-                  className={adminTab === 'audit' ? 'active' : ''}
-                  onClick={() => setAdminTab('audit')}
-                >
-                  Audit
-                </button>
-              )}
-            </div>
-          </div>
-          {adminTab === 'delivery-groups' && (
-            <>
-              <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h2>Delivery groups</h2>
-                      <button className="button secondary" onClick={startAdminGroupCreate} disabled={adminReadOnly}>
-                        Create group
-                      </button>
-                    </div>
-                    {deliveryGroups.length === 0 && <div className="helper">No delivery groups available.</div>}
-                    {deliveryGroups.length > 0 && (
-                      <div className="list" style={{ marginTop: '12px' }}>
-                        {deliveryGroups.map((group) => (
-                          <div className="list-item admin-group" key={group.id}>
-                            <div>
-                              <strong>{group.name}</strong>
-                              <div className="helper">{group.id}</div>
-                            </div>
-                            <div>{group.owner || 'Unassigned owner'}</div>
-                            <div>{Array.isArray(group.services) ? `${group.services.length} services` : '0 services'}</div>
-                            <div>{summarizeGuardrails(group.guardrails)}</div>
-                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                <button
-                                  className="button secondary"
-                                  onClick={() => {
-                                    setAdminGroupMode('view')
-                                    setAdminGroupId(group.id)
-                                    setAdminGroupError('')
-                                    setAdminGroupNote('')
-                                  }}
-                                >
-                                  View
-                                </button>
-                                <button className="button secondary" onClick={() => startAdminGroupEdit(group)} disabled={adminReadOnly}>
-                                  Edit
-                                </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="card">
-                    {adminGroupMode === 'view' && activeAdminGroup && (
-                      <>
-                        <h2>Group detail</h2>
-                        <div className="helper">Delivery group details and policy context.</div>
-                        <div className="list" style={{ marginTop: '12px' }}>
-                          <div className="list-item admin-detail">
-                            <div>Name</div>
-                            <div>{activeAdminGroup.name}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Owner</div>
-                            <div>{activeAdminGroup.owner || 'Unassigned'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Description</div>
-                            <div>{activeAdminGroup.description || 'No description'}</div>
-                          </div>
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
-                        <div className="list">
-                          <div className="list-item admin-detail">
-                            <div>Created</div>
-                            <div>{formatAuditValue(activeAdminGroup.created_by, activeAdminGroup.created_at)}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Last updated</div>
-                            <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Last change reason</div>
-                            <div>{activeAdminGroup.last_change_reason || 'None'}</div>
-                          </div>
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Services</div>
-                        <div className="list">
-                          {(activeAdminGroup.services || []).length === 0 && <div className="helper">No services assigned.</div>}
-                          {(activeAdminGroup.services || []).map((svc) => (
-                            <div key={svc} className="list-item admin-detail">
-                              <div>{svc}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Allowed recipes</div>
-                        <div className="list">
-                          {(activeAdminGroup.allowed_recipes || []).length === 0 && <div className="helper">No recipes assigned.</div>}
-                          {(activeAdminGroup.allowed_recipes || []).map((recipeIdValue) => (
-                            <div key={recipeIdValue} className="list-item admin-detail">
-                              <div>{getRecipeLabel(recipeIdValue)}</div>
-                              <div className="helper">{recipeIdValue}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
-                        <div className="list">
-                          <div className="list-item admin-detail">
-                            <div>Max concurrent deployments</div>
-                            <div>{activeAdminGroup.guardrails?.max_concurrent_deployments || '-'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Daily deploy quota</div>
-                            <div>{activeAdminGroup.guardrails?.daily_deploy_quota || '-'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Daily rollback quota</div>
-                            <div>{activeAdminGroup.guardrails?.daily_rollback_quota || '-'}</div>
-                          </div>
-                        </div>
-                        <button
-                          className="button secondary"
-                          style={{ marginTop: '12px' }}
-                          onClick={() => startAdminGroupEdit(activeAdminGroup)}
-                          disabled={adminReadOnly}
-                        >
-                          Edit group
-                        </button>
-                      </>
-                    )}
-                    {(adminGroupMode === 'create' || adminGroupMode === 'edit') && (
-                      <>
-                        <h2>{adminGroupMode === 'create' ? 'Create delivery group' : 'Edit delivery group'}</h2>
-                        {adminGroupMode === 'edit' && activeAdminGroup && (
-                          <>
-                            <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
-                            <div className="list" style={{ marginTop: '12px' }}>
-                              <div className="list-item admin-detail">
-                                <div>Created</div>
-                                <div>{formatAuditValue(activeAdminGroup.created_by, activeAdminGroup.created_at)}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Last updated</div>
-                                <div>{formatAuditValue(activeAdminGroup.updated_by, activeAdminGroup.updated_at)}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Last change reason</div>
-                                <div>{activeAdminGroup.last_change_reason || 'None'}</div>
-                              </div>
-                            </div>
-                          </>
-                        )}
-                        {adminGroupMode === 'edit' && (
-                          <div className="field">
-                            <label htmlFor="admin-group-change-reason">Change reason (optional)</label>
-                            <input
-                              id="admin-group-change-reason"
-                              value={adminGroupDraft.change_reason}
-                              onChange={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
-                              onInput={(e) => handleAdminGroupDraftChange('change_reason', e.target.value)}
-                              disabled={adminReadOnly}
-                            />
-                          </div>
-                        )}
-                        <button
-                          className="button secondary"
-                          style={{ marginTop: '12px' }}
-                          onClick={validateAdminGroupDraft}
-                          disabled={adminGroupSaving || adminReadOnly}
-                        >
-                          Preview changes
-                        </button>
-                        {adminGroupValidation && (
-                          <div className="helper" style={{ marginTop: '8px' }}>
-                            Validation: {adminGroupValidation.validation_status}
-                          </div>
-                        )}
-                        {adminGroupValidation?.messages?.length > 0 && (
-                          <div className="list" style={{ marginTop: '8px' }}>
-                            {adminGroupValidation.messages.map((item, idx) => (
-                              <div className="list-item admin-detail" key={`group-validate-${idx}`}>
-                                <div>{item.type}</div>
-                                <div>{item.field || 'general'}</div>
-                                <div>{item.message}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {adminGroupValidation?.validation_status === 'WARNING' && (
-                          <label className="check-item" style={{ marginTop: '8px' }}>
-                            <input
-                              type="checkbox"
-                              checked={adminGroupConfirmWarning}
-                              onChange={(e) => setAdminGroupConfirmWarning(e.target.checked)}
-                              disabled={adminReadOnly}
-                            />
-                            <span>Confirm warnings and proceed to save.</span>
-                          </label>
-                        )}
-                        <div className="field">
-                          <label htmlFor="admin-group-id">Group id</label>
-                          <input
-                            id="admin-group-id"
-                            value={adminGroupDraft.id}
-                            onChange={(e) => handleAdminGroupDraftChange('id', e.target.value)}
-                            onInput={(e) => handleAdminGroupDraftChange('id', e.target.value)}
-                            disabled={adminGroupMode === 'edit' || adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-group-name">Name</label>
-                          <input
-                            id="admin-group-name"
-                            value={adminGroupDraft.name}
-                            onChange={(e) => handleAdminGroupDraftChange('name', e.target.value)}
-                            onInput={(e) => handleAdminGroupDraftChange('name', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-group-description">Description</label>
-                          <input
-                            id="admin-group-description"
-                            value={adminGroupDraft.description}
-                            onChange={(e) => handleAdminGroupDraftChange('description', e.target.value)}
-                            onInput={(e) => handleAdminGroupDraftChange('description', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-group-owner">Owner</label>
-                          <input
-                            id="admin-group-owner"
-                            value={adminGroupDraft.owner}
-                            onChange={(e) => handleAdminGroupDraftChange('owner', e.target.value)}
-                            onInput={(e) => handleAdminGroupDraftChange('owner', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="helper">Admin-only configuration. Affects Delivery Owners and Observers.</div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Services</div>
-                        <div className="checklist">
-                          {sortedServiceNames.length === 0 && <div className="helper">No allowlisted services found.</div>}
-                          {sortedServiceNames.map((svc) => (
-                            <label key={svc} className="check-item">
-                              <input
-                                type="checkbox"
-                                checked={adminGroupDraft.services.includes(svc)}
-                                onChange={() => toggleAdminGroupService(svc)}
-                                disabled={adminReadOnly}
-                              />
-                              <span>{svc}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Allowed recipes</div>
-                        <div className="checklist">
-                          {sortedRecipes.length === 0 && <div className="helper">No recipes found.</div>}
-                          {sortedRecipes.map((recipe) => (
-                            <label key={recipe.id} className="check-item">
-                              <input
-                                type="checkbox"
-                                checked={adminGroupDraft.allowed_recipes.includes(recipe.id)}
-                                onChange={() => toggleAdminGroupRecipe(recipe.id)}
-                                disabled={adminReadOnly}
-                              />
-                              <span>{recipe.name || recipe.id}</span>
-                              <span className="helper">{recipe.id}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
-                        <div className="row">
-                          <div className="field">
-                            <label htmlFor="admin-group-max-concurrent">Max concurrent deployments</label>
-                            <input
-                              id="admin-group-max-concurrent"
-                              type="number"
-                              min="1"
-                              value={adminGroupDraft.guardrails.max_concurrent_deployments}
-                              onChange={(e) => handleAdminGuardrailChange('max_concurrent_deployments', e.target.value)}
-                              onInput={(e) => handleAdminGuardrailChange('max_concurrent_deployments', e.target.value)}
-                              disabled={adminReadOnly}
-                            />
-                            <div className="helper">Minimum 1. Default 1.</div>
-                          </div>
-                          <div className="field">
-                            <label htmlFor="admin-group-daily-deploy">Daily deploy quota</label>
-                            <input
-                              id="admin-group-daily-deploy"
-                              type="number"
-                              min="1"
-                              value={adminGroupDraft.guardrails.daily_deploy_quota}
-                              onChange={(e) => handleAdminGuardrailChange('daily_deploy_quota', e.target.value)}
-                              onInput={(e) => handleAdminGuardrailChange('daily_deploy_quota', e.target.value)}
-                              disabled={adminReadOnly}
-                            />
-                            <div className="helper">Minimum 1. Default {adminSettings?.daily_deploy_quota ?? 'system'}.</div>
-                          </div>
-                          <div className="field">
-                            <label htmlFor="admin-group-daily-rollback">Daily rollback quota</label>
-                            <input
-                              id="admin-group-daily-rollback"
-                              type="number"
-                              min="1"
-                              value={adminGroupDraft.guardrails.daily_rollback_quota}
-                              onChange={(e) => handleAdminGuardrailChange('daily_rollback_quota', e.target.value)}
-                              onInput={(e) => handleAdminGuardrailChange('daily_rollback_quota', e.target.value)}
-                              disabled={adminReadOnly}
-                            />
-                            <div className="helper">Minimum 1. Default {adminSettings?.daily_rollback_quota ?? 'system'}.</div>
-                          </div>
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Impact preview</div>
-                        <div className="list">
-                          <div className="list-item admin-detail">
-                            <div>Services</div>
-                            <div>{adminGroupDraft.services.length}</div>
-                            <div>
-                              {adminServiceDiff
-                                ? `+${adminServiceDiff.added.length} / -${adminServiceDiff.removed.length}`
-                                : 'New group'}
-                            </div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Recipes</div>
-                            <div>{adminGroupDraft.allowed_recipes.length}</div>
-                            <div>
-                              {adminRecipeDiff
-                                ? `+${adminRecipeDiff.added.length} / -${adminRecipeDiff.removed.length}`
-                                : 'New group'}
-                            </div>
-                          </div>
-                        </div>
-                        {adminServiceConflicts.length > 0 && (
-                          <div className="helper" style={{ marginTop: '8px' }}>
-                            Service {adminServiceConflicts[0].service} already belongs to {adminServiceConflicts[0].groupName}.
-                          </div>
-                        )}
-                        {adminGroupError && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupError}</div>}
-                        {adminGroupNote && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupNote}</div>}
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                          <button
-                            className="button"
-                            onClick={saveAdminGroup}
-                            disabled={adminGroupSaving || adminReadOnly || adminGroupValidation?.validation_status === 'ERROR'}
-                          >
-                            {adminGroupSaving ? 'Saving...' : 'Save group'}
-                          </button>
-                          <button
-                            className="button secondary"
-                            onClick={() => {
-                              setAdminGroupMode('view')
-                              setAdminGroupError('')
-                              setAdminGroupNote('')
-                              if (activeAdminGroup) {
-                                setAdminGroupDraft(buildGroupDraft(activeAdminGroup, adminGuardrailDefaults))
-                              } else {
-                                setAdminGroupDraft(buildGroupDraft(null, adminGuardrailDefaults))
-                              }
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    {adminGroupMode === 'view' && !activeAdminGroup && (
-                      <div className="helper">Select a delivery group to view details.</div>
-                    )}
-                  </div>
-                </>
-              )}
-              {adminTab === 'recipes' && (
-                <>
-                  <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h2>Recipes</h2>
-                      <button className="button secondary" onClick={startAdminRecipeCreate} disabled={adminReadOnly}>
-                        Create recipe
-                      </button>
-                    </div>
-                    {recipes.length === 0 && <div className="helper">No recipes available.</div>}
-                    {recipes.length > 0 && (
-                      <div className="list" style={{ marginTop: '12px' }}>
-                        {sortedRecipes.map((recipe) => {
-                          const usage = recipeUsageCounts[recipe.id] || 0
-                          const status = recipe.status || 'active'
-                          return (
-                            <div className="list-item admin-group" key={recipe.id}>
-                              <div>
-                                <strong>{recipe.name || recipe.id}</strong>
-                                <div className="helper">{recipe.id}</div>
-                              </div>
-                              <div>
-                                <span className={`status ${String(status).toUpperCase()}`}>{recipeStatusLabel(status)}</span>
-                              </div>
-                              <div>{usage} groups</div>
-                              <div>
-                                {isPlatformAdmin
-                                  ? recipe.spinnaker_application || 'No engine mapping'
-                                  : 'Diagnostics hidden'}
-                              </div>
-                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                <button
-                                  className="button secondary"
-                                  onClick={() => {
-                                    setAdminRecipeMode('view')
-                                    setAdminRecipeId(recipe.id)
-                                    setAdminRecipeError('')
-                                    setAdminRecipeNote('')
-                                  }}
-                                >
-                                  View
-                                </button>
-                                <button className="button secondary" onClick={() => startAdminRecipeEdit(recipe)} disabled={adminReadOnly}>
-                                  Edit
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div className="card">
-                    {adminRecipeMode === 'view' && activeAdminRecipe && (
-                      <>
-                        <h2>Recipe detail</h2>
-                        <div className="helper">Recipe metadata and engine mapping.</div>
-                        <div className="list" style={{ marginTop: '12px' }}>
-                          <div className="list-item admin-detail">
-                            <div>Name</div>
-                            <div>{activeAdminRecipe.name}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Revision</div>
-                            <div>v{activeAdminRecipe.recipe_revision ?? 1}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Status</div>
-                            <div>{recipeStatusLabel(activeAdminRecipe.status)}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Description</div>
-                            <div>{activeAdminRecipe.description || 'No description'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Behavior summary</div>
-                            <div>{activeAdminRecipe.effective_behavior_summary || 'No summary provided'}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Used by</div>
-                            <div>{activeAdminRecipeUsage} delivery groups</div>
-                          </div>
-                        </div>
-                        <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
-                        <div className="list">
-                          <div className="list-item admin-detail">
-                            <div>Created</div>
-                            <div>{formatAuditValue(activeAdminRecipe.created_by, activeAdminRecipe.created_at)}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Last updated</div>
-                            <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
-                          </div>
-                          <div className="list-item admin-detail">
-                            <div>Last change reason</div>
-                            <div>{activeAdminRecipe.last_change_reason || 'None'}</div>
-                          </div>
-                        </div>
-                        {isPlatformAdmin ? (
-                          <>
-                            <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
-                            <div className="list">
-                              <div className="list-item admin-detail">
-                                <div>Application</div>
-                                <div>{activeAdminRecipe.spinnaker_application || 'Not set'}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Deploy pipeline</div>
-                                <div>{activeAdminRecipe.deploy_pipeline || 'Not set'}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Rollback pipeline</div>
-                                <div>{activeAdminRecipe.rollback_pipeline || 'Not set'}</div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="helper" style={{ marginTop: '12px' }}>
-                            Engine mapping is visible to Platform Admins only.
-                          </div>
-                        )}
-                        <button
-                          className="button secondary"
-                          style={{ marginTop: '12px' }}
-                          onClick={() => startAdminRecipeEdit(activeAdminRecipe)}
-                          disabled={adminReadOnly}
-                        >
-                          Edit recipe
-                        </button>
-                      </>
-                    )}
-                    {(adminRecipeMode === 'create' || adminRecipeMode === 'edit') && (
-                      <>
-                        <h2>{adminRecipeMode === 'create' ? 'Create recipe' : 'Edit recipe'}</h2>
-                        {adminRecipeMode === 'edit' && activeAdminRecipe && (
-                          <>
-                            <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
-                            <div className="list" style={{ marginTop: '12px' }}>
-                              <div className="list-item admin-detail">
-                                <div>Created</div>
-                                <div>{formatAuditValue(activeAdminRecipe.created_by, activeAdminRecipe.created_at)}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Last updated</div>
-                                <div>{formatAuditValue(activeAdminRecipe.updated_by, activeAdminRecipe.updated_at)}</div>
-                              </div>
-                              <div className="list-item admin-detail">
-                                <div>Last change reason</div>
-                                <div>{activeAdminRecipe.last_change_reason || 'None'}</div>
-                              </div>
-                            </div>
-                          </>
-                        )}
-                        {adminRecipeMode === 'edit' && (
-                          <div className="field">
-                            <label htmlFor="admin-recipe-change-reason">Change reason (optional)</label>
-                            <input
-                              id="admin-recipe-change-reason"
-                              value={adminRecipeDraft.change_reason}
-                              onChange={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
-                              onInput={(e) => handleAdminRecipeDraftChange('change_reason', e.target.value)}
-                              disabled={adminReadOnly}
-                            />
-                          </div>
-                        )}
-                        <button
-                          className="button secondary"
-                          style={{ marginTop: '12px' }}
-                          onClick={validateAdminRecipeDraft}
-                          disabled={adminRecipeSaving || adminReadOnly}
-                        >
-                          Preview changes
-                        </button>
-                        {adminRecipeValidation && (
-                          <div className="helper" style={{ marginTop: '8px' }}>
-                            Validation: {adminRecipeValidation.validation_status}
-                          </div>
-                        )}
-                        {adminRecipeValidation?.messages?.length > 0 && (
-                          <div className="list" style={{ marginTop: '8px' }}>
-                            {adminRecipeValidation.messages.map((item, idx) => (
-                              <div className="list-item admin-detail" key={`recipe-validate-${idx}`}>
-                                <div>{item.type}</div>
-                                <div>{item.field || 'general'}</div>
-                                <div>{item.message}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {adminRecipeValidation?.validation_status === 'WARNING' && (
-                          <label className="check-item" style={{ marginTop: '8px' }}>
-                            <input
-                              type="checkbox"
-                              checked={adminRecipeConfirmWarning}
-                              onChange={(e) => setAdminRecipeConfirmWarning(e.target.checked)}
-                              disabled={adminReadOnly}
-                            />
-                            <span>Confirm warnings and proceed to save.</span>
-                          </label>
-                        )}
-                        <div className="helper" style={{ marginTop: '12px' }}>
-                          Admin-only configuration. Affects Delivery Owners and Observers.
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-id">Recipe id</label>
-                          <input
-                            id="admin-recipe-id"
-                            value={adminRecipeDraft.id}
-                            onChange={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('id', e.target.value)}
-                            disabled={adminRecipeMode === 'edit' || adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-name">Name</label>
-                          <input
-                            id="admin-recipe-name"
-                            value={adminRecipeDraft.name}
-                            onChange={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('name', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-description">Description</label>
-                          <input
-                            id="admin-recipe-description"
-                            value={adminRecipeDraft.description}
-                            onChange={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('description', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                        </div>
-                        <div className="field">
-                          <label htmlFor="admin-recipe-behavior">Effective behavior summary</label>
-                          <textarea
-                            id="admin-recipe-behavior"
-                            rows={2}
-                            value={adminRecipeDraft.effective_behavior_summary}
-                            onChange={(e) => handleAdminRecipeDraftChange('effective_behavior_summary', e.target.value)}
-                            onInput={(e) => handleAdminRecipeDraftChange('effective_behavior_summary', e.target.value)}
-                            disabled={adminReadOnly}
-                          />
-                          <div className="helper">Short, user-facing summary of current recipe behavior.</div>
-                        </div>
-                        {isPlatformAdmin ? (
-                          <>
-                            <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
-                            {adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && (
-                              <div className="helper">Engine mapping is locked while recipe is in use.</div>
-                            )}
-                            <div className="field">
-                              <label htmlFor="admin-recipe-app">Spinnaker application</label>
-                              <input
-                                id="admin-recipe-app"
-                                value={adminRecipeDraft.spinnaker_application}
-                                onChange={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
-                                onInput={(e) => handleAdminRecipeDraftChange('spinnaker_application', e.target.value)}
-                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                              />
-                            </div>
-                            <div className="field">
-                              <label htmlFor="admin-recipe-deploy">Deploy pipeline</label>
-                              <input
-                                id="admin-recipe-deploy"
-                                value={adminRecipeDraft.deploy_pipeline}
-                                onChange={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
-                                onInput={(e) => handleAdminRecipeDraftChange('deploy_pipeline', e.target.value)}
-                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                              />
-                            </div>
-                            <div className="field">
-                              <label htmlFor="admin-recipe-rollback">Rollback pipeline</label>
-                              <input
-                                id="admin-recipe-rollback"
-                                value={adminRecipeDraft.rollback_pipeline}
-                                onChange={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
-                                onInput={(e) => handleAdminRecipeDraftChange('rollback_pipeline', e.target.value)}
-                                disabled={adminReadOnly || (adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0)}
-                              />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="helper" style={{ marginTop: '12px' }}>
-                            Engine mapping is visible to Platform Admins only.
-                          </div>
-                        )}
-                        <div className="field">
-                          <label htmlFor="admin-recipe-status">Deprecated</label>
-                          <input
-                            id="admin-recipe-status"
-                            type="checkbox"
-                            checked={adminRecipeDraft.status === 'deprecated'}
-                            onChange={(e) =>
-                              handleAdminRecipeDraftChange('status', e.target.checked ? 'deprecated' : 'active')
-                            }
-                            disabled={adminReadOnly}
-                          />
-                          {adminRecipeDraft.status === 'deprecated' && (
-                            <div className="helper">Deprecated recipes cannot be used for new deployments.</div>
-                          )}
-                        </div>
-                        {adminRecipeError && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeError}</div>}
-                        {adminRecipeNote && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeNote}</div>}
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                          <button
-                            className="button"
-                            onClick={saveAdminRecipe}
-                            disabled={adminRecipeSaving || adminReadOnly || adminRecipeValidation?.validation_status === 'ERROR'}
-                          >
-                            {adminRecipeSaving ? 'Saving...' : 'Save recipe'}
-                          </button>
-                          <button
-                            className="button secondary"
-                            onClick={() => {
-                              setAdminRecipeMode('view')
-                              setAdminRecipeError('')
-                              setAdminRecipeNote('')
-                              if (activeAdminRecipe) {
-                                setAdminRecipeDraft(buildRecipeDraft(activeAdminRecipe))
-                              } else {
-                                setAdminRecipeDraft(buildRecipeDraft(null))
-                              }
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    {adminRecipeMode === 'view' && !activeAdminRecipe && (
-                      <div className="helper">Select a recipe to view details.</div>
-                    )}
-                  </div>
-                </>
-              )}
-              {adminTab === 'audit' && isPlatformAdmin && (
-                <div className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2>Audit events</h2>
-                    <button className="button secondary" onClick={loadAuditEvents} disabled={auditLoading}>
-                      {auditLoading ? 'Loading...' : 'Refresh'}
-                    </button>
-                  </div>
-                  {auditError && <div className="helper" style={{ marginTop: '8px' }}>{auditError}</div>}
-                  {!auditError && auditEvents.length === 0 && (
-                    <div className="helper" style={{ marginTop: '8px' }}>No audit events found.</div>
-                  )}
-                  {auditEvents.length > 0 && (
-                    <div className="list" style={{ marginTop: '12px' }}>
-                      {auditEvents.map((event) => (
-                        <div className="list-item admin-group" key={event.event_id}>
-                          <div>
-                            <strong>{event.event_type}</strong>
-                            <div className="helper">{event.timestamp}</div>
-                          </div>
-                          <div>{event.actor_id}</div>
-                          <div>{event.outcome}</div>
-                          <div>{event.target_type}: {event.target_id}</div>
-                          <div>{event.summary}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-        </div>
+        <AdminPage {...adminPageProps} />
       )}
 
       <footer className="footer">
         DXCP UI. Guardrails enforced by the API: allowlist, sandbox only, per-group lock, rate limits, idempotency.
       </footer>
-    </div>
+    </AppShell>
   )
 }
