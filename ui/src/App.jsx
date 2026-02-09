@@ -956,18 +956,18 @@ export default function App() {
     let active = true
     async function initAuth() {
       const runtimeConfig = await getRuntimeConfig()
-      if (!active) return
+      if (!active || typeof window === 'undefined') return
       if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
-        if (active) {
+        if (active && typeof window !== 'undefined') {
           setAuthError('Auth0 configuration is missing.')
           setAuthReady(true)
         }
         return
       }
-      if (active && runtimeConfig.apiBase) {
+      if (active && typeof window !== 'undefined' && runtimeConfig.apiBase) {
         setApiBase(normalizeApiBase(runtimeConfig.apiBase))
       }
-      if (active) {
+      if (active && typeof window !== 'undefined') {
         setAuthAudience(runtimeConfig.audience)
         setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
       }
@@ -977,14 +977,14 @@ export default function App() {
             ? window.__DXCP_AUTH0_FACTORY__
             : createAuth0Client
         const result = await initAuthOnce(runtimeConfig, factory)
-        if (!active) return
+        if (!active || typeof window === 'undefined') return
         setAuthClient(result.client)
         setAccessToken(result.token || '')
         setUser(result.user || null)
         setIsAuthenticated(Boolean(result.isAuthenticated))
         setAuthReady(true)
       } catch (err) {
-        if (active) {
+        if (active && typeof window !== 'undefined') {
           const message = err?.error_description || err?.error || err?.message || 'Failed to initialize Auth0.'
           setAuthError(message)
           setAuthReady(true)
