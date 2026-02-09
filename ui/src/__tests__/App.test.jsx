@@ -311,9 +311,9 @@ async function withDom(fn) {
     }
     cleanup()
     dom.window.close()
+    Object.defineProperty(globalThis, 'window', { value: { event: undefined }, configurable: true })
     delete globalThis.window.__DXCP_AUTH0_FACTORY__
     delete globalThis.window.__DXCP_AUTH0_CONFIG__
-    delete globalThis.window
     delete globalThis.document
     delete globalThis.navigator
     delete globalThis.HTMLElement

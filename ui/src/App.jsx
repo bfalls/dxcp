@@ -954,41 +954,47 @@ export default function App() {
 
   useEffect(() => {
     let active = true
+    const safeSet = (fn) => {
+      if (!active || typeof window === 'undefined') return
+      fn()
+    }
     async function initAuth() {
+      if (typeof window === 'undefined') return
       const runtimeConfig = await getRuntimeConfig()
       if (!active || typeof window === 'undefined') return
       if (!runtimeConfig.domain || !runtimeConfig.clientId || !runtimeConfig.audience) {
-        if (active && typeof window !== 'undefined') {
+        safeSet(() => {
           setAuthError('Auth0 configuration is missing.')
           setAuthReady(true)
-        }
+        })
         return
       }
-      if (active && typeof window !== 'undefined' && runtimeConfig.apiBase) {
-        setApiBase(normalizeApiBase(runtimeConfig.apiBase))
+      if (runtimeConfig.apiBase) {
+        safeSet(() => setApiBase(normalizeApiBase(runtimeConfig.apiBase)))
       }
-      if (active && typeof window !== 'undefined') {
+      safeSet(() => {
         setAuthAudience(runtimeConfig.audience)
         setRolesClaim(runtimeConfig.rolesClaim || ROLES_CLAIM)
-      }
+      })
       try {
         const factory =
           typeof window !== 'undefined' && window.__DXCP_AUTH0_FACTORY__
             ? window.__DXCP_AUTH0_FACTORY__
             : createAuth0Client
         const result = await initAuthOnce(runtimeConfig, factory)
-        if (!active || typeof window === 'undefined') return
-        setAuthClient(result.client)
-        setAccessToken(result.token || '')
-        setUser(result.user || null)
-        setIsAuthenticated(Boolean(result.isAuthenticated))
-        setAuthReady(true)
+        safeSet(() => {
+          setAuthClient(result.client)
+          setAccessToken(result.token || '')
+          setUser(result.user || null)
+          setIsAuthenticated(Boolean(result.isAuthenticated))
+          setAuthReady(true)
+        })
       } catch (err) {
-        if (active && typeof window !== 'undefined') {
+        safeSet(() => {
           const message = err?.error_description || err?.error || err?.message || 'Failed to initialize Auth0.'
           setAuthError(message)
           setAuthReady(true)
-        }
+        })
       }
     }
     initAuth()
