@@ -2520,13 +2520,14 @@ export default function App() {
       lastViewRef.current === 'detail' &&
       typeof window !== 'undefined'
     ) {
-      requestAnimationFrame(() => window.scrollTo(0, deploymentsScrollRef.current || 0))
+      window.requestAnimationFrame(() => window.scrollTo(0, deploymentsScrollRef.current || 0))
     }
     lastViewRef.current = view
   }, [
     authReady,
     isAuthenticated,
     location.key,
+    location.search,
     currentPath,
     view,
     deploymentId,
