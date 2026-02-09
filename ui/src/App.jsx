@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createAuth0Client } from '@auth0/auth0-spa-js'
 import { Navigate, Route, Routes, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import { createApiClient } from './apiClient.js'
@@ -23,6 +23,28 @@ const BACKSTAGE_BASE_URL = ENV.VITE_BACKSTAGE_BASE_URL || ''
 
 const VERSION_RE = /^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$/
 const INSIGHTS_WINDOW_DAYS = 7
+const CACHE_TTL_MS = 30 * 1000
+
+// Deterministic, in-memory cache for navigation refresh rules.
+const cacheStore = {
+  services: { ts: 0 },
+  servicesView: { ts: 0 },
+  policy: { ts: 0 },
+  versions: new Map(),
+  deployments: { ts: 0 },
+  deploymentDetail: new Map()
+}
+
+function getCacheEntry(map, key) {
+  if (!map.has(key)) {
+    map.set(key, { ts: 0 })
+  }
+  return map.get(key)
+}
+
+function isCacheFresh(entry) {
+  return Boolean(entry?.ts && Date.now() - entry.ts <= CACHE_TTL_MS)
+}
 
 let sharedAuthInitPromise = null
 let sharedAuthResult = null
@@ -566,6 +588,7 @@ export default function App() {
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
   const [deployInlineHeadline, setDeployInlineHeadline] = useState('')
   const [deployStep, setDeployStep] = useState('form')
+  const [deployEntryReady, setDeployEntryReady] = useState(true)
   const [preflightStatus, setPreflightStatus] = useState('idle')
   const [preflightResult, setPreflightResult] = useState(null)
   const [preflightError, setPreflightError] = useState('')
@@ -608,6 +631,11 @@ export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const currentPath = location.pathname || '/'
+  const lastViewRef = useRef('')
+  const lastRouteKeyRef = useRef('')
+  const deploymentsScrollRef = useRef(0)
+  const invalidationRef = useRef({ recipe: '', version: '' })
+  const previousServiceRef = useRef('')
   const view = useMemo(() => resolveViewFromPath(currentPath), [currentPath])
   const deploymentMatch = useMemo(() => matchPath('/deployments/:deploymentId', currentPath), [currentPath])
   const deploymentId = deploymentMatch?.params?.deploymentId || ''
@@ -657,14 +685,16 @@ export default function App() {
         ? 'OBSERVER'
         : 'UNKNOWN'
     : 'UNKNOWN'
-  const canDeploy = actionInfo.actions?.deploy === true
+  const canDeploy = actionInfo.actions?.deploy === true && deployEntryReady
   const canRollback = actionInfo.actions?.rollback === true
   const isPlatformAdmin = derivedRole === 'PLATFORM_ADMIN'
-  const deployDisabledReason = actionInfo.loading
-    ? 'Loading access policy.'
-    : derivedRole === 'OBSERVER'
-      ? 'Observers are read-only.'
-      : `Role ${derivedRole} cannot deploy.`
+  const deployDisabledReason = !deployEntryReady
+    ? 'Refreshing policy and versions.'
+    : actionInfo.loading
+      ? 'Loading access policy.'
+      : derivedRole === 'OBSERVER'
+        ? 'Observers are read-only.'
+        : `Role ${derivedRole} cannot deploy.`
   const rollbackDisabledReason = actionInfo.loading
     ? 'Loading access policy.'
     : derivedRole === 'OBSERVER'
@@ -705,6 +735,7 @@ export default function App() {
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
+    deployEntryReady &&
     canDeploy &&
     recipeId &&
     trimmedChangeSummary &&
@@ -976,6 +1007,7 @@ export default function App() {
     try {
       const data = await api.get('/deployments')
       setDeployments(Array.isArray(data) ? data : [])
+      cacheStore.deployments.ts = Date.now()
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setErrorHeadline('')
@@ -1018,6 +1050,7 @@ export default function App() {
       const data = await api.get('/services')
       if (Array.isArray(data)) {
         setServices(data)
+        cacheStore.services.ts = Date.now()
         if (!service && data.length === 1) {
           const nextService = data[0].service_name
           setService(nextService)
@@ -1038,11 +1071,13 @@ export default function App() {
       const data = await api.get('/recipes')
       const list = Array.isArray(data) ? data : []
       setRecipes(list)
+      return true
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setErrorHeadline('')
       setErrorMessage('Failed to load recipes')
     }
+    return false
   }, [api])
 
   const loadDeliveryGroups = useCallback(async () => {
@@ -1055,7 +1090,7 @@ export default function App() {
       if (isLoginRequiredError(err)) return
       setDeliveryGroups([])
     }
-    return []
+    return null
   }, [api])
 
   const loadAuditEvents = useCallback(async () => {
@@ -1078,7 +1113,7 @@ export default function App() {
     try {
       const data = await api.get('/services')
       const list = Array.isArray(data) ? data : []
-      const groups = deliveryGroups.length > 0 ? deliveryGroups : await loadDeliveryGroups()
+      const groups = deliveryGroups.length > 0 ? deliveryGroups : (await loadDeliveryGroups()) || []
       const statusResults = await Promise.allSettled(
         list.map((svc) => api.get(`/services/${encodeURIComponent(svc.service_name)}/delivery-status`))
       )
@@ -1098,6 +1133,7 @@ export default function App() {
       })
       rows.sort((a, b) => a.name.localeCompare(b.name))
       setServicesView(rows)
+      cacheStore.servicesView.ts = Date.now()
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setServicesView([])
@@ -1174,6 +1210,8 @@ export default function App() {
     try {
       const data = await api.get('/deployments')
       setPolicyDeployments(Array.isArray(data) ? data : [])
+      cacheStore.policy.ts = Date.now()
+      return true
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setPolicyDeployments([])
@@ -1181,7 +1219,20 @@ export default function App() {
     } finally {
       setPolicyDeploymentsLoading(false)
     }
+    return false
   }, [api])
+
+  const refreshPolicyContext = useCallback(async () => {
+    const results = await Promise.allSettled([loadRecipes(), loadDeliveryGroups(), loadPolicyDeployments()])
+    const recipesOk = results[0].status === 'fulfilled' && results[0].value === true
+    const groupsOk = results[1].status === 'fulfilled' && results[1].value !== null
+    const policyOk = results[2].status === 'fulfilled' && results[2].value === true
+    if (recipesOk && groupsOk && policyOk) {
+      cacheStore.policy.ts = Date.now()
+      return true
+    }
+    return false
+  }, [loadRecipes, loadDeliveryGroups, loadPolicyDeployments])
 
   function startAdminGroupCreate() {
     setAdminGroupMode('create')
@@ -1569,6 +1620,9 @@ export default function App() {
       const data = await api.get(`/services/${encodeURIComponent(service)}/versions${suffix}`)
       const list = Array.isArray(data?.versions) ? data.versions : []
       setVersions(list)
+      const entry = getCacheEntry(cacheStore.versions, service)
+      entry.ts = Date.now()
+      return true
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setVersionsError('Failed to load versions')
@@ -1579,12 +1633,21 @@ export default function App() {
         setVersionsLoading(false)
       }
     }
+    return false
   }, [api, service])
 
   async function refreshData() {
     setRefreshing(true)
-    const tasks = [loadRecipes(), loadVersions(true)]
-    await Promise.allSettled(tasks)
+    const tasks = [refreshPolicyContext(), loadVersions(true)]
+    const results = await Promise.allSettled(tasks)
+    const policyOk = results[0].status === 'fulfilled' && results[0].value === true
+    const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
+    const ready = policyOk && versionsOk
+    setDeployEntryReady(ready)
+    if (!ready) {
+      setErrorHeadline('Refresh required')
+      setErrorMessage('Policy or versions could not be refreshed. Please retry.')
+    }
     setRefreshing(false)
   }
 
@@ -1707,6 +1770,8 @@ export default function App() {
         setFailures(Array.isArray(failureData) ? failureData : [])
         const timelineData = await api.get(`/deployments/${deploymentId}/timeline`)
         setTimeline(Array.isArray(timelineData) ? timelineData : [])
+        const entry = getCacheEntry(cacheStore.deploymentDetail, deploymentId)
+        entry.ts = Date.now()
       } catch (err) {
         if (isLoginRequiredError(err)) return
         setErrorHeadline('')
@@ -1721,6 +1786,9 @@ export default function App() {
   const openDeployment = useCallback(
     (deployment) => {
       if (!deployment?.id) return
+      if (view === 'deployments' && typeof window !== 'undefined') {
+        deploymentsScrollRef.current = window.scrollY
+      }
       setDeploymentDetailLoading(true)
       setSelected(null)
       setFailures([])
@@ -1728,7 +1796,7 @@ export default function App() {
       setTimeline([])
       navigate(`/deployments/${encodeURIComponent(deployment.id)}`)
     },
-    [navigate]
+    [navigate, view]
   )
 
   async function handleRollback() {
@@ -1933,8 +2001,20 @@ export default function App() {
   }, [isAuthenticated])
 
   useEffect(() => {
+    previousServiceRef.current = service
+  }, [service])
+
+  useEffect(() => {
     if (!isAuthenticated) return
     if (!currentDeliveryGroup || filteredRecipes.length === 0) {
+      if (recipeId && previousServiceRef.current === service) {
+        const alertKey = `recipe:${service}:${recipeId}`
+        if (invalidationRef.current.recipe !== alertKey) {
+          invalidationRef.current.recipe = alertKey
+          setErrorHeadline('Selection needs review')
+          setErrorMessage('Policy updated and cleared the selected recipe. Please re-select a recipe.')
+        }
+      }
       setRecipeId('')
       setRecipeAutoApplied(false)
       if (deployStep === 'confirm') {
@@ -1944,6 +2024,14 @@ export default function App() {
     }
     const allowedIds = filteredRecipes.map((recipe) => recipe.id)
     if (!allowedIds.includes(recipeId)) {
+      if (recipeId && previousServiceRef.current === service) {
+        const alertKey = `recipe:${service}:${recipeId}`
+        if (invalidationRef.current.recipe !== alertKey) {
+          invalidationRef.current.recipe = alertKey
+          setErrorHeadline('Selection needs review')
+          setErrorMessage('Policy updated and cleared the selected recipe. Please re-select a recipe.')
+        }
+      }
       if (allowedIds.length === 1) {
         setRecipeId(allowedIds[0])
         setRecipeAutoApplied(true)
@@ -1958,7 +2046,7 @@ export default function App() {
         }
       }
     }
-  }, [isAuthenticated, currentDeliveryGroup, filteredRecipes, recipeId, deployStep])
+  }, [isAuthenticated, currentDeliveryGroup, filteredRecipes, recipeId, deployStep, service])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -2079,11 +2167,19 @@ export default function App() {
       setVersionAutoApplied(false)
     }
     if (version && versions.length > 0 && !versions.find((item) => item.version === version)) {
+      if (previousServiceRef.current === service) {
+        const alertKey = `version:${service}:${version}`
+        if (invalidationRef.current.version !== alertKey) {
+          invalidationRef.current.version = alertKey
+          setErrorHeadline('Selection needs review')
+          setErrorMessage('Available versions changed and cleared the selected version. Please re-select a version.')
+        }
+      }
       setVersion('')
       setVersionAutoApplied(false)
       setVersionSelection('none')
     }
-  }, [versions, versionMode, versionSelection, version])
+  }, [versions, versionMode, versionSelection, version, service])
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'deploy' || !service) return undefined
@@ -2121,6 +2217,8 @@ export default function App() {
         const detail = await api.get(`/deployments/${selected.id}`)
         if (!cancelled && detail && !detail.code) {
           setSelected(detail)
+          const entry = getCacheEntry(cacheStore.deploymentDetail, selected.id)
+          entry.ts = Date.now()
           const failureData = await api.get(`/deployments/${selected.id}/failures`)
           setFailures(Array.isArray(failureData) ? failureData : [])
           const timelineData = await api.get(`/deployments/${selected.id}/timeline`)
@@ -2156,8 +2254,11 @@ export default function App() {
       setDeploymentDetailLoading(false)
       return
     }
-    loadDeploymentDetail(deploymentId)
-  }, [authReady, isAuthenticated, deploymentId, loadDeploymentDetail])
+    const detailEntry = getCacheEntry(cacheStore.deploymentDetail, deploymentId)
+    if (!isCacheFresh(detailEntry) || selected?.id !== deploymentId) {
+      loadDeploymentDetail(deploymentId)
+    }
+  }, [authReady, isAuthenticated, deploymentId, selected?.id, loadDeploymentDetail])
 
   useEffect(() => {
     if (view !== 'service') return
@@ -2177,30 +2278,98 @@ export default function App() {
   }, [view, serviceDetailName])
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated) return
+    if (view !== 'service' || !serviceDetailName) return
+    // Service detail should refresh on entry even if route state arrives before name is set.
+    loadServiceDetail(serviceDetailName)
+  }, [authReady, isAuthenticated, view, serviceDetailName, loadServiceDetail])
+
+  useEffect(() => {
     if (!isAuthenticated || view !== 'insights') return
     if (!isPlatformAdmin && !insightsDefaultsApplied) return
     loadInsights()
   }, [view, isAuthenticated, insightsDefaultsApplied, isPlatformAdmin, loadInsights])
 
   useEffect(() => {
-    if (!authReady || !isAuthenticated || view !== 'services') return
-    loadServicesList()
-  }, [authReady, isAuthenticated, view, loadServicesList])
+    if (!authReady || !isAuthenticated) return
+    const routeKey = location.key || currentPath
+    if (lastRouteKeyRef.current === routeKey) return
+    lastRouteKeyRef.current = routeKey
 
-  useEffect(() => {
-    if (!authReady || !isAuthenticated || view !== 'deploy') return
-    loadPolicyDeployments()
-  }, [authReady, isAuthenticated, view, currentDeliveryGroup?.id, loadPolicyDeployments])
+    // Deterministic refresh rules on route entry (TTL-based, in-memory cache only).
+    if (view === 'services') {
+      if (!isCacheFresh(cacheStore.servicesView) || servicesView.length === 0) {
+        loadServicesList()
+      }
+    }
 
-  useEffect(() => {
-    if (!authReady || !isAuthenticated || view !== 'deployments') return
-    refreshDeployments()
-  }, [authReady, isAuthenticated, view, refreshDeployments])
+    if (view === 'deploy') {
+      setDeployEntryReady(false)
+      const versionsEntry = service ? getCacheEntry(cacheStore.versions, service) : null
+      const versionsFresh = service && isCacheFresh(versionsEntry)
+      const policyPromise = refreshPolicyContext()
+      const versionsPromise = service ? loadVersions(Boolean(versionsFresh)) : Promise.resolve(true)
+      const actionsPromise = service ? loadAllowedActions(service) : Promise.resolve(true)
+      Promise.allSettled([policyPromise, versionsPromise, actionsPromise]).then((results) => {
+        if (lastRouteKeyRef.current !== routeKey) return
+        const policyOk = results[0].status === 'fulfilled' && results[0].value === true
+        const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
+        const ready = policyOk && versionsOk
+        setDeployEntryReady(ready)
+        if (!ready) {
+          setErrorHeadline('Refresh required')
+          setErrorMessage('Policy or versions could not be refreshed. Please retry.')
+        }
+      })
+    } else {
+      setDeployEntryReady(true)
+    }
 
-  useEffect(() => {
-    if (!authReady || !isAuthenticated || view !== 'service' || !serviceDetailName) return
-    loadServiceDetail(serviceDetailName)
-  }, [authReady, isAuthenticated, view, serviceDetailName, loadServiceDetail])
+    if (view === 'deployments') {
+      if (!isCacheFresh(cacheStore.deployments) || deployments.length === 0) {
+        refreshDeployments()
+      }
+    }
+
+    if (view === 'detail' && deploymentId) {
+      const detailEntry = getCacheEntry(cacheStore.deploymentDetail, deploymentId)
+      if (!isCacheFresh(detailEntry) || selected?.id !== deploymentId) {
+        loadDeploymentDetail(deploymentId)
+      }
+    }
+
+    if (view === 'service' && serviceDetailName) {
+      loadServiceDetail(serviceDetailName)
+    }
+
+    if (
+      view === 'deployments' &&
+      lastViewRef.current === 'detail' &&
+      typeof window !== 'undefined'
+    ) {
+      requestAnimationFrame(() => window.scrollTo(0, deploymentsScrollRef.current || 0))
+    }
+    lastViewRef.current = view
+  }, [
+    authReady,
+    isAuthenticated,
+    location.key,
+    currentPath,
+    view,
+    deploymentId,
+    serviceDetailName,
+    service,
+    servicesView.length,
+    deployments.length,
+    selected?.id,
+    loadServicesList,
+    refreshPolicyContext,
+    loadVersions,
+    loadAllowedActions,
+    refreshDeployments,
+    loadDeploymentDetail,
+    loadServiceDetail
+  ])
 
   const selectedService = services.find((s) => s.service_name === selected?.service)
   let serviceUrl = ''
