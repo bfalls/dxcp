@@ -598,6 +598,9 @@ export default function App() {
   const [preflightResult, setPreflightResult] = useState(null)
   const [preflightError, setPreflightError] = useState('')
   const [preflightErrorHeadline, setPreflightErrorHeadline] = useState('')
+  const [policySummary, setPolicySummary] = useState(null)
+  const [policySummaryStatus, setPolicySummaryStatus] = useState('idle')
+  const [policySummaryError, setPolicySummaryError] = useState('')
   const [policyDeployments, setPolicyDeployments] = useState([])
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
@@ -739,9 +742,14 @@ export default function App() {
     () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version }) : ''),
     [service, recipeId, version]
   )
+  const policySummaryKey = useMemo(
+    () => (service ? JSON.stringify({ service, recipeId: recipeId || '', environment: 'sandbox' }) : ''),
+    [service, recipeId]
+  )
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const lastAutoPreflightKeyRef = useRef('')
   const lastChangeSummaryFilledRef = useRef(false)
+  const lastPolicySummaryKeyRef = useRef('')
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
     deployEntryReady &&
@@ -1281,6 +1289,34 @@ export default function App() {
     }
     return false
   }, [api])
+
+  const loadPolicySummary = useCallback(async () => {
+    if (!service) return false
+    setPolicySummaryStatus('checking')
+    setPolicySummaryError('')
+    try {
+      const payload = { service, environment: 'sandbox' }
+      if (recipeId) {
+        payload.recipeId = recipeId
+      }
+      const result = await api.post('/policy/summary', payload)
+      if (result && result.code) {
+        setPolicySummary(null)
+        setPolicySummaryStatus('error')
+        setPolicySummaryError(`${result.code}: ${result.message}`)
+        return false
+      }
+      setPolicySummary(result)
+      setPolicySummaryStatus('ok')
+      return true
+    } catch (err) {
+      if (isLoginRequiredError(err)) return false
+      setPolicySummary(null)
+      setPolicySummaryStatus('error')
+      setPolicySummaryError('Failed to load policy summary.')
+    }
+    return false
+  }, [api, recipeId, service])
 
   const refreshPolicyContext = useCallback(async () => {
     const results = await Promise.allSettled([loadRecipes(), loadDeliveryGroups(), loadPolicyDeployments()])
@@ -2049,6 +2085,9 @@ export default function App() {
       setRecipes([])
       setRecipeId('')
       setDeployments([])
+      setPolicySummary(null)
+      setPolicySummaryStatus('idle')
+      setPolicySummaryError('')
       setPolicyDeployments([])
       setPolicyDeploymentsError('')
       setPolicyDeploymentsLoading(false)
@@ -2082,6 +2121,7 @@ export default function App() {
         loading: true,
         error: ''
         })
+      lastPolicySummaryKeyRef.current = ''
     }
   }, [isAuthenticated])
 
@@ -2217,6 +2257,23 @@ export default function App() {
     runPreflight,
     trimmedChangeSummary
   ])
+
+  useEffect(() => {
+    if (!isAuthenticated || view !== 'deploy') return
+    if (!policySummaryKey) {
+      setPolicySummary(null)
+      setPolicySummaryStatus('idle')
+      setPolicySummaryError('')
+      lastPolicySummaryKeyRef.current = ''
+      return
+    }
+    if (lastPolicySummaryKeyRef.current === policySummaryKey) return
+    lastPolicySummaryKeyRef.current = policySummaryKey
+    setPolicySummary(null)
+    setPolicySummaryStatus('idle')
+    setPolicySummaryError('')
+    loadPolicySummary()
+  }, [isAuthenticated, view, policySummaryKey, loadPolicySummary])
 
   useEffect(() => {
     if (!isAuthenticated || !service || !accessToken) return
@@ -2769,6 +2826,9 @@ export default function App() {
     preflightStatus,
     preflightError,
     preflightErrorHeadline,
+    policySummary,
+    policySummaryStatus,
+    policySummaryError,
     debugDeployGatesEnabled,
     canDeploy,
     canRunPreflight,

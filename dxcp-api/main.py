@@ -27,6 +27,7 @@ from models import (
     DeliveryGroupUpsert,
     DeploymentIntent,
     EngineType,
+    PolicySummaryRequest,
     Recipe,
     RecipeUpsert,
     Role,
@@ -256,6 +257,20 @@ def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
     if isinstance(value, int) and value > 0:
         return value
     return default_value
+
+
+def _policy_snapshot_for_group(group: dict) -> dict:
+    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    active = storage.count_active_deployments_for_group(group["id"])
+    quota = rate_limiter.get_daily_remaining(group["id"], "deploy", daily_deploy_quota)
+    return {
+        "max_concurrent_deployments": max_concurrent,
+        "current_concurrent_deployments": active,
+        "daily_deploy_quota": daily_deploy_quota,
+        "deployments_used": quota["used"],
+        "deployments_remaining": quota["remaining"],
+    }
 
 
 def _with_guardrail_defaults(group: dict) -> dict:
@@ -1213,6 +1228,52 @@ def create_deployment(
     return _deployment_public_view(actor, record)
 
 
+@app.post("/v1/policy/summary")
+def get_policy_summary(
+    req: PolicySummaryRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "view policy")
+    if role_error:
+        return role_error
+    rate_limiter.check_read(actor.actor_id)
+    group, group_error = resolve_delivery_group(req.service, actor)
+    if group_error:
+        return group_error
+    policy_env_error = _policy_check_environment(group, req.environment, actor)
+    if policy_env_error:
+        return policy_env_error
+    recipe = None
+    if req.recipeId:
+        recipe, recipe_error = resolve_recipe(req.recipeId, actor)
+        if recipe_error:
+            return recipe_error
+        policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+        if policy_recipe_error:
+            return policy_recipe_error
+    try:
+        service_entry = guardrails.validate_service(req.service)
+        guardrails.validate_environment(req.environment, service_entry)
+    except PolicyError as exc:
+        return _capability_error(exc.code, exc.message, actor)
+    if recipe:
+        recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+        if recipe_capability_error:
+            return recipe_capability_error
+
+    policy_snapshot = _policy_snapshot_for_group(group)
+    return {
+        "service": req.service,
+        "environment": req.environment,
+        "recipeId": recipe.get("id") if recipe else None,
+        "deliveryGroupId": group.get("id"),
+        "policy": policy_snapshot,
+        "generatedAt": utc_now(),
+    }
+
+
 @app.post("/v1/deployments/validate")
 def validate_deployment(
     intent: DeploymentIntent,
@@ -1250,13 +1311,10 @@ def validate_deployment(
     if not build:
         return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
 
-    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
-    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
-    active = storage.count_active_deployments_for_group(group["id"])
-    if active >= max_concurrent:
+    policy_snapshot = _policy_snapshot_for_group(group)
+    if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
         return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
-    quota = rate_limiter.get_daily_remaining(group["id"], "deploy", daily_deploy_quota)
-    if quota["remaining"] <= 0:
+    if policy_snapshot["deployments_remaining"] <= 0:
         return error_response(429, "QUOTA_EXCEEDED", "Daily quota exceeded")
 
     return {
@@ -1266,13 +1324,7 @@ def validate_deployment(
         "recipeId": recipe.get("id"),
         "deliveryGroupId": group.get("id"),
         "versionRegistered": True,
-        "policy": {
-            "max_concurrent_deployments": max_concurrent,
-            "current_concurrent_deployments": active,
-            "daily_deploy_quota": daily_deploy_quota,
-            "deployments_used": quota["used"],
-            "deployments_remaining": quota["remaining"],
-        },
+        "policy": policy_snapshot,
         "validatedAt": utc_now(),
     }
 

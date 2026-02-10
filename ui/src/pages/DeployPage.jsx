@@ -37,6 +37,9 @@ export default function DeployPage({
   preflightStatus,
   preflightError,
   preflightErrorHeadline,
+  policySummary,
+  policySummaryStatus,
+  policySummaryError,
   debugDeployGatesEnabled,
   canDeploy,
   canRunPreflight,
@@ -59,9 +62,12 @@ export default function DeployPage({
   versionVerified,
   trimmedChangeSummary
 }) {
-  const deploysRemaining = currentDeliveryGroup?.guardrails?.daily_deploy_quota
-    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
-    : '-'
+  const policySnapshot = preflightResult?.policy || policySummary?.policy || null
+  const deploysRemaining =
+    policySnapshot?.deployments_remaining ??
+    (currentDeliveryGroup?.guardrails?.daily_deploy_quota
+      ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+      : '-')
   const rollbacksRemaining = currentDeliveryGroup?.guardrails?.daily_rollback_quota
     ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
     : '-'
@@ -247,13 +253,13 @@ export default function DeployPage({
             <div className="list space-8">
               <div className="list-item two-col">
                 <div>Deploys remaining today</div>
-                <div>{preflightResult?.policy?.deployments_remaining ?? deploysRemaining}</div>
+                <div>{deploysRemaining}</div>
               </div>
               <div className="list-item two-col">
                 <div>Concurrent deployments</div>
                 <div>
-                  {preflightResult?.policy
-                    ? `${preflightResult.policy.current_concurrent_deployments} / ${preflightResult.policy.max_concurrent_deployments}`
+                  {policySnapshot
+                    ? `${policySnapshot.current_concurrent_deployments} / ${policySnapshot.max_concurrent_deployments}`
                     : '-'}
                 </div>
               </div>
@@ -273,6 +279,16 @@ export default function DeployPage({
             {preflightStatus === 'checking' && (
               <div className="helper space-8">
                 Checking policy and guardrails...
+              </div>
+            )}
+            {policySummaryStatus === 'checking' && (
+              <div className="helper space-8">
+                Loading policy summary...
+              </div>
+            )}
+            {policySummaryStatus === 'error' && policySummaryError && (
+              <div className="helper space-8">
+                {policySummaryError}
               </div>
             )}
             {preflightStatus === 'error' && preflightError && (
@@ -378,9 +394,7 @@ export default function DeployPage({
               <div className="list-item">
                 <div>Deploys remaining today</div>
                 <div>
-                  {currentDeliveryGroup?.guardrails?.daily_deploy_quota
-                    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
-                    : '-'}
+                  {deploysRemaining}
                 </div>
               </div>
               <div className="list-item">
@@ -439,9 +453,7 @@ export default function DeployPage({
             <div className="list-item two-col">
               <div>Deploys remaining today</div>
               <div>
-                {currentDeliveryGroup.guardrails?.daily_deploy_quota
-                  ? deploysRemaining
-                  : '-'}
+                {deploysRemaining}
               </div>
             </div>
             <div className="list-item two-col">

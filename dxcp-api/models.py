@@ -50,6 +50,12 @@ class DeploymentIntent(BaseModel):
     recipeId: str
 
 
+class PolicySummaryRequest(BaseModel):
+    service: str
+    environment: str
+    recipeId: Optional[str] = None
+
+
 class NormalizedFailure(BaseModel):
     category: str
     summary: str

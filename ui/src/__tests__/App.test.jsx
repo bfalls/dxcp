@@ -29,6 +29,7 @@ const buildFetchMock = ({
   servicesList,
   guardrailValidation,
   preflightResponse,
+  policySummaryResponse,
   versionsByService
 }) => {
   let groups = deliveryGroups || [
@@ -100,6 +101,26 @@ const buildFetchMock = ({
           deployments_remaining: 5
         },
         validatedAt: '2025-01-01T00:00:00Z'
+      })
+    }
+    if (pathname === '/v1/policy/summary' && options.method === 'POST') {
+      if (policySummaryResponse) {
+        return ok(policySummaryResponse)
+      }
+      const body = JSON.parse(options.body || '{}')
+      return ok({
+        service: body.service,
+        environment: body.environment,
+        recipeId: body.recipeId || null,
+        deliveryGroupId: 'default',
+        policy: {
+          max_concurrent_deployments: 1,
+          current_concurrent_deployments: 0,
+          daily_deploy_quota: 5,
+          deployments_used: 0,
+          deployments_remaining: 5
+        },
+        generatedAt: '2025-01-01T00:00:00Z'
       })
     }
     if (pathname === '/v1/settings/public') {

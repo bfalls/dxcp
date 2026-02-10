@@ -106,6 +106,30 @@ paths:
         '503':
           $ref: '#/components/responses/MutationsDisabled'
 
+  /policy/summary:
+    post:
+      summary: Fetch policy summary for a service selection
+      operationId: getPolicySummary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicySummaryRequest'
+      responses:
+        '200':
+          description: Policy summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicySummaryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /deployments/{deploymentId}:
     get:
       summary: Get deployment status
@@ -430,6 +454,61 @@ components:
             deployments_remaining:
               type: integer
         validatedAt:
+          type: string
+          format: date-time
+    PolicySummaryRequest:
+      type: object
+      required:
+        - service
+        - environment
+      properties:
+        service:
+          type: string
+        environment:
+          type: string
+          enum: [sandbox]
+        recipeId:
+          type: string
+          nullable: true
+    PolicySummaryResponse:
+      type: object
+      required:
+        - service
+        - environment
+        - deliveryGroupId
+        - policy
+        - generatedAt
+      properties:
+        service:
+          type: string
+        environment:
+          type: string
+          enum: [sandbox]
+        recipeId:
+          type: string
+          nullable: true
+        deliveryGroupId:
+          type: string
+        policy:
+          type: object
+          required:
+            - max_concurrent_deployments
+            - current_concurrent_deployments
+            - daily_deploy_quota
+            - deployments_used
+            - deployments_remaining
+          properties:
+            max_concurrent_deployments:
+              type: integer
+            current_concurrent_deployments:
+              type: integer
+            daily_deploy_quota:
+              type: integer
+            deployments_used:
+              type: integer
+            deployments_remaining:
+              type: integer
+        generatedAt:
           type: string
           format: date-time
     DeploymentState:
