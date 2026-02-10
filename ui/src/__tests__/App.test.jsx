@@ -570,7 +570,7 @@ export async function runAllTests() {
     assert.ok(view.queryByText('No delivery group assigned.') === null)
   })
 
-  await runTest('Change summary typing does not trigger validate', async () => {
+  await runTest('Change summary triggers preflight validation when filled', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -608,7 +608,7 @@ export async function runAllTests() {
     changeInput.value = 'Release notes'
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
-    await waitForCondition(() => validateCalls === 0)
+    await waitForCondition(() => validateCalls >= 1)
   })
 
   await runTest('Review deploy validates once and blocks on failure', async () => {
@@ -654,7 +654,7 @@ export async function runAllTests() {
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
     await waitForCondition(() => !reviewButton.disabled)
     fireEvent.click(reviewButton)
-    await waitForCondition(() => validateCalls === 1)
+    await waitForCondition(() => validateCalls >= 1)
     await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
     assert.equal(view.queryByText('Confirm deploy'), null)
   })

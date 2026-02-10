@@ -735,11 +735,13 @@ export default function App() {
   )
   const trimmedChangeSummary = useMemo(() => changeSummary.trim(), [changeSummary])
   const selectedRecipeNarrative = useMemo(() => strategyNarrative(selectedRecipe), [selectedRecipe])
-  const selectionKey = useMemo(
+  const preflightKey = useMemo(
     () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version }) : ''),
     [service, recipeId, version]
   )
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
+  const lastAutoPreflightKeyRef = useRef('')
+  const lastChangeSummaryFilledRef = useRef(false)
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
     deployEntryReady &&
@@ -1878,51 +1880,76 @@ export default function App() {
     await refreshDeployments()
   }
 
-  async function handleReviewDeploy() {
-    if (!canRunPreflight || preflightStatus === 'checking') return
-    setPreflightStatus('checking')
-    setPreflightError('')
-    setPreflightErrorHeadline('')
-    try {
-      // Validate only when the user requests review to avoid burning read RPM on every keystroke.
-      const payload = {
-        service,
-        environment: 'sandbox',
-        version,
-        changeSummary: trimmedChangeSummary,
-        recipeId
-      }
-      const result = await api.post('/deployments/validate', payload)
-      if (result && result.code) {
-        const messages = {
-          CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
-          QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
-          VERSION_NOT_FOUND: 'Version must be registered for this service.',
-          INVALID_VERSION: 'Version format is invalid.',
-          RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
-          RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
-          SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
-          SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
-          ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
-          RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
-          MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
-          RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+  const runPreflight = useCallback(
+    async ({ advanceToConfirm }) => {
+      if (!canRunPreflight || preflightStatus === 'checking') return false
+      if (!service || !recipeId || !version) return false
+      setPreflightStatus('checking')
+      setPreflightError('')
+      setPreflightErrorHeadline('')
+      try {
+        const payload = {
+          service,
+          environment: 'sandbox',
+          version,
+          changeSummary: trimmedChangeSummary,
+          recipeId
         }
-        const inline = messages[result.code]
+        const result = await api.post('/deployments/validate', payload)
+        if (result && result.code) {
+          const messages = {
+            CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
+            QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
+            VERSION_NOT_FOUND: 'Version must be registered for this service.',
+            INVALID_VERSION: 'Version format is invalid.',
+            RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
+            RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
+            SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+            SERVICE_NOT_ALLOWLISTED: 'Service is not allowlisted.',
+            ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
+            RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
+            MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
+            RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+          }
+          const inline = messages[result.code]
+          setPreflightStatus('error')
+          setPreflightErrorHeadline('Fix these issues to continue')
+          setPreflightError(`${result.code}: ${inline || result.message}`)
+          return false
+        }
+        setPreflightResult(result)
+        setPreflightStatus('ok')
+      setValidatedIntentKey(preflightKey)
+        if (advanceToConfirm) {
+          setDeployStep('confirm')
+        }
+        return true
+      } catch (err) {
         setPreflightStatus('error')
         setPreflightErrorHeadline('Fix these issues to continue')
-        setPreflightError(`${result.code}: ${inline || result.message}`)
-        return
+        setPreflightError('Failed to check policy and guardrails.')
+        return false
       }
-      setPreflightResult(result)
-      setPreflightStatus('ok')
-      setValidatedIntentKey(selectionKey)
+    },
+    [
+      api,
+      canRunPreflight,
+      preflightStatus,
+      service,
+      recipeId,
+      version,
+      trimmedChangeSummary,
+      preflightKey
+    ]
+  )
+
+  async function handleReviewDeploy() {
+    if (!canRunPreflight || preflightStatus === 'checking') return
+    if (validatedIntentKey && validatedIntentKey === preflightKey && preflightStatus === 'ok' && preflightResult) {
       setDeployStep('confirm')
-    } catch (err) {
-      setPreflightStatus('error')
-      setPreflightErrorHeadline('Fix these issues to continue')
-      setPreflightError('Failed to check policy and guardrails.')
+      return
     }
+    await runPreflight({ advanceToConfirm: true })
   }
 
   useEffect(() => {
@@ -2135,11 +2162,13 @@ export default function App() {
       setPreflightError('')
       setPreflightErrorHeadline('')
       setValidatedIntentKey('')
+      lastAutoPreflightKeyRef.current = ''
+      lastChangeSummaryFilledRef.current = false
       return
     }
     if (!service || !recipeId || !version) return
     if (deployStep === 'confirm') {
-      if (validatedIntentKey && validatedIntentKey === selectionKey) {
+      if (validatedIntentKey && validatedIntentKey === preflightKey) {
         return
       }
       setDeployStep('form')
@@ -2148,6 +2177,8 @@ export default function App() {
       setPreflightError('')
       setPreflightErrorHeadline('')
       setValidatedIntentKey('')
+      lastAutoPreflightKeyRef.current = ''
+      lastChangeSummaryFilledRef.current = false
       return
     }
     setPreflightStatus('idle')
@@ -2160,8 +2191,31 @@ export default function App() {
     recipeId,
     version,
     deployStep,
-    selectionKey,
+    preflightKey,
     validatedIntentKey
+  ])
+
+  useEffect(() => {
+    if (!canRunPreflight || deployStep === 'confirm') return
+    if (!preflightKey || preflightStatus === 'checking') return
+    if (validatedIntentKey && validatedIntentKey === preflightKey && preflightStatus === 'ok') return
+    const changeSummaryFilled = Boolean(trimmedChangeSummary)
+    if (!changeSummaryFilled) {
+      lastChangeSummaryFilledRef.current = false
+      return
+    }
+    if (lastAutoPreflightKeyRef.current === preflightKey && lastChangeSummaryFilledRef.current) return
+    lastAutoPreflightKeyRef.current = preflightKey
+    lastChangeSummaryFilledRef.current = true
+    runPreflight({ advanceToConfirm: false })
+  }, [
+    canRunPreflight,
+    deployStep,
+    preflightKey,
+    preflightStatus,
+    validatedIntentKey,
+    runPreflight,
+    trimmedChangeSummary
   ])
 
   useEffect(() => {
