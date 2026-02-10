@@ -755,6 +755,21 @@ export default function App() {
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
   )
+  const latestPolicyDeployment = useMemo(() => {
+    if (!Array.isArray(policyDeployments) || policyDeployments.length === 0) return null
+    const list = service ? policyDeployments.filter((item) => item?.service === service) : policyDeployments
+    if (list.length === 0) return null
+    return list
+      .slice()
+      .sort((a, b) => {
+        const aTime = Date.parse(a?.createdAt || a?.updatedAt || '')
+        const bTime = Date.parse(b?.createdAt || b?.updatedAt || '')
+        if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0
+        if (Number.isNaN(aTime)) return 1
+        if (Number.isNaN(bTime)) return -1
+        return bTime - aTime
+      })[0]
+  }, [policyDeployments, service])
   const visibleDeployments = useMemo(() => {
     if (!deploymentsFilterService) return deployments
     return deployments.filter((item) => item.service === deploymentsFilterService)
@@ -2692,6 +2707,7 @@ export default function App() {
     policyDeploymentsLoading,
     policyDeploymentsError,
     deployResult,
+    latestPolicyDeployment,
     statusClass,
     isPlatformAdmin,
     openDeployment,

@@ -52,12 +52,21 @@ export default function DeployPage({
   policyDeploymentsLoading,
   policyDeploymentsError,
   deployResult,
+  latestPolicyDeployment,
   statusClass,
   isPlatformAdmin,
   openDeployment,
   versionVerified,
   trimmedChangeSummary
 }) {
+  const deploysRemaining = currentDeliveryGroup?.guardrails?.daily_deploy_quota
+    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
+    : '-'
+  const rollbacksRemaining = currentDeliveryGroup?.guardrails?.daily_rollback_quota
+    ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
+    : '-'
+  const latestDeployment = deployResult || latestPolicyDeployment
+
   return (
     <div className="shell two-column">
       <div className="page-header-zone">
@@ -236,24 +245,29 @@ export default function DeployPage({
             </div>
             <div className="helper space-12">Policy checks</div>
             <div className="list space-8">
-              <div className="list-item admin-detail">
+              <div className="list-item two-col">
                 <div>Deploys remaining today</div>
-                <div>{preflightResult?.policy?.deployments_remaining ?? '-'}</div>
-                <div />
+                <div>{preflightResult?.policy?.deployments_remaining ?? deploysRemaining}</div>
               </div>
-              <div className="list-item admin-detail">
+              <div className="list-item two-col">
                 <div>Concurrent deployments</div>
                 <div>
                   {preflightResult?.policy
                     ? `${preflightResult.policy.current_concurrent_deployments} / ${preflightResult.policy.max_concurrent_deployments}`
                     : '-'}
                 </div>
-                <div />
               </div>
-              <div className="list-item admin-detail">
+              <div className="list-item two-col">
                 <div>Version status</div>
-                <div>{preflightResult?.versionRegistered ? 'Registered' : '-'}</div>
-                <div />
+                <div>
+                  {preflightResult?.versionRegistered
+                    ? 'Registered'
+                    : versionVerified
+                      ? 'Registered'
+                      : version
+                        ? 'Unverified'
+                        : '-'}
+                </div>
               </div>
             </div>
             {preflightStatus === 'checking' && (
@@ -403,74 +417,74 @@ export default function DeployPage({
         {currentDeliveryGroup && (
           <>
             <div className="list">
-              <div className="list-item">
+              <div className="list-item two-col">
                 <div>Delivery group</div>
                 <div>{currentDeliveryGroup.name}</div>
               </div>
-              <div className="list-item">
+              <div className="list-item two-col">
                 <div>Owner</div>
                 <div>{currentDeliveryGroup.owner || 'Unassigned'}</div>
               </div>
             </div>
           <div className="helper space-12">Guardrails</div>
-            <div className="list">
-              <div className="list-item">
-                <div>Max concurrent deployments</div>
-                <div>{currentDeliveryGroup.guardrails?.max_concurrent_deployments || '-'}</div>
-              </div>
-              <div className="list-item">
-                <div>Daily deploy quota</div>
-                <div>{currentDeliveryGroup.guardrails?.daily_deploy_quota || '-'}</div>
-              </div>
-              <div className="list-item">
-                <div>Deploys remaining today</div>
-                <div>
-                  {currentDeliveryGroup.guardrails?.daily_deploy_quota
-                    ? Math.max(currentDeliveryGroup.guardrails.daily_deploy_quota - policyQuotaStats.deployUsed, 0)
-                    : '-'}
-                </div>
-              </div>
-              <div className="list-item">
-                <div>Daily rollback quota</div>
-                <div>{currentDeliveryGroup.guardrails?.daily_rollback_quota || '-'}</div>
-              </div>
-              <div className="list-item">
-                <div>Rollbacks remaining today</div>
-                <div>
-                  {currentDeliveryGroup.guardrails?.daily_rollback_quota
-                    ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
-                    : '-'}
-                </div>
+          <div className="list">
+            <div className="list-item two-col">
+              <div>Max concurrent deployments</div>
+              <div>{currentDeliveryGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+            </div>
+            <div className="list-item two-col">
+              <div>Daily deploy quota</div>
+              <div>{currentDeliveryGroup.guardrails?.daily_deploy_quota || '-'}</div>
+            </div>
+            <div className="list-item two-col">
+              <div>Deploys remaining today</div>
+              <div>
+                {currentDeliveryGroup.guardrails?.daily_deploy_quota
+                  ? deploysRemaining
+                  : '-'}
               </div>
             </div>
+            <div className="list-item two-col">
+              <div>Daily rollback quota</div>
+              <div>{currentDeliveryGroup.guardrails?.daily_rollback_quota || '-'}</div>
+            </div>
+            <div className="list-item two-col">
+              <div>Rollbacks remaining today</div>
+              <div>
+                {currentDeliveryGroup.guardrails?.daily_rollback_quota
+                  ? rollbacksRemaining
+                  : '-'}
+              </div>
+            </div>
+          </div>
           {policyDeploymentsLoading && <div className="helper space-8">Loading quota usage...</div>}
           {policyDeploymentsError && <div className="helper space-8">{policyDeploymentsError}</div>}
           <div className="helper space-12">Recipe</div>
-            <div className="list">
-              <div className="list-item">
-                <div>Selected</div>
-                <div>{selectedRecipe?.name || 'None'}</div>
-              </div>
-              <div className="list-item">
-                <div>Description</div>
-                <div>{selectedRecipe?.description || 'No description'}</div>
-              </div>
+          <div className="list">
+            <div className="list-item two-col">
+              <div>Selected</div>
+              <div>{selectedRecipe?.name || 'None'}</div>
+            </div>
+            <div className="list-item two-col">
+              <div>Description</div>
+              <div>{selectedRecipe?.description || 'No description'}</div>
+            </div>
             </div>
           </>
         )}
       </div>
       <div className="card" style={{ gridColumn: '1 / -1' }}>
         <h2>Latest deployment</h2>
-        {deployResult ? (
+        {latestDeployment ? (
           <div>
-            <div className={statusClass(deployResult.state)}>{deployResult.state}</div>
-            <p>Service: {deployResult.service}</p>
-            <p>Version: {deployResult.version}</p>
-            <p>Deployment id: {deployResult.id}</p>
-            {isPlatformAdmin && deployResult.engineExecutionId && (
-              <p>Execution id: {deployResult.engineExecutionId}</p>
+            <div className={statusClass(latestDeployment.state)}>{latestDeployment.state}</div>
+            <p>Service: {latestDeployment.service}</p>
+            <p>Version: {latestDeployment.version}</p>
+            <p>Deployment id: {latestDeployment.id}</p>
+            {isPlatformAdmin && latestDeployment.engineExecutionId && (
+              <p>Execution id: {latestDeployment.engineExecutionId}</p>
             )}
-            <button className="button secondary" onClick={() => openDeployment(deployResult)}>
+            <button className="button secondary" onClick={() => openDeployment(latestDeployment)}>
               View detail
             </button>
           </div>

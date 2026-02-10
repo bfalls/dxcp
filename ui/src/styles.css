@@ -372,6 +372,10 @@ body {
   background: #0d1919;
 }
 
+.list-item.two-col {
+  grid-template-columns: 140px minmax(0, 1fr);
+}
+
 .list-item.recipe-choice {
   grid-template-columns: 28px 1.4fr 1fr;
   align-items: start;
