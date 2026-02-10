@@ -258,6 +258,27 @@ def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
     return default_value
 
 
+def _with_guardrail_defaults(group: dict) -> dict:
+    guardrails = group.get("guardrails") or {}
+    max_concurrent = guardrails.get("max_concurrent_deployments")
+    daily_deploy = guardrails.get("daily_deploy_quota")
+    daily_rollback = guardrails.get("daily_rollback_quota")
+    if max_concurrent is None:
+        max_concurrent = 1
+    if daily_deploy is None:
+        daily_deploy = SETTINGS.daily_quota_deploy
+    if daily_rollback is None:
+        daily_rollback = SETTINGS.daily_quota_rollback
+    return {
+        **group,
+        "guardrails": {
+            "max_concurrent_deployments": int(max_concurrent),
+            "daily_deploy_quota": int(daily_deploy),
+            "daily_rollback_quota": int(daily_rollback),
+        },
+    }
+
+
 def _validate_guardrails(guardrails: Optional[dict]) -> Optional[JSONResponse]:
     if guardrails is None:
         return None
@@ -1285,7 +1306,7 @@ def list_delivery_groups(request: Request, authorization: Optional[str] = Header
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     groups = storage.list_delivery_groups()
-    return [DeliveryGroup(**group).dict() for group in groups]
+    return [DeliveryGroup(**_with_guardrail_defaults(group)).dict() for group in groups]
 
 
 @app.get("/v1/delivery-groups/{group_id}")
@@ -1299,7 +1320,7 @@ def get_delivery_group(
     group = storage.get_delivery_group(group_id)
     if not group:
         return error_response(404, "NOT_FOUND", "Delivery group not found")
-    return DeliveryGroup(**group).dict()
+    return DeliveryGroup(**_with_guardrail_defaults(group)).dict()
 
 
 @app.post("/v1/delivery-groups", status_code=201)

@@ -1432,9 +1432,17 @@ class DynamoStorage:
         return filtered[:limit]
 
     def ensure_default_delivery_group(self) -> Optional[dict]:
-        existing = self._scan_delivery_groups(limit=1)
-        if existing:
-            return None
+        try:
+            existing = self.table.get_item(
+                Key={"pk": "DELIVERY_GROUP", "sk": "default"},
+                ConsistentRead=True,
+            ).get("Item")
+            if existing:
+                return None
+        except Exception:
+            existing = self._scan_delivery_groups(limit=1)
+            if existing:
+                return None
         now = utc_now()
         services = [entry["service_name"] for entry in self.list_services() if entry.get("service_name")]
         group = {
@@ -1451,7 +1459,31 @@ class DynamoStorage:
             "updated_at": now,
             "updated_by": "system",
         }
-        return self.insert_delivery_group(group)
+        item = {
+            "pk": "DELIVERY_GROUP",
+            "sk": group["id"],
+            "id": group["id"],
+            "name": group["name"],
+            "description": group.get("description"),
+            "owner": group.get("owner"),
+            "services": group.get("services", []),
+            "allowed_environments": group.get("allowed_environments"),
+            "allowed_recipes": group.get("allowed_recipes", []),
+            "guardrails": group.get("guardrails"),
+            "created_at": group.get("created_at"),
+            "created_by": group.get("created_by"),
+            "updated_at": group.get("updated_at"),
+            "updated_by": group.get("updated_by"),
+            "last_change_reason": group.get("last_change_reason"),
+        }
+        try:
+            self.table.put_item(
+                Item=item,
+                ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+            )
+        except Exception:
+            return None
+        return group
 
     def ensure_default_recipe(self) -> Optional[dict]:
         now = utc_now()

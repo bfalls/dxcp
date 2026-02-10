@@ -1119,8 +1119,31 @@ export default function App() {
     try {
       const data = await api.get('/delivery-groups')
       const list = Array.isArray(data) ? data : []
-      setDeliveryGroups(list)
-      return list
+      const normalizeGuardrailValue = (value) => {
+        if (value === null || value === undefined || value === '') return null
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : null
+      }
+      const normalized = list.map((group) => {
+        const base = group || {}
+        const guardrails = base.guardrails || {}
+        return {
+          ...base,
+          guardrails: {
+            max_concurrent_deployments:
+              guardrails.max_concurrent_deployments ??
+              normalizeGuardrailValue(base.max_concurrent_deployments),
+            daily_deploy_quota:
+              guardrails.daily_deploy_quota ??
+              normalizeGuardrailValue(base.daily_deploy_quota),
+            daily_rollback_quota:
+              guardrails.daily_rollback_quota ??
+              normalizeGuardrailValue(base.daily_rollback_quota)
+          }
+        }
+      })
+      setDeliveryGroups(normalized)
+      return normalized
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setDeliveryGroups([])
