@@ -42,16 +42,7 @@ export default function ServicesPage({
   if (mode === 'list') {
     return (
       <div className="shell">
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h2>Delivery control plane</h2>
-          <div className="helper" style={{ marginTop: '8px' }}>
-            DXCP is the source of truth for delivery intent and status. It applies platform guardrails by default.
-          </div>
-          <div className="helper" style={{ marginTop: '8px' }}>
-            What you can do depends on your role. Services shown here are allowlisted and scoped by policy.
-          </div>
-        </div>
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <div className="page-header-zone">
           <PageHeader
             title="Services"
             subtitle="Deployable services and their latest delivery status."
@@ -61,15 +52,26 @@ export default function ServicesPage({
               </button>
             }
           />
-          {servicesViewError && <div className="helper" style={{ marginTop: '8px' }}>{servicesViewError}</div>}
-          {servicesViewLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading services...</div>}
+        </div>
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h2>Delivery control plane</h2>
+          <div className="helper space-8">
+            DXCP is the source of truth for delivery intent and status. It applies platform guardrails by default.
+          </div>
+          <div className="helper space-8">
+            What you can do depends on your role. Services shown here are allowlisted and scoped by policy.
+          </div>
+        </div>
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          {servicesViewError && <div className="helper space-8">{servicesViewError}</div>}
+          {servicesViewLoading && <div className="helper space-8">Loading services...</div>}
           {!servicesViewLoading && servicesView.length === 0 && (
-            <div className="helper" style={{ marginTop: '8px' }}>
+            <div className="helper space-8">
               No deployable services available. Services are allowlisted by delivery group policy.
             </div>
           )}
           {servicesView.length > 0 && (
-            <div className="table" style={{ marginTop: '12px' }}>
+            <div className="table space-12">
               <div className="table-row header">
                 <div>Service</div>
                 <div>Delivery group</div>
@@ -101,7 +103,7 @@ export default function ServicesPage({
 
   return (
     <div className="shell">
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
+      <div className="page-header-zone">
         <PageHeader
           title="Service detail"
           subtitle={serviceDetailName || 'Unknown service'}
@@ -111,7 +113,7 @@ export default function ServicesPage({
             </button>
           }
         />
-        <div className="tabs" style={{ marginTop: '12px' }}>
+        <div className="tabs">
           {['overview', 'deploy', 'history', 'failures', 'insights'].map((tab) => (
             <button
               key={tab}
@@ -142,13 +144,13 @@ export default function ServicesPage({
             <h2>What is running</h2>
             {serviceDetailRunning ? (
               <div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span className="badge info">Source: Authoritative</span>
-                  <span className="badge neutral">
-                    Operation: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}
-                  </span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="badge info">Source: Authoritative</span>
+                <span className="badge neutral">
+                  Operation: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}
+                </span>
                 </div>
-                <p style={{ marginTop: '8px' }}>
+                <p className="space-8">
                   Version: <strong>{serviceDetailRunning.version || '-'}</strong>
                 </p>
                 <p>Environment: {serviceDetailRunning.environment || 'sandbox'}</p>
@@ -172,7 +174,7 @@ export default function ServicesPage({
                 {serviceDetailRunning.derivedAt && (
                   <p>Derived: {formatTime(serviceDetailRunning.derivedAt)}</p>
                 )}
-                <div className="helper" style={{ marginTop: '8px' }}>
+                <div className="helper space-8">
                   Derived from DXCP deployment records.
                 </div>
               </div>
@@ -198,7 +200,7 @@ export default function ServicesPage({
                 {serviceDetailLatest.rollbackOf && (
                   <p>Rollback of: {serviceDetailLatest.rollbackOf}</p>
                 )}
-                <div className="links" style={{ marginTop: '8px' }}>
+                <div className="links space-8">
                   <button
                     className="button secondary"
                     onClick={() => openDeployment({ id: serviceDetailLatest.id })}
@@ -225,15 +227,15 @@ export default function ServicesPage({
             <h2>Delivery group</h2>
             {serviceDetailGroup ? (
               <>
-                <p>{serviceDetailGroup.name}</p>
-                <div className="helper">Owner: {serviceDetailGroup.owner || 'Unassigned'}</div>
-                <div className="guardrails" style={{ marginTop: '12px' }}>
-                  <div className="helper" style={{ marginBottom: '6px' }}>Guardrails</div>
-                  <div className="list">
-                    <div className="list-item">
-                      <div>Max concurrent deployments</div>
-                      <div>{serviceDetailGroup.guardrails?.max_concurrent_deployments || '-'}</div>
-                    </div>
+              <p>{serviceDetailGroup.name}</p>
+              <div className="helper">Owner: {serviceDetailGroup.owner || 'Unassigned'}</div>
+              <div className="guardrails space-12">
+                <div className="helper space-4">Guardrails</div>
+                <div className="list">
+                  <div className="list-item">
+                    <div>Max concurrent deployments</div>
+                    <div>{serviceDetailGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+                  </div>
                     <div className="list-item">
                       <div>Daily deploy quota</div>
                       <div>{serviceDetailGroup.guardrails?.daily_deploy_quota || '-'}</div>
@@ -287,8 +289,7 @@ export default function ServicesPage({
             Deployment intent stays in the Deploy view for now.
           </div>
           <button
-            className="button secondary"
-            style={{ marginTop: '12px' }}
+            className="button secondary space-12"
             onClick={() => {
               if (serviceDetailName) setService(serviceDetailName)
               navigateToDeploy()
@@ -304,7 +305,7 @@ export default function ServicesPage({
           <h2>Deployment history</h2>
           {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
           {serviceDetailHistory.length > 0 && (
-            <div className="table" style={{ marginTop: '12px' }}>
+            <div className="table space-12">
               <div className="table-row header history">
                 <div>Outcome</div>
                 <div>State</div>
@@ -322,9 +323,9 @@ export default function ServicesPage({
                       <span className={`badge ${outcomeTone(item.outcome, item.state)}`}>
                         {outcomeDisplayLabel(item.outcome, item.state, item.deploymentKind, item.rollbackOf)}
                       </span>
-                      {resolveDeploymentKind(item.deploymentKind, item.rollbackOf) === 'ROLL_FORWARD' &&
-                        resolveOutcome(item.outcome, item.state) === 'ROLLED_BACK' && (
-                          <div className="helper" style={{ marginTop: '4px' }}>
+                        {resolveDeploymentKind(item.deploymentKind, item.rollbackOf) === 'ROLL_FORWARD' &&
+                          resolveOutcome(item.outcome, item.state) === 'ROLLED_BACK' && (
+                          <div className="helper space-4">
                             Auto-rollback recorded as a separate rollback deployment.
                             {rollbackId && (
                               <button
@@ -346,7 +347,7 @@ export default function ServicesPage({
                         {deploymentKindLabel(item.deploymentKind, item.rollbackOf)}
                       </span>
                       {item.rollbackOf && (
-                        <div className="helper" style={{ marginTop: '4px' }}>
+                        <div className="helper space-4">
                           of {item.rollbackOf}
                         </div>
                       )}

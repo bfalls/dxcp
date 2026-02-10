@@ -1,4 +1,5 @@
 import React from 'react'
+import PageHeader from '../components/PageHeader.jsx'
 
 export default function DeploymentDetailPage({
   selected,
@@ -28,16 +29,30 @@ export default function DeploymentDetailPage({
   deploymentLoading
 }) {
   return (
-    <div className="shell">
+    <div className="shell two-column">
+      <div className="page-header-zone">
+        <PageHeader
+          title="Deployment detail"
+          actions={
+            <button
+              className="button danger"
+              onClick={handleRollback}
+              disabled={!canRollback}
+              title={!canRollback ? rollbackDisabledReason : ''}
+            >
+              Rollback
+            </button>
+          }
+        />
+      </div>
       <div className="card">
-        <h2>Deployment detail</h2>
         {deploymentLoading && <div className="helper">Loading deployment detail...</div>}
         {!deploymentLoading && !selected && <div className="helper">Select a deployment from the list.</div>}
         {selected && (
           <div>
             <div className={statusClass(selected.state)}>{selected.state}</div>
-            {statusMessage && <div className="helper" style={{ marginTop: '8px' }}>{statusMessage}</div>}
-            <div className="list" style={{ marginTop: '12px' }}>
+            {statusMessage && <div className="helper space-8">{statusMessage}</div>}
+            <div className="list space-12">
               <div className="list-item admin-detail">
                 <div>Intent id</div>
                 <div>{selected.intentCorrelationId || 'Not captured'}</div>
@@ -58,7 +73,7 @@ export default function DeploymentDetailPage({
                   </span>
                   {resolveDeploymentKind(selected.deploymentKind, selected.rollbackOf) === 'ROLL_FORWARD' &&
                     resolveOutcome(selected.outcome, selected.state) === 'ROLLED_BACK' && (
-                      <div className="helper" style={{ marginTop: '4px' }}>
+                      <div className="helper space-4">
                         Auto-rollback recorded as a separate rollback deployment.
                         {selectedRollbackId && (
                           <button
@@ -109,31 +124,21 @@ export default function DeploymentDetailPage({
                 </a>
               )}
             </div>
-            <button
-              className="button danger"
-              onClick={handleRollback}
-              style={{ marginTop: '12px' }}
-              disabled={!canRollback}
-              title={!canRollback ? rollbackDisabledReason : ''}
-            >
-              Rollback
-            </button>
             {!canRollback && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Rollback disabled. {rollbackDisabledReason}
               </div>
             )}
             {selected.rollbackOf && (
               <button
-                className="button secondary"
+                className="button secondary space-8"
                 onClick={() => openDeployment({ id: selected.rollbackOf })}
-                style={{ marginTop: '8px' }}
               >
                 View original deployment
               </button>
             )}
             {rollbackResult && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Rollback created: {rollbackResult.id}
               </div>
             )}

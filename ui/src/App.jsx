@@ -2838,12 +2838,9 @@ export default function App() {
 
       {authReady && !isAuthenticated && !authError && (
         <div className="shell">
-          <div className="card">
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
             <h2>Login required</h2>
-            <div className="helper">Sign in with Auth0 to view services and deployments.</div>
-            <button className="button" style={{ marginTop: '12px' }} onClick={handleLogin}>
-              Login
-            </button>
+            <div className="helper">Use the Login button in the top navigation to sign in.</div>
           </div>
         </div>
       )}

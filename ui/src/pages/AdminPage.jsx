@@ -69,14 +69,33 @@ export default function AdminPage({
   auditError,
   auditEvents
 }) {
+  const headerAction =
+    adminTab === 'delivery-groups'
+      ? (
+          <button className="button secondary" onClick={startAdminGroupCreate} disabled={adminReadOnly}>
+            Create group
+          </button>
+        )
+      : adminTab === 'recipes'
+        ? (
+            <button className="button secondary" onClick={startAdminRecipeCreate} disabled={adminReadOnly}>
+              Create recipe
+            </button>
+          )
+        : adminTab === 'audit' && isPlatformAdmin
+          ? (
+              <button className="button secondary" onClick={loadAuditEvents} disabled={auditLoading}>
+                {auditLoading ? 'Loading...' : 'Refresh'}
+              </button>
+            )
+          : null
+
   return (
-    <div className="shell">
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <PageHeader
-          title="Admin"
-          actions={adminReadOnly ? <div className="helper">Only Platform Admins can modify this.</div> : null}
-        />
-        <div className="tabs" style={{ marginTop: '12px' }}>
+    <div className="shell two-column">
+      <div className="page-header-zone">
+        <PageHeader title="Admin" actions={headerAction} />
+        {adminReadOnly && <div className="helper">Only Platform Admins can modify this.</div>}
+        <div className="tabs">
           <button
             className={adminTab === 'delivery-groups' ? 'active' : ''}
             onClick={() => setAdminTab('delivery-groups')}
@@ -102,15 +121,10 @@ export default function AdminPage({
       {adminTab === 'delivery-groups' && (
         <>
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Delivery groups</h2>
-              <button className="button secondary" onClick={startAdminGroupCreate} disabled={adminReadOnly}>
-                Create group
-              </button>
-            </div>
+            <h2>Delivery groups</h2>
             {deliveryGroups.length === 0 && <div className="helper">No delivery groups available.</div>}
             {deliveryGroups.length > 0 && (
-              <div className="list" style={{ marginTop: '12px' }}>
+              <div className="list space-12">
                 {deliveryGroups.map((group) => (
                   <div className="list-item admin-group" key={group.id}>
                     <div>
@@ -146,7 +160,7 @@ export default function AdminPage({
               <>
                 <h2>Group detail</h2>
                 <div className="helper">Delivery group details and policy context.</div>
-                <div className="list" style={{ marginTop: '12px' }}>
+                <div className="list space-12">
                   <div className="list-item admin-detail">
                     <div>Name</div>
                     <div>{activeAdminGroup.name}</div>
@@ -160,7 +174,7 @@ export default function AdminPage({
                     <div>{activeAdminGroup.description || 'No description'}</div>
                   </div>
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
+                <div className="helper space-12">Audit</div>
                 <div className="list">
                   <div className="list-item admin-detail">
                     <div>Created</div>
@@ -175,7 +189,7 @@ export default function AdminPage({
                     <div>{activeAdminGroup.last_change_reason || 'None'}</div>
                   </div>
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Services</div>
+                <div className="helper space-12">Services</div>
                 <div className="list">
                   {(activeAdminGroup.services || []).length === 0 && <div className="helper">No services assigned.</div>}
                   {(activeAdminGroup.services || []).map((svc) => (
@@ -184,7 +198,7 @@ export default function AdminPage({
                     </div>
                   ))}
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Allowed recipes</div>
+                <div className="helper space-12">Allowed recipes</div>
                 <div className="list">
                   {(activeAdminGroup.allowed_recipes || []).length === 0 && <div className="helper">No recipes assigned.</div>}
                   {(activeAdminGroup.allowed_recipes || []).map((recipeIdValue) => (
@@ -194,7 +208,7 @@ export default function AdminPage({
                     </div>
                   ))}
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+                <div className="helper space-12">Guardrails</div>
                 <div className="list">
                   <div className="list-item admin-detail">
                     <div>Max concurrent deployments</div>
@@ -210,8 +224,7 @@ export default function AdminPage({
                   </div>
                 </div>
                 <button
-                  className="button secondary"
-                  style={{ marginTop: '12px' }}
+                  className="button secondary space-12"
                   onClick={() => startAdminGroupEdit(activeAdminGroup)}
                   disabled={adminReadOnly}
                 >
@@ -224,8 +237,8 @@ export default function AdminPage({
                 <h2>{adminGroupMode === 'create' ? 'Create delivery group' : 'Edit delivery group'}</h2>
                 {adminGroupMode === 'edit' && activeAdminGroup && (
                   <>
-                    <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
-                    <div className="list" style={{ marginTop: '12px' }}>
+                    <div className="helper space-4">Audit</div>
+                    <div className="list space-12">
                       <div className="list-item admin-detail">
                         <div>Created</div>
                         <div>{formatAuditValue(activeAdminGroup.created_by, activeAdminGroup.created_at)}</div>
@@ -254,20 +267,19 @@ export default function AdminPage({
                   </div>
                 )}
                 <button
-                  className="button secondary"
-                  style={{ marginTop: '12px' }}
+                  className="button secondary space-12"
                   onClick={validateAdminGroupDraft}
                   disabled={adminGroupSaving || adminReadOnly}
                 >
                   Preview changes
                 </button>
                 {adminGroupValidation && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
+                  <div className="helper space-8">
                     Validation: {adminGroupValidation.validation_status}
                   </div>
                 )}
                 {adminGroupValidation?.messages?.length > 0 && (
-                  <div className="list" style={{ marginTop: '8px' }}>
+                  <div className="list space-8">
                     {adminGroupValidation.messages.map((item, idx) => (
                       <div className="list-item admin-detail" key={`group-validate-${idx}`}>
                         <div>{item.type}</div>
@@ -278,7 +290,7 @@ export default function AdminPage({
                   </div>
                 )}
                 {adminGroupValidation?.validation_status === 'WARNING' && (
-                  <label className="check-item" style={{ marginTop: '8px' }}>
+                  <label className="check-item space-8">
                     <input
                       type="checkbox"
                       checked={adminGroupConfirmWarning}
@@ -329,7 +341,7 @@ export default function AdminPage({
                   />
                 </div>
                 <div className="helper">Admin-only configuration. Affects Delivery Owners and Observers.</div>
-                <div className="helper" style={{ marginTop: '12px' }}>Services</div>
+                <div className="helper space-12">Services</div>
                 <div className="checklist">
                   {sortedServiceNames.length === 0 && <div className="helper">No allowlisted services found.</div>}
                   {sortedServiceNames.map((svc) => (
@@ -344,7 +356,7 @@ export default function AdminPage({
                     </label>
                   ))}
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Allowed recipes</div>
+                <div className="helper space-12">Allowed recipes</div>
                 <div className="checklist">
                   {sortedRecipes.length === 0 && <div className="helper">No recipes found.</div>}
                   {sortedRecipes.map((recipe) => (
@@ -360,7 +372,7 @@ export default function AdminPage({
                     </label>
                   ))}
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+                <div className="helper space-12">Guardrails</div>
                 <div className="row">
                   <div className="field">
                     <label htmlFor="admin-group-max-concurrent">Max concurrent deployments</label>
@@ -402,7 +414,7 @@ export default function AdminPage({
                     <div className="helper">Minimum 1. Default {adminSettings?.daily_rollback_quota ?? 'system'}.</div>
                   </div>
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Impact preview</div>
+                <div className="helper space-12">Impact preview</div>
                 <div className="list">
                   <div className="list-item admin-detail">
                     <div>Services</div>
@@ -424,13 +436,13 @@ export default function AdminPage({
                   </div>
                 </div>
                 {adminServiceConflicts.length > 0 && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
+                  <div className="helper space-8">
                     Service {adminServiceConflicts[0].service} already belongs to {adminServiceConflicts[0].groupName}.
                   </div>
                 )}
-                {adminGroupError && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupError}</div>}
-                {adminGroupNote && <div className="helper" style={{ marginTop: '8px' }}>{adminGroupNote}</div>}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                {adminGroupError && <div className="helper space-8">{adminGroupError}</div>}
+                {adminGroupNote && <div className="helper space-8">{adminGroupNote}</div>}
+                <div style={{ display: 'flex', gap: '8px' }} className="space-12">
                   <button
                     className="button"
                     onClick={saveAdminGroup}
@@ -465,15 +477,10 @@ export default function AdminPage({
       {adminTab === 'recipes' && (
         <>
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Recipes</h2>
-              <button className="button secondary" onClick={startAdminRecipeCreate} disabled={adminReadOnly}>
-                Create recipe
-              </button>
-            </div>
+            <h2>Recipes</h2>
             {recipes.length === 0 && <div className="helper">No recipes available.</div>}
             {recipes.length > 0 && (
-              <div className="list" style={{ marginTop: '12px' }}>
+              <div className="list space-12">
                 {sortedRecipes.map((recipe) => {
                   const usage = recipeUsageCounts[recipe.id] || 0
                   const status = recipe.status || 'active'
@@ -519,7 +526,7 @@ export default function AdminPage({
               <>
                 <h2>Recipe detail</h2>
                 <div className="helper">Recipe metadata and engine mapping.</div>
-                <div className="list" style={{ marginTop: '12px' }}>
+                <div className="list space-12">
                   <div className="list-item admin-detail">
                     <div>Name</div>
                     <div>{activeAdminRecipe.name}</div>
@@ -545,7 +552,7 @@ export default function AdminPage({
                     <div>{activeAdminRecipeUsage} delivery groups</div>
                   </div>
                 </div>
-                <div className="helper" style={{ marginTop: '12px' }}>Audit</div>
+                <div className="helper space-12">Audit</div>
                 <div className="list">
                   <div className="list-item admin-detail">
                     <div>Created</div>
@@ -562,7 +569,7 @@ export default function AdminPage({
                 </div>
                 {isPlatformAdmin ? (
                   <>
-                    <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                    <div className="helper space-12">Engine mapping</div>
                     <div className="list">
                       <div className="list-item admin-detail">
                         <div>Application</div>
@@ -579,13 +586,12 @@ export default function AdminPage({
                     </div>
                   </>
                 ) : (
-                  <div className="helper" style={{ marginTop: '12px' }}>
+                  <div className="helper space-12">
                     Engine mapping is visible to Platform Admins only.
                   </div>
                 )}
                 <button
-                  className="button secondary"
-                  style={{ marginTop: '12px' }}
+                  className="button secondary space-12"
                   onClick={() => startAdminRecipeEdit(activeAdminRecipe)}
                   disabled={adminReadOnly}
                 >
@@ -598,8 +604,8 @@ export default function AdminPage({
                 <h2>{adminRecipeMode === 'create' ? 'Create recipe' : 'Edit recipe'}</h2>
                 {adminRecipeMode === 'edit' && activeAdminRecipe && (
                   <>
-                    <div className="helper" style={{ marginTop: '4px' }}>Audit</div>
-                    <div className="list" style={{ marginTop: '12px' }}>
+                    <div className="helper space-4">Audit</div>
+                    <div className="list space-12">
                       <div className="list-item admin-detail">
                         <div>Created</div>
                         <div>{formatAuditValue(activeAdminRecipe.created_by, activeAdminRecipe.created_at)}</div>
@@ -628,20 +634,19 @@ export default function AdminPage({
                   </div>
                 )}
                 <button
-                  className="button secondary"
-                  style={{ marginTop: '12px' }}
+                  className="button secondary space-12"
                   onClick={validateAdminRecipeDraft}
                   disabled={adminRecipeSaving || adminReadOnly}
                 >
                   Preview changes
                 </button>
                 {adminRecipeValidation && (
-                  <div className="helper" style={{ marginTop: '8px' }}>
+                  <div className="helper space-8">
                     Validation: {adminRecipeValidation.validation_status}
                   </div>
                 )}
                 {adminRecipeValidation?.messages?.length > 0 && (
-                  <div className="list" style={{ marginTop: '8px' }}>
+                  <div className="list space-8">
                     {adminRecipeValidation.messages.map((item, idx) => (
                       <div className="list-item admin-detail" key={`recipe-validate-${idx}`}>
                         <div>{item.type}</div>
@@ -652,7 +657,7 @@ export default function AdminPage({
                   </div>
                 )}
                 {adminRecipeValidation?.validation_status === 'WARNING' && (
-                  <label className="check-item" style={{ marginTop: '8px' }}>
+                  <label className="check-item space-8">
                     <input
                       type="checkbox"
                       checked={adminRecipeConfirmWarning}
@@ -662,7 +667,7 @@ export default function AdminPage({
                     <span>Confirm warnings and proceed to save.</span>
                   </label>
                 )}
-                <div className="helper" style={{ marginTop: '12px' }}>
+                <div className="helper space-12">
                   Admin-only configuration. Affects Delivery Owners and Observers.
                 </div>
                 <div className="field">
@@ -709,7 +714,7 @@ export default function AdminPage({
                 </div>
                 {isPlatformAdmin ? (
                   <>
-                    <div className="helper" style={{ marginTop: '12px' }}>Engine mapping</div>
+                    <div className="helper space-12">Engine mapping</div>
                     {adminRecipeMode === 'edit' && activeAdminRecipeUsage > 0 && (
                       <div className="helper">Engine mapping is locked while recipe is in use.</div>
                     )}
@@ -745,7 +750,7 @@ export default function AdminPage({
                     </div>
                   </>
                 ) : (
-                  <div className="helper" style={{ marginTop: '12px' }}>
+                  <div className="helper space-12">
                     Engine mapping is visible to Platform Admins only.
                   </div>
                 )}
@@ -764,9 +769,9 @@ export default function AdminPage({
                     <div className="helper">Deprecated recipes cannot be used for new deployments.</div>
                   )}
                 </div>
-                {adminRecipeError && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeError}</div>}
-                {adminRecipeNote && <div className="helper" style={{ marginTop: '8px' }}>{adminRecipeNote}</div>}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                {adminRecipeError && <div className="helper space-8">{adminRecipeError}</div>}
+                {adminRecipeNote && <div className="helper space-8">{adminRecipeNote}</div>}
+                <div style={{ display: 'flex', gap: '8px' }} className="space-12">
                   <button
                     className="button"
                     onClick={saveAdminRecipe}
@@ -800,18 +805,13 @@ export default function AdminPage({
       )}
       {adminTab === 'audit' && isPlatformAdmin && (
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2>Audit events</h2>
-            <button className="button secondary" onClick={loadAuditEvents} disabled={auditLoading}>
-              {auditLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-          {auditError && <div className="helper" style={{ marginTop: '8px' }}>{auditError}</div>}
+          <h2>Audit events</h2>
+          {auditError && <div className="helper space-8">{auditError}</div>}
           {!auditError && auditEvents.length === 0 && (
-            <div className="helper" style={{ marginTop: '8px' }}>No audit events found.</div>
+            <div className="helper space-8">No audit events found.</div>
           )}
           {auditEvents.length > 0 && (
-            <div className="list" style={{ marginTop: '12px' }}>
+            <div className="list space-12">
               {auditEvents.map((event) => (
                 <div className="list-item admin-group" key={event.event_id}>
                   <div>

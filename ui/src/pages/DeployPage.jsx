@@ -59,8 +59,8 @@ export default function DeployPage({
   trimmedChangeSummary
 }) {
   return (
-    <div className="shell">
-      <div className="card">
+    <div className="shell two-column">
+      <div className="page-header-zone">
         <PageHeader
           title="Deploy intent"
           actions={
@@ -69,6 +69,8 @@ export default function DeployPage({
             </button>
           }
         />
+      </div>
+      <div className="card">
         {deployStep === 'form' && (
           <>
             {/* Stable E2E selectors for deploy flow inputs */}
@@ -102,7 +104,7 @@ export default function DeployPage({
                 <div className="helper">No compatible recipes are allowed for this service.</div>
               )}
               {filteredRecipes.length > 0 && (
-                <div className="list" style={{ marginTop: '8px' }}>
+                <div className="list space-8">
                   {filteredRecipes.map((recipe) => {
                     const revision = recipe.recipe_revision ?? 1
                     const isSelected = recipeId === recipe.id
@@ -189,7 +191,7 @@ export default function DeployPage({
                 </select>
                 {versionMode === 'custom' && (
                   <input
-                    style={{ marginTop: '8px' }}
+                    className="space-8"
                     value={version}
                     onChange={(e) => {
                       setVersion(e.target.value)
@@ -232,8 +234,8 @@ export default function DeployPage({
               />
               {!changeSummary.trim() && <div className="helper">Required for audit trails.</div>}
             </div>
-            <div className="helper" style={{ marginTop: '12px' }}>Policy checks</div>
-            <div className="list" style={{ marginTop: '8px' }}>
+            <div className="helper space-12">Policy checks</div>
+            <div className="list space-8">
               <div className="list-item admin-detail">
                 <div>Deploys remaining today</div>
                 <div>{preflightResult?.policy?.deployments_remaining ?? '-'}</div>
@@ -255,18 +257,18 @@ export default function DeployPage({
               </div>
             </div>
             {preflightStatus === 'checking' && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Checking policy and guardrails...
               </div>
             )}
             {preflightStatus === 'error' && preflightError && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 {preflightErrorHeadline && <strong>{preflightErrorHeadline}. </strong>}
                 {preflightError}
               </div>
             )}
             {debugDeployGatesEnabled && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Deploy gates:{' '}
                 {[
                   `canDeploy=${String(canDeploy)}`,
@@ -289,33 +291,33 @@ export default function DeployPage({
               {preflightStatus === 'checking' ? 'Checking policy...' : 'Review deploy'}
             </button>
             {!canDeploy && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Deploy disabled. {deployDisabledReason}
               </div>
             )}
             {canDeploy && !changeSummary.trim() && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Change summary is required.
               </div>
             )}
             {versionUnverifiable && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 Custom versions must match a registered build before you can deploy.
               </div>
             )}
             {deployInlineMessage && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                 {deployInlineMessage}
               </div>
             )}
-            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+            {statusMessage && <div className="helper space-12">{statusMessage}</div>}
           </>
         )}
         {deployStep === 'confirm' && (
           <>
             <h3>Confirm deploy</h3>
-            <div className="list" style={{ marginTop: '12px' }}>
+            <div className="list space-12">
               <div className="list-item">
                 <div>Service</div>
                 <div>{service || '-'}</div>
@@ -349,7 +351,7 @@ export default function DeployPage({
                 <div>sandbox</div>
               </div>
             </div>
-            <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+            <div className="helper space-12">Guardrails</div>
             <div className="list">
               <div className="list-item">
                 <div>Max concurrent deployments</div>
@@ -372,7 +374,7 @@ export default function DeployPage({
                 <div>{currentDeliveryGroup?.guardrails?.daily_rollback_quota || '-'}</div>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            <div style={{ display: 'flex', gap: '8px' }} className="space-12">
               <button
                 className="button"
                 data-testid="deploy-confirm-button"
@@ -386,12 +388,12 @@ export default function DeployPage({
               </button>
             </div>
             {deployInlineMessage && (
-              <div className="helper" style={{ marginTop: '8px' }}>
+              <div className="helper space-8">
                 {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                 {deployInlineMessage}
               </div>
             )}
-            {statusMessage && <div className="helper" style={{ marginTop: '12px' }}>{statusMessage}</div>}
+            {statusMessage && <div className="helper space-12">{statusMessage}</div>}
           </>
         )}
       </div>
@@ -410,7 +412,7 @@ export default function DeployPage({
                 <div>{currentDeliveryGroup.owner || 'Unassigned'}</div>
               </div>
             </div>
-            <div className="helper" style={{ marginTop: '12px' }}>Guardrails</div>
+          <div className="helper space-12">Guardrails</div>
             <div className="list">
               <div className="list-item">
                 <div>Max concurrent deployments</div>
@@ -441,9 +443,9 @@ export default function DeployPage({
                 </div>
               </div>
             </div>
-            {policyDeploymentsLoading && <div className="helper" style={{ marginTop: '8px' }}>Loading quota usage...</div>}
-            {policyDeploymentsError && <div className="helper" style={{ marginTop: '8px' }}>{policyDeploymentsError}</div>}
-            <div className="helper" style={{ marginTop: '12px' }}>Recipe</div>
+          {policyDeploymentsLoading && <div className="helper space-8">Loading quota usage...</div>}
+          {policyDeploymentsError && <div className="helper space-8">{policyDeploymentsError}</div>}
+          <div className="helper space-12">Recipe</div>
             <div className="list">
               <div className="list-item">
                 <div>Selected</div>

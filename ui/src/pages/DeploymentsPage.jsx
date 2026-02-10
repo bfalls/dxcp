@@ -4,13 +4,15 @@ import PageHeader from '../components/PageHeader.jsx'
 export default function DeploymentsPage({ deployments, refreshDeployments, openDeployment, statusClass, formatTime }) {
   return (
     <div className="shell">
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
+      <div className="page-header-zone">
         <PageHeader
           title="Recent deployments"
           actions={
             <button className="button secondary" onClick={refreshDeployments}>Refresh</button>
           }
         />
+      </div>
+      <div className="card" style={{ gridColumn: '1 / -1' }}>
         {/* Stable E2E selectors for deployment history list */}
         <div className="list" data-testid="deployment-list">
           {deployments.length === 0 && <div className="helper">No deployments yet.</div>}

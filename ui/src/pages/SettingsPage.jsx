@@ -1,4 +1,5 @@
 import React from 'react'
+import PageHeader from '../components/PageHeader.jsx'
 
 export default function SettingsPage({
   minRefreshSeconds,
@@ -15,9 +16,11 @@ export default function SettingsPage({
 }) {
   return (
     <div className="shell">
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <h2>Settings</h2>
-        <div className="helper">Control auto-refresh behavior for the UI.</div>
+      <div className="page-header-zone">
+        <PageHeader
+          title="Settings"
+          subtitle="Control auto-refresh behavior for the UI."
+        />
       </div>
       <div className="card">
         <h2>User settings</h2>
@@ -45,7 +48,7 @@ export default function SettingsPage({
         <div className="card">
           <h2>Admin defaults</h2>
           <div className="helper">Config-driven defaults and guardrails.</div>
-          <div className="list" style={{ marginTop: '8px' }}>
+          <div className="list space-8">
             <div className="list-item">
               <div>Default</div>
               <div>{Math.round((adminSettings?.default_refresh_interval_seconds ?? defaultRefreshSeconds) / 60)} minutes</div>
