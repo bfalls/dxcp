@@ -6,18 +6,19 @@ import TwoColumn from '../components/TwoColumn.jsx'
 function DeploymentHeader({
   selected,
   statusClass,
-  statusMessage,
   outcomeTone,
   outcomeDisplayLabel,
   deploymentKindLabel,
   handleRollback,
   canRollback,
-  rollbackDisabledReason
+  rollbackDisabledReason,
+  headerMeta
 }) {
   return (
     <>
       <PageHeader
         title="Deployment detail"
+        meta={headerMeta}
         actions={
           <button
             className="button danger"
@@ -42,7 +43,6 @@ function DeploymentHeader({
             <span className="badge neutral">Service: {selected.service}</span>
             <span className="badge neutral">Version: {selected.version || '-'}</span>
           </div>
-          {statusMessage && <div className="helper space-8">{statusMessage}</div>}
         </>
       )}
     </>
@@ -82,8 +82,7 @@ function DeploymentMeta({
   openDeployment,
   formatTime,
   serviceUrl,
-  isPlatformAdmin,
-  rollbackResult
+  isPlatformAdmin
 }) {
   const isAutoRollback =
     resolveDeploymentKind(selected.deploymentKind, selected.rollbackOf) === 'ROLL_FORWARD' &&
@@ -173,11 +172,6 @@ function DeploymentMeta({
           View original deployment
         </button>
       )}
-      {rollbackResult && (
-        <div className="helper space-8">
-          Rollback created: {rollbackResult.id}
-        </div>
-      )}
     </SectionCard>
   )
 }
@@ -215,7 +209,6 @@ function DeploymentFailures({ failures, renderFailures, engineExecutionUrl }) {
 export default function DeploymentDetailPage({
   selected,
   statusClass,
-  statusMessage,
   selectedValidatedAt,
   selectedExecutionAt,
   outcomeTone,
@@ -233,11 +226,11 @@ export default function DeploymentDetailPage({
   handleRollback,
   canRollback,
   rollbackDisabledReason,
-  rollbackResult,
   timelineSteps,
   failures,
   renderFailures,
-  deploymentLoading
+  deploymentLoading,
+  headerMeta
 }) {
   return (
     <TwoColumn
@@ -245,13 +238,13 @@ export default function DeploymentDetailPage({
         <DeploymentHeader
           selected={selected}
           statusClass={statusClass}
-          statusMessage={statusMessage}
           outcomeTone={outcomeTone}
           outcomeDisplayLabel={outcomeDisplayLabel}
           deploymentKindLabel={deploymentKindLabel}
           handleRollback={handleRollback}
           canRollback={canRollback}
           rollbackDisabledReason={rollbackDisabledReason}
+          headerMeta={headerMeta}
         />
       }
       primary={
@@ -281,7 +274,6 @@ export default function DeploymentDetailPage({
                 formatTime={formatTime}
                 serviceUrl={serviceUrl}
                 isPlatformAdmin={isPlatformAdmin}
-                rollbackResult={rollbackResult}
               />
             </>
           )}

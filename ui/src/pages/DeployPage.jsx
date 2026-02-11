@@ -46,7 +46,6 @@ export default function DeployPage({
   deployDisabledReason,
   canReviewDeploy,
   handleReviewDeploy,
-  statusMessage,
   deployInlineMessage,
   deployInlineHeadline,
   selectedRecipeNarrative,
@@ -60,7 +59,8 @@ export default function DeployPage({
   isPlatformAdmin,
   openDeployment,
   versionVerified,
-  trimmedChangeSummary
+  trimmedChangeSummary,
+  headerMeta
 }) {
   const policySnapshot = preflightResult?.policy || policySummary?.policy || null
   const deploysRemaining =
@@ -78,6 +78,7 @@ export default function DeployPage({
       <div className="page-header-zone">
         <PageHeader
           title="Deploy intent"
+          meta={headerMeta}
           actions={
             <button className="button secondary" onClick={refreshData} disabled={refreshing}>
               {refreshing ? 'Refreshing...' : 'Refresh data'}
@@ -341,7 +342,6 @@ export default function DeployPage({
                 {deployInlineMessage}
               </div>
             )}
-            {statusMessage && <div className="helper space-12">{statusMessage}</div>}
           </>
         )}
         {deployStep === 'confirm' && (
@@ -421,7 +421,6 @@ export default function DeployPage({
                 {deployInlineMessage}
               </div>
             )}
-            {statusMessage && <div className="helper space-12">{statusMessage}</div>}
           </>
         )}
       </div>

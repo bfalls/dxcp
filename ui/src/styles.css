@@ -108,6 +108,32 @@ body {
   flex-wrap: wrap;
 }
 
+.page-header-meta {
+  display: flex;
+  align-items: center;
+}
+
+.header-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.header-status-item {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.header-status-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
 .deployment-header-summary {
   display: flex;
   flex-wrap: wrap;

@@ -7,6 +7,7 @@ import AppShell from './components/AppShell.jsx'
 import AlertRail from './components/AlertRail.jsx'
 import PageHeader from './components/PageHeader.jsx'
 import SectionCard from './components/SectionCard.jsx'
+import HeaderStatus from './components/HeaderStatus.jsx'
 import ServicesPage from './pages/ServicesPage.jsx'
 import DeployPage from './pages/DeployPage.jsx'
 import DeploymentsPage from './pages/DeploymentsPage.jsx'
@@ -551,7 +552,6 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [errorHeadline, setErrorHeadline] = useState('')
-  const [rollbackResult, setRollbackResult] = useState(null)
   const [recipes, setRecipes] = useState([])
   const [recipeId, setRecipeId] = useState('')
   const [recipeAutoApplied, setRecipeAutoApplied] = useState(false)
@@ -565,12 +565,15 @@ export default function App() {
   const [deploymentsQueryService, setDeploymentsQueryService] = useState('')
   const [deploymentsFilterService, setDeploymentsFilterService] = useState('')
   const [deploymentsUrlSyncEnabled, setDeploymentsUrlSyncEnabled] = useState(false)
+  const [deploymentsLoading, setDeploymentsLoading] = useState(false)
+  const [deploymentsRefreshedAt, setDeploymentsRefreshedAt] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [insightsError, setInsightsError] = useState('')
   const [deploymentDetailLoading, setDeploymentDetailLoading] = useState(false)
+  const [deploymentDetailRefreshedAt, setDeploymentDetailRefreshedAt] = useState('')
   const [insightsWindowDays, setInsightsWindowDays] = useState(INSIGHTS_WINDOW_DAYS)
   const [insightsGroupId, setInsightsGroupId] = useState('')
   const [insightsService, setInsightsService] = useState('')
@@ -583,7 +586,7 @@ export default function App() {
   const [deliveryGroups, setDeliveryGroups] = useState([])
   const [servicesView, setServicesView] = useState([])
   const [servicesViewLoading, setServicesViewLoading] = useState(false)
-  const [servicesViewError, setServicesViewError] = useState('')
+  const [servicesRefreshedAt, setServicesRefreshedAt] = useState('')
   const [debugDeployGatesEnabled, setDebugDeployGatesEnabled] = useState(ENV.VITE_DEBUG_DEPLOY_GATES === 'true')
   const [serviceDetailName, setServiceDetailName] = useState('')
   const [serviceDetailTab, setServiceDetailTab] = useState('overview')
@@ -591,7 +594,7 @@ export default function App() {
   const [serviceDetailHistory, setServiceDetailHistory] = useState([])
   const [serviceDetailFailures, setServiceDetailFailures] = useState([])
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
-  const [serviceDetailError, setServiceDetailError] = useState('')
+  const [serviceDetailRefreshedAt, setServiceDetailRefreshedAt] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
   const [deployInlineHeadline, setDeployInlineHeadline] = useState('')
   const [deployStep, setDeployStep] = useState('form')
@@ -606,6 +609,7 @@ export default function App() {
   const [policyDeployments, setPolicyDeployments] = useState([])
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
+  const [policyRefreshedAt, setPolicyRefreshedAt] = useState('')
   const [publicSettings, setPublicSettings] = useState({
     default_refresh_interval_seconds: 300,
     min_refresh_interval_seconds: 60,
@@ -1052,14 +1056,19 @@ export default function App() {
   const refreshDeployments = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
+    setDeploymentsLoading(true)
     try {
       const data = await api.get('/deployments', options)
       setDeployments(Array.isArray(data) ? data : [])
-      cacheStore.deployments.ts = Date.now()
+      const now = Date.now()
+      cacheStore.deployments.ts = now
+      setDeploymentsRefreshedAt(now)
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setErrorHeadline('')
       setErrorMessage('Failed to load deployments')
+    } finally {
+      setDeploymentsLoading(false)
     }
   }, [api])
 
@@ -1179,8 +1188,9 @@ export default function App() {
   }, [api])
 
   const loadServicesList = useCallback(async (options = {}) => {
-    setServicesViewError('')
     setServicesViewLoading(true)
+    setErrorMessage('')
+    setErrorHeadline('')
     try {
       const data = await api.get('/services', options)
       const list = Array.isArray(data) ? data : []
@@ -1205,11 +1215,14 @@ export default function App() {
       })
       rows.sort((a, b) => a.name.localeCompare(b.name))
       setServicesView(rows)
-      cacheStore.servicesView.ts = Date.now()
+      const now = Date.now()
+      cacheStore.servicesView.ts = now
+      setServicesRefreshedAt(now)
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setServicesView([])
-      setServicesViewError('Failed to load services')
+      setErrorHeadline('Services')
+      setErrorMessage('Failed to load services')
     } finally {
       setServicesViewLoading(false)
     }
@@ -1217,8 +1230,9 @@ export default function App() {
 
   const loadServiceDetail = useCallback(async (serviceName) => {
     if (!serviceName) return
-    setServiceDetailError('')
     setServiceDetailLoading(true)
+    setErrorMessage('')
+    setErrorHeadline('')
     try {
       const [status, deployments] = await Promise.all([
         api.get(`/services/${encodeURIComponent(serviceName)}/delivery-status`),
@@ -1234,12 +1248,14 @@ export default function App() {
       } else {
         setServiceDetailFailures([])
       }
+      setServiceDetailRefreshedAt(Date.now())
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setServiceDetailStatus(null)
       setServiceDetailHistory([])
       setServiceDetailFailures([])
-      setServiceDetailError('Failed to load service detail')
+      setErrorHeadline('Service detail')
+      setErrorMessage('Failed to load service detail')
     } finally {
       setServiceDetailLoading(false)
     }
@@ -1332,7 +1348,9 @@ export default function App() {
     const groupsOk = results[1].status === 'fulfilled' && results[1].value !== null
     const policyOk = results[2].status === 'fulfilled' && results[2].value === true
     if (recipesOk && groupsOk && policyOk) {
-      cacheStore.policy.ts = Date.now()
+      const now = Date.now()
+      cacheStore.policy.ts = now
+      setPolicyRefreshedAt(now)
       return true
     }
     return false
@@ -1770,16 +1788,18 @@ export default function App() {
       if (insightsService) params.set('service', insightsService)
       const data = await api.get(`/insights/failures?${params.toString()}`, options)
       if (data && data.code) {
-        setErrorHeadline('')
         setInsightsError(`${data.code}: ${data.message}`)
+        setErrorHeadline('Insights')
+        setErrorMessage(`${data.code}: ${data.message}`)
         setInsights(null)
         return
       }
       setInsights(data)
     } catch (err) {
       if (isLoginRequiredError(err)) return
-      setErrorHeadline('')
       setInsightsError('Failed to load insights')
+      setErrorHeadline('Insights')
+      setErrorMessage('Failed to load insights')
       setInsights(null)
     } finally {
       setInsightsLoading(false)
@@ -1860,7 +1880,6 @@ export default function App() {
       setDeploymentDetailLoading(true)
       setSelected(null)
       setFailures([])
-      setRollbackResult(null)
       setTimeline([])
       setErrorMessage('')
       setErrorHeadline('')
@@ -1878,7 +1897,9 @@ export default function App() {
         const timelineData = await api.get(`/deployments/${deploymentId}/timeline`)
         setTimeline(Array.isArray(timelineData) ? timelineData : [])
         const entry = getCacheEntry(cacheStore.deploymentDetail, deploymentId)
-        entry.ts = Date.now()
+        const now = Date.now()
+        entry.ts = now
+        setDeploymentDetailRefreshedAt(now)
       } catch (err) {
         if (isLoginRequiredError(err)) return
         setErrorHeadline('')
@@ -1899,7 +1920,6 @@ export default function App() {
       setDeploymentDetailLoading(true)
       setSelected(null)
       setFailures([])
-      setRollbackResult(null)
       setTimeline([])
       navigate(`/deployments/${encodeURIComponent(deployment.id)}`)
     },
@@ -1920,7 +1940,6 @@ export default function App() {
       setErrorMessage(`${result.code}: ${result.message}`)
       return
     }
-    setRollbackResult(result)
     setSelected(result)
     setFailures([])
     setStatusMessage(`Rollback started with id ${result.id}`)
@@ -2108,30 +2127,28 @@ export default function App() {
       setTimeline([])
       setDeploymentDetailLoading(false)
       setInsights(null)
-        setServicesView([])
-        setServicesViewError('')
-        setServiceDetailName('')
-        setServiceDetailStatus(null)
-        setServiceDetailHistory([])
-        setServiceDetailFailures([])
-        setServiceDetailError('')
-        setPublicSettings({
-          default_refresh_interval_seconds: 300,
-          min_refresh_interval_seconds: 60,
-          max_refresh_interval_seconds: 3600
-        })
-        setAdminSettings(null)
-        setUserSettingsKey('')
-        setUserSettings(null)
-        setUserSettingsLoaded(false)
-        setRefreshMinutesInput('')
+      setServicesView([])
+      setServiceDetailName('')
+      setServiceDetailStatus(null)
+      setServiceDetailHistory([])
+      setServiceDetailFailures([])
+      setPublicSettings({
+        default_refresh_interval_seconds: 300,
+        min_refresh_interval_seconds: 60,
+        max_refresh_interval_seconds: 3600
+      })
+      setAdminSettings(null)
+      setUserSettingsKey('')
+      setUserSettings(null)
+      setUserSettingsLoaded(false)
+      setRefreshMinutesInput('')
       setRefreshClampNote('')
       setRefreshInputError('')
       setActionInfo({
         actions: { view: true, deploy: false, rollback: false },
         loading: true,
         error: ''
-        })
+      })
       deployQueryAppliedRef.current = false
       lastPolicySummaryKeyRef.current = ''
     }
@@ -2774,10 +2791,44 @@ export default function App() {
     navigate('/deploy')
   }, [navigate])
 
+  const servicesListStatusItems = servicesViewLoading
+    ? [{ label: 'Data', value: 'loading' }]
+    : servicesRefreshedAt
+      ? [{ label: 'Data refreshed', value: formatTime(servicesRefreshedAt) }]
+      : [{ label: 'Data', value: 'ready' }]
+
+  const serviceDetailStatusItems = serviceDetailLoading
+    ? [{ label: 'Data', value: 'loading' }]
+    : serviceDetailRefreshedAt
+      ? [{ label: 'Data refreshed', value: formatTime(serviceDetailRefreshedAt) }]
+      : [{ label: 'Data', value: 'ready' }]
+
+  const policyStatusItems = [
+    {
+      label: 'Policy',
+      value:
+        policySummaryStatus === 'checking' || policyDeploymentsLoading || refreshing ? 'loading' : 'loaded'
+    }
+  ]
+  if (policyRefreshedAt) {
+    policyStatusItems.push({ label: 'Data refreshed', value: formatTime(policyRefreshedAt) })
+  }
+
+  const deploymentsStatusItems = deploymentsLoading
+    ? [{ label: 'Data', value: 'loading' }]
+    : deploymentsRefreshedAt
+      ? [{ label: 'Data refreshed', value: formatTime(deploymentsRefreshedAt) }]
+      : [{ label: 'Data', value: 'ready' }]
+
+  const deploymentDetailStatusItems = deploymentDetailLoading
+    ? [{ label: 'Data', value: 'loading' }]
+    : deploymentDetailRefreshedAt
+      ? [{ label: 'Data refreshed', value: formatTime(deploymentDetailRefreshedAt) }]
+      : [{ label: 'Data', value: 'ready' }]
+
   const servicesPageProps = {
     servicesView,
     servicesViewLoading,
-    servicesViewError,
     loadServicesList,
     setServiceDetailTab,
     navigateToService,
@@ -2787,7 +2838,6 @@ export default function App() {
     formatTime,
     serviceDetailName,
     serviceDetailTab,
-    serviceDetailError,
     serviceDetailLoading,
     serviceDetailRunning,
     serviceDetailLatest,
@@ -2809,7 +2859,9 @@ export default function App() {
     getRecipeDisplay,
     getRollbackIdFor,
     renderFailures,
-    setService
+    setService,
+    listHeaderMeta: <HeaderStatus items={servicesListStatusItems} />,
+    detailHeaderMeta: <HeaderStatus items={serviceDetailStatusItems} />
   }
 
   const deployPageProps = {
@@ -2857,7 +2909,6 @@ export default function App() {
     deployDisabledReason,
     canReviewDeploy,
     handleReviewDeploy,
-    statusMessage,
     deployInlineMessage,
     deployInlineHeadline,
     selectedRecipeNarrative,
@@ -2871,7 +2922,8 @@ export default function App() {
     isPlatformAdmin,
     openDeployment,
     versionVerified,
-    trimmedChangeSummary
+    trimmedChangeSummary,
+    headerMeta: <HeaderStatus items={policyStatusItems} />
   }
 
   const deploymentsPageProps = {
@@ -2879,13 +2931,13 @@ export default function App() {
     refreshDeployments,
     openDeployment,
     statusClass,
-    formatTime
+    formatTime,
+    headerMeta: <HeaderStatus items={deploymentsStatusItems} />
   }
 
   const deploymentDetailPageProps = {
     selected,
     statusClass,
-    statusMessage,
     selectedValidatedAt,
     selectedExecutionAt,
     outcomeTone,
@@ -2903,11 +2955,11 @@ export default function App() {
     handleRollback,
     canRollback,
     rollbackDisabledReason,
-    rollbackResult,
     timelineSteps,
     failures,
     renderFailures,
-    deploymentLoading: deploymentDetailLoading
+    deploymentLoading: deploymentDetailLoading,
+    headerMeta: <HeaderStatus items={deploymentDetailStatusItems} />
   }
 
   const settingsPageProps = {
@@ -2991,6 +3043,20 @@ export default function App() {
     auditEvents
   }
 
+  const infoItems = []
+  if (!authReady) {
+    infoItems.push({ headline: 'Session', message: 'Loading session...' })
+  }
+  if (authReady && !isAuthenticated && !authError) {
+    infoItems.push({
+      headline: 'Login required',
+      message: 'Use the Login button in the top navigation to sign in.'
+    })
+  }
+  if (statusMessage) {
+    infoItems.push({ headline: 'Status', message: statusMessage })
+  }
+
   return (
     <AppShell
       refreshDeployments={refreshDeployments}
@@ -3002,23 +3068,15 @@ export default function App() {
       handleLogout={handleLogout}
       derivedRole={derivedRole}
       currentDeliveryGroup={currentDeliveryGroup}
-      alertRail={<AlertRail errorMessage={errorMessage} errorHeadline={errorHeadline} authError={authError} />}
+      alertRail={
+        <AlertRail
+          errorMessage={errorMessage}
+          errorHeadline={errorHeadline}
+          authError={authError}
+          infoItems={infoItems}
+        />
+      }
     >
-      {!authReady && (
-        <div className="shell">
-          <div className="card">Loading session...</div>
-        </div>
-      )}
-
-      {authReady && !isAuthenticated && !authError && (
-        <div className="shell">
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <h2>Login required</h2>
-            <div className="helper">Use the Login button in the top navigation to sign in.</div>
-          </div>
-        </div>
-      )}
-
       {authReady && isAuthenticated && (
         <Routes>
           <Route path="/" element={<Navigate to="/services" replace />} />
@@ -3091,7 +3149,6 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  {insightsError && <div className="helper" style={{ marginTop: '8px' }}>{insightsError}</div>}
                   {!insights && !insightsLoading && !insightsError && (
                     <div className="helper">No insights available for the selected filters.</div>
                   )}

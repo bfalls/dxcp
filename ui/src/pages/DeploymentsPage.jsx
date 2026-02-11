@@ -1,12 +1,20 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
 
-export default function DeploymentsPage({ deployments, refreshDeployments, openDeployment, statusClass, formatTime }) {
+export default function DeploymentsPage({
+  deployments,
+  refreshDeployments,
+  openDeployment,
+  statusClass,
+  formatTime,
+  headerMeta
+}) {
   return (
     <div className="shell">
       <div className="page-header-zone">
         <PageHeader
           title="Recent deployments"
+          meta={headerMeta}
           actions={
             <button className="button secondary" onClick={() => refreshDeployments({ bypassCache: true })}>
               Refresh

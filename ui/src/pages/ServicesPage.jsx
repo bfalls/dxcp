@@ -6,7 +6,6 @@ export default function ServicesPage({
   mode,
   servicesView,
   servicesViewLoading,
-  servicesViewError,
   loadServicesList,
   setServiceDetailTab,
   navigateToService,
@@ -16,7 +15,6 @@ export default function ServicesPage({
   formatTime,
   serviceDetailName,
   serviceDetailTab,
-  serviceDetailError,
   serviceDetailLoading,
   serviceDetailRunning,
   serviceDetailLatest,
@@ -38,8 +36,11 @@ export default function ServicesPage({
   getRecipeDisplay,
   getRollbackIdFor,
   renderFailures,
-  setService
+  setService,
+  listHeaderMeta,
+  detailHeaderMeta
 }) {
+  const headerMeta = mode === 'list' ? listHeaderMeta : detailHeaderMeta
   if (mode === 'list') {
     return (
       <div className="shell">
@@ -47,6 +48,7 @@ export default function ServicesPage({
           <PageHeader
             title="Services"
             subtitle="Deployable services and their latest delivery status."
+            meta={headerMeta}
             actions={
               <button
                 className="button secondary"
@@ -68,7 +70,6 @@ export default function ServicesPage({
           </div>
         </SectionCard>
         <SectionCard style={{ gridColumn: '1 / -1' }}>
-          {servicesViewError && <div className="helper space-8">{servicesViewError}</div>}
           {servicesViewLoading && <div className="helper space-8">Loading services...</div>}
           {!servicesViewLoading && servicesView.length === 0 && (
             <div className="helper space-8">
@@ -112,6 +113,7 @@ export default function ServicesPage({
         <PageHeader
           title="Service detail"
           subtitle={serviceDetailName || 'Unknown service'}
+          meta={headerMeta}
           actions={
             <button className="button secondary" onClick={navigateToServices}>
               Back to services
@@ -130,12 +132,6 @@ export default function ServicesPage({
           ))}
         </div>
       </div>
-
-      {serviceDetailError && (
-        <SectionCard style={{ gridColumn: '1 / -1' }}>
-          {serviceDetailError}
-        </SectionCard>
-      )}
 
       {serviceDetailLoading && (
         <SectionCard style={{ gridColumn: '1 / -1' }}>
