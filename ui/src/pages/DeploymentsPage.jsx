@@ -8,7 +8,9 @@ export default function DeploymentsPage({ deployments, refreshDeployments, openD
         <PageHeader
           title="Recent deployments"
           actions={
-            <button className="button secondary" onClick={refreshDeployments}>Refresh</button>
+            <button className="button secondary" onClick={() => refreshDeployments({ bypassCache: true })}>
+              Refresh
+            </button>
           }
         />
       </div>

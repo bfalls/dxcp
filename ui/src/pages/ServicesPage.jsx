@@ -1,5 +1,6 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
+import SectionCard from '../components/SectionCard.jsx'
 
 export default function ServicesPage({
   mode,
@@ -47,13 +48,17 @@ export default function ServicesPage({
             title="Services"
             subtitle="Deployable services and their latest delivery status."
             actions={
-              <button className="button secondary" onClick={loadServicesList} disabled={servicesViewLoading}>
+              <button
+                className="button secondary"
+                onClick={() => loadServicesList({ bypassCache: true })}
+                disabled={servicesViewLoading}
+              >
                 {servicesViewLoading ? 'Refreshing...' : 'Refresh'}
               </button>
             }
           />
         </div>
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Delivery control plane</h2>
           <div className="helper space-8">
             DXCP is the source of truth for delivery intent and status. It applies platform guardrails by default.
@@ -61,8 +66,8 @@ export default function ServicesPage({
           <div className="helper space-8">
             What you can do depends on your role. Services shown here are allowlisted and scoped by policy.
           </div>
-        </div>
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        </SectionCard>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           {servicesViewError && <div className="helper space-8">{servicesViewError}</div>}
           {servicesViewLoading && <div className="helper space-8">Loading services...</div>}
           {!servicesViewLoading && servicesView.length === 0 && (
@@ -96,7 +101,7 @@ export default function ServicesPage({
               ))}
             </div>
           )}
-        </div>
+        </SectionCard>
       </div>
     )
   }
@@ -127,20 +132,20 @@ export default function ServicesPage({
       </div>
 
       {serviceDetailError && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           {serviceDetailError}
-        </div>
+        </SectionCard>
       )}
 
       {serviceDetailLoading && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           Loading service detail...
-        </div>
+        </SectionCard>
       )}
 
       {!serviceDetailLoading && serviceDetailTab === 'overview' && (
         <>
-          <div className="card">
+          <SectionCard>
             <h2>What is running</h2>
             {serviceDetailRunning ? (
               <div>
@@ -181,8 +186,8 @@ export default function ServicesPage({
             ) : (
               <div className="helper">No running version recorded yet.</div>
             )}
-          </div>
-          <div className="card">
+          </SectionCard>
+          <SectionCard>
             <h2>Latest delivery status</h2>
             {serviceDetailLatest ? (
               <div>
@@ -222,8 +227,8 @@ export default function ServicesPage({
             ) : (
               <div className="helper">No deployments recorded yet.</div>
             )}
-          </div>
-          <div className="card">
+          </SectionCard>
+          <SectionCard>
             <h2>Delivery group</h2>
             {serviceDetailGroup ? (
               <>
@@ -250,8 +255,8 @@ export default function ServicesPage({
             ) : (
               <div className="helper">Service is not assigned to a delivery group.</div>
             )}
-          </div>
-          <div className="card">
+          </SectionCard>
+          <SectionCard>
             <h2>Integrations</h2>
             {!backstageEntityRef && !backstageEntityUrl && (
               <div className="helper">No integrations configured for this service.</div>
@@ -278,12 +283,12 @@ export default function ServicesPage({
                 </div>
               </div>
             )}
-          </div>
+          </SectionCard>
         </>
       )}
 
       {!serviceDetailLoading && serviceDetailTab === 'deploy' && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Deploy</h2>
           <div className="helper">
             Deployment intent stays in the Deploy view for now.
@@ -297,11 +302,11 @@ export default function ServicesPage({
           >
             Go to Deploy
           </button>
-        </div>
+        </SectionCard>
       )}
 
       {!serviceDetailLoading && serviceDetailTab === 'history' && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Deployment history</h2>
           {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
           {serviceDetailHistory.length > 0 && (
@@ -363,23 +368,23 @@ export default function ServicesPage({
               })}
             </div>
           )}
-        </div>
+        </SectionCard>
       )}
 
       {!serviceDetailLoading && serviceDetailTab === 'failures' && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Latest failures</h2>
           {renderFailures(serviceDetailFailures, serviceDetailStatus?.latest?.engineExecutionUrl)}
-        </div>
+        </SectionCard>
       )}
 
       {!serviceDetailLoading && serviceDetailTab === 'insights' && (
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Insights</h2>
           <div className="helper">
             Service-level insights are not available yet. Use the Insights view for system-wide trends.
           </div>
-        </div>
+        </SectionCard>
       )}
     </div>
   )

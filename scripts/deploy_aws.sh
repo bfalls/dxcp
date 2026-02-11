@@ -315,7 +315,7 @@ PY
 echo "Building UI..."
 pushd "$ROOT_DIR/ui" >/dev/null
 npm install
-VITE_API_BASE="$API_BASE" npm run build
+VITE_API_BASE="${DXCP_UI_API_BASE:-/v1}" npm run build
 popd >/dev/null
 
 UI_DIST_DIR="$ROOT_DIR/ui/dist"
@@ -342,7 +342,8 @@ if [[ -z "$DXCP_UI_AUTH0_DOMAIN" ]]; then
 fi
 
 echo "Writing UI runtime config.json..."
-UI_DIST_DIR="$UI_DIST_DIR" API_BASE="$API_BASE" DXCP_UI_AUTH0_DOMAIN="$DXCP_UI_AUTH0_DOMAIN" \
+DXCP_UI_API_BASE="${DXCP_UI_API_BASE:-/v1}"
+UI_DIST_DIR="$UI_DIST_DIR" API_BASE="$API_BASE" DXCP_UI_API_BASE="$DXCP_UI_API_BASE" DXCP_UI_AUTH0_DOMAIN="$DXCP_UI_AUTH0_DOMAIN" \
 DXCP_UI_AUTH0_CLIENT_ID="$DXCP_UI_AUTH0_CLIENT_ID" DXCP_UI_AUTH0_AUDIENCE="$DXCP_UI_AUTH0_AUDIENCE" \
 DXCP_UI_AUTH0_ROLES_CLAIM="$DXCP_UI_AUTH0_ROLES_CLAIM" python - <<'PY'
 import json
@@ -352,6 +353,7 @@ import sys
 required = [
     "UI_DIST_DIR",
     "API_BASE",
+    "DXCP_UI_API_BASE",
     "DXCP_UI_AUTH0_DOMAIN",
     "DXCP_UI_AUTH0_CLIENT_ID",
     "DXCP_UI_AUTH0_AUDIENCE",
@@ -364,7 +366,7 @@ if missing:
 
 path = os.path.join(os.environ["UI_DIST_DIR"], "config.json")
 config = {
-    "apiBase": os.environ["API_BASE"],
+    "apiBase": os.environ["DXCP_UI_API_BASE"],
     "auth0": {
         "domain": os.environ["DXCP_UI_AUTH0_DOMAIN"],
         "clientId": os.environ["DXCP_UI_AUTH0_CLIENT_ID"],

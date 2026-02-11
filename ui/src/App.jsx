@@ -5,6 +5,8 @@ import { createApiClient } from './apiClient.js'
 import { clampRefreshIntervalSeconds, getUserSettingsKey, loadUserSettings, saveUserSettings } from './settings.js'
 import AppShell from './components/AppShell.jsx'
 import AlertRail from './components/AlertRail.jsx'
+import PageHeader from './components/PageHeader.jsx'
+import SectionCard from './components/SectionCard.jsx'
 import ServicesPage from './pages/ServicesPage.jsx'
 import DeployPage from './pages/DeployPage.jsx'
 import DeploymentsPage from './pages/DeploymentsPage.jsx'
@@ -645,6 +647,7 @@ export default function App() {
   const invalidationRef = useRef({ recipe: '', version: '' })
   const queryAlertRef = useRef({ deployService: '', deployRecipe: '', deployVersion: '', deploymentsService: '' })
   const urlSyncRef = useRef({ deploy: '', deployments: '' })
+  const deployQueryAppliedRef = useRef(false)
   const previousServiceRef = useRef('')
   const view = useMemo(() => resolveViewFromPath(currentPath), [currentPath])
   const deploymentMatch = useMemo(() => matchPath('/deployments/:deploymentId', currentPath), [currentPath])
@@ -1046,11 +1049,11 @@ export default function App() {
     }
   }, [authClient, isAuthenticated, authAudience])
 
-  const refreshDeployments = useCallback(async () => {
+  const refreshDeployments = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
-      const data = await api.get('/deployments')
+      const data = await api.get('/deployments', options)
       setDeployments(Array.isArray(data) ? data : [])
       cacheStore.deployments.ts = Date.now()
     } catch (err) {
@@ -1088,11 +1091,11 @@ export default function App() {
     }
   }, [api])
 
-  const loadServices = useCallback(async () => {
+  const loadServices = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
-      const data = await api.get('/services')
+      const data = await api.get('/services', options)
       if (Array.isArray(data)) {
         setServices(data)
         cacheStore.services.ts = Date.now()
@@ -1109,11 +1112,11 @@ export default function App() {
     }
   }, [api, service, loadAllowedActions])
 
-  const loadRecipes = useCallback(async () => {
+  const loadRecipes = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
     try {
-      const data = await api.get('/recipes')
+      const data = await api.get('/recipes', options)
       const list = Array.isArray(data) ? data : []
       setRecipes(list)
       return true
@@ -1125,9 +1128,9 @@ export default function App() {
     return false
   }, [api])
 
-  const loadDeliveryGroups = useCallback(async () => {
+  const loadDeliveryGroups = useCallback(async (options = {}) => {
     try {
-      const data = await api.get('/delivery-groups')
+      const data = await api.get('/delivery-groups', options)
       const list = Array.isArray(data) ? data : []
       const normalizeGuardrailValue = (value) => {
         if (value === null || value === undefined || value === '') return null
@@ -1175,13 +1178,14 @@ export default function App() {
     }
   }, [api])
 
-  const loadServicesList = useCallback(async () => {
+  const loadServicesList = useCallback(async (options = {}) => {
     setServicesViewError('')
     setServicesViewLoading(true)
     try {
-      const data = await api.get('/services')
+      const data = await api.get('/services', options)
       const list = Array.isArray(data) ? data : []
-      const groups = deliveryGroups.length > 0 ? deliveryGroups : (await loadDeliveryGroups()) || []
+      const groups =
+        deliveryGroups.length > 0 ? deliveryGroups : (await loadDeliveryGroups(options)) || []
       const statusResults = await Promise.allSettled(
         list.map((svc) => api.get(`/services/${encodeURIComponent(svc.service_name)}/delivery-status`))
       )
@@ -1272,11 +1276,11 @@ export default function App() {
     }
   }, [api])
 
-  const loadPolicyDeployments = useCallback(async () => {
+  const loadPolicyDeployments = useCallback(async (options = {}) => {
     setPolicyDeploymentsError('')
     setPolicyDeploymentsLoading(true)
     try {
-      const data = await api.get('/deployments')
+      const data = await api.get('/deployments', options)
       setPolicyDeployments(Array.isArray(data) ? data : [])
       cacheStore.policy.ts = Date.now()
       return true
@@ -1318,8 +1322,12 @@ export default function App() {
     return false
   }, [api, recipeId, service])
 
-  const refreshPolicyContext = useCallback(async () => {
-    const results = await Promise.allSettled([loadRecipes(), loadDeliveryGroups(), loadPolicyDeployments()])
+  const refreshPolicyContext = useCallback(async (options = {}) => {
+    const results = await Promise.allSettled([
+      loadRecipes(options),
+      loadDeliveryGroups(options),
+      loadPolicyDeployments(options)
+    ])
     const recipesOk = results[0].status === 'fulfilled' && results[0].value === true
     const groupsOk = results[1].status === 'fulfilled' && results[1].value !== null
     const policyOk = results[2].status === 'fulfilled' && results[2].value === true
@@ -1703,7 +1711,7 @@ export default function App() {
     )
   }
 
-  const loadVersions = useCallback(async (refresh = false) => {
+  const loadVersions = useCallback(async (refresh = false, options = {}) => {
     if (!service) return
     if (refresh) {
       setVersionsRefreshing(true)
@@ -1713,7 +1721,7 @@ export default function App() {
     setVersionsError('')
     try {
       const suffix = refresh ? '?refresh=1' : ''
-      const data = await api.get(`/services/${encodeURIComponent(service)}/versions${suffix}`)
+      const data = await api.get(`/services/${encodeURIComponent(service)}/versions${suffix}`, options)
       const list = Array.isArray(data?.versions) ? data.versions : []
       setVersions(list)
       const entry = getCacheEntry(cacheStore.versions, service)
@@ -1734,7 +1742,10 @@ export default function App() {
 
   async function refreshData() {
     setRefreshing(true)
-    const tasks = [refreshPolicyContext(), loadVersions(true)]
+    const tasks = [
+      refreshPolicyContext({ bypassCache: true }),
+      loadVersions(true, { bypassCache: true })
+    ]
     const results = await Promise.allSettled(tasks)
     const policyOk = results[0].status === 'fulfilled' && results[0].value === true
     const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
@@ -1747,7 +1758,7 @@ export default function App() {
     setRefreshing(false)
   }
 
-  const loadInsights = useCallback(async () => {
+  const loadInsights = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
     setInsightsError('')
@@ -1757,7 +1768,7 @@ export default function App() {
       params.set('windowDays', String(insightsWindowDays))
       if (insightsGroupId) params.set('groupId', insightsGroupId)
       if (insightsService) params.set('service', insightsService)
-      const data = await api.get(`/insights/failures?${params.toString()}`)
+      const data = await api.get(`/insights/failures?${params.toString()}`, options)
       if (data && data.code) {
         setErrorHeadline('')
         setInsightsError(`${data.code}: ${data.message}`)
@@ -1780,8 +1791,8 @@ export default function App() {
     setErrorHeadline('')
     setStatusMessage('')
     setDeployResult(null)
-    setDeployInlineMessage('')
-    setDeployInlineHeadline('')
+      setDeployInlineMessage('')
+      setDeployInlineHeadline('')
     if (!validVersion) {
       setErrorMessage('Version format is invalid')
       return
@@ -2121,6 +2132,7 @@ export default function App() {
         loading: true,
         error: ''
         })
+      deployQueryAppliedRef.current = false
       lastPolicySummaryKeyRef.current = ''
     }
   }, [isAuthenticated])
@@ -2477,11 +2489,21 @@ export default function App() {
         }
         setService('')
         setDeployQueryParams((prev) => (prev ? { ...prev, service: '' } : prev))
+        deployQueryAppliedRef.current = true
+        setDeployUrlSyncEnabled(true)
         return
       }
       if (service !== queryService) {
-        setService(queryService)
+        if (!deployQueryAppliedRef.current) {
+          setService(queryService)
+          deployQueryAppliedRef.current = true
+          return
+        }
+        setDeployUrlSyncEnabled(true)
         return
+      }
+      if (!deployQueryAppliedRef.current) {
+        deployQueryAppliedRef.current = true
       }
     }
 
@@ -2980,9 +3002,8 @@ export default function App() {
       handleLogout={handleLogout}
       derivedRole={derivedRole}
       currentDeliveryGroup={currentDeliveryGroup}
+      alertRail={<AlertRail errorMessage={errorMessage} errorHeadline={errorHeadline} authError={authError} />}
     >
-      <AlertRail errorMessage={errorMessage} errorHeadline={errorHeadline} authError={authError} />
-
       {!authReady && (
         <div className="shell">
           <div className="card">Loading session...</div>
@@ -3010,13 +3031,21 @@ export default function App() {
             path="/insights"
             element={
               <div className="shell">
-                <div className="card" style={{ gridColumn: '1 / -1' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2>Insights</h2>
-                    <button className="button secondary" onClick={loadInsights} disabled={insightsLoading}>
-                      {insightsLoading ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                  </div>
+                <div className="page-header-zone">
+                  <PageHeader
+                    title="Insights"
+                    actions={
+                      <button
+                        className="button secondary"
+                        onClick={() => loadInsights({ bypassCache: true })}
+                        disabled={insightsLoading}
+                      >
+                        {insightsLoading ? 'Refreshing...' : 'Refresh'}
+                      </button>
+                    }
+                  />
+                </div>
+                <SectionCard style={{ gridColumn: '1 / -1' }}>
                   <div className="row" style={{ marginTop: '12px' }}>
                     <div className="field">
                       <label htmlFor="insights-service">Service</label>
@@ -3106,7 +3135,7 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                </div>
+                </SectionCard>
               </div>
             }
           />

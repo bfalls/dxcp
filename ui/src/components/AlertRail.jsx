@@ -1,22 +1,24 @@
 import React from 'react'
+import LayoutContainer from './LayoutContainer.jsx'
+import SectionCard from './SectionCard.jsx'
 
 export default function AlertRail({ errorMessage, errorHeadline, authError }) {
-  if (!errorMessage && !authError) return null
+  const hasAlerts = Boolean(errorMessage || authError)
   return (
-    <>
-      {errorMessage && (
-        <div className="shell">
-          <div className="card">
-            {errorHeadline && <strong>{errorHeadline}. </strong>}
-            {errorMessage}
+    <div className={`alert-rail${hasAlerts ? ' has-alerts' : ''}`} aria-live="polite">
+      <LayoutContainer>
+        {hasAlerts ? (
+          <div className="alert-rail-stack">
+            {errorMessage && (
+              <SectionCard>
+                {errorHeadline && <strong>{errorHeadline}. </strong>}
+                {errorMessage}
+              </SectionCard>
+            )}
+            {authError && <SectionCard>{authError}</SectionCard>}
           </div>
-        </div>
-      )}
-      {authError && (
-        <div className="shell">
-          <div className="card">{authError}</div>
-        </div>
-      )}
-    </>
+        ) : null}
+      </LayoutContainer>
+    </div>
   )
 }

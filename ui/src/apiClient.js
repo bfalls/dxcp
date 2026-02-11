@@ -1,4 +1,8 @@
 export function createApiClient({ baseUrl, getToken }) {
+  const inFlight = new Map()
+  const cache = new Map()
+  const defaultCacheTtlMs = 2000
+
   async function buildHeaders() {
     const token = await getToken()
     if (!token) {
@@ -9,10 +13,36 @@ export function createApiClient({ baseUrl, getToken }) {
     return { Authorization: `Bearer ${token}` }
   }
 
-  async function get(path) {
+  async function get(path, options = {}) {
+    const { bypassCache = false, cacheTtlMs = defaultCacheTtlMs } = options || {}
     const headers = await buildHeaders()
-    const res = await fetch(`${baseUrl}${path}`, { headers })
-    return res.json()
+    const url = `${baseUrl}${path}`
+    if (!bypassCache) {
+      const cached = cache.get(url)
+      if (cached && Date.now() - cached.ts <= cacheTtlMs) {
+        return cached.data
+      }
+      const pending = inFlight.get(url)
+      if (pending) {
+        return pending
+      }
+    }
+    const fetchPromise = (async () => {
+      try {
+        const res = await fetch(url, { headers })
+        const data = await res.json()
+        if (!bypassCache && res.ok) {
+          cache.set(url, { ts: Date.now(), data })
+        }
+        return data
+      } finally {
+        inFlight.delete(url)
+      }
+    })()
+    if (!bypassCache) {
+      inFlight.set(url, fetchPromise)
+    }
+    return fetchPromise
   }
 
   async function post(path, body, idempotencyKey) {

@@ -391,7 +391,7 @@ export async function runAllTests() {
 
     await view.findByText('OBSERVER')
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
-    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    const reviewButton = view.getByTestId('deploy-review-button')
     assert.equal(reviewButton.disabled, true)
   })
 
@@ -671,7 +671,7 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await waitForCondition(() => versionSelect.value === '2.1.0')
     await view.findByDisplayValue('release')
-    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    const reviewButton = view.getByTestId('deploy-review-button')
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
     await waitForCondition(() => !reviewButton.disabled)
     fireEvent.click(reviewButton)
@@ -711,7 +711,7 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
     await waitForCondition(() => versionSelect.value === '2.1.0')
-    const reviewButton = view.getByRole('button', { name: 'Review deploy' })
+    const reviewButton = view.getByTestId('deploy-review-button')
     await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
     await waitForCondition(() => !reviewButton.disabled)
     fireEvent.click(reviewButton)

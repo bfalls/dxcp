@@ -19,6 +19,8 @@ export interface ApiStackProps extends StackProps {
 }
 
 export class ApiStack extends Stack {
+  public readonly apiEndpoint: string;
+
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
@@ -83,6 +85,7 @@ export class ApiStack extends Stack {
         allowOrigins: props.corsOrigins,
       },
     });
+    this.apiEndpoint = httpApi.apiEndpoint;
 
     const integration = new integrations.HttpLambdaIntegration("DxcpIntegration", handler);
     httpApi.addRoutes({

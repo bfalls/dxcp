@@ -41,7 +41,7 @@ const dataStack = new DataStack(app, "DxcpDataStack", {
 
 const demoRuntimeStack = new DemoRuntimeStack(app, "DxcpDemoRuntimeStack", { env, configPrefix });
 
-new ApiStack(app, "DxcpApiStack", {
+const apiStack = new ApiStack(app, "DxcpApiStack", {
   env,
   table: dataStack.table,
   configPrefix,
@@ -51,4 +51,4 @@ new ApiStack(app, "DxcpApiStack", {
   engineTokenSecret: demoRuntimeStack.controllerTokenSecret,
 });
 
-new UiStack(app, "DxcpUiStack", { env });
+new UiStack(app, "DxcpUiStack", { env, apiEndpoint: apiStack.apiEndpoint });

@@ -12,6 +12,7 @@ export default function AppShell({
   handleLogout,
   derivedRole,
   currentDeliveryGroup,
+  alertRail,
   children
 }) {
   const location = useLocation()
@@ -100,6 +101,7 @@ export default function AppShell({
           </nav>
         </LayoutContainer>
       </header>
+      {alertRail}
       <LayoutContainer className="page-body">{children}</LayoutContainer>
     </div>
   )
