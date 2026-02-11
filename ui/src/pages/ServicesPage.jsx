@@ -1,4 +1,5 @@
 import React from 'react'
+import InfoTooltip from '../components/InfoTooltip.jsx'
 import PageHeader from '../components/PageHeader.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 
@@ -145,8 +146,18 @@ export default function ServicesPage({
             <h2>What is running</h2>
             {serviceDetailRunning ? (
               <div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="badge info">Source: Authoritative</span>
+              <div className="badge-row">
+                <span className="badge info badge-with-tooltip">
+                  State source: DXCP
+                  <InfoTooltip label="State source details">
+                    <span className="info-tooltip-title">State source</span>
+                    <span>
+                      Shows where the running version comes from. DXCP derives it from its deployment records and is the
+                      system of record.
+                    </span>
+                    <span className="info-tooltip-list">Known sources: DXCP record (authoritative).</span>
+                  </InfoTooltip>
+                </span>
                 <span className="badge neutral">
                   Operation: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}
                 </span>
@@ -176,7 +187,7 @@ export default function ServicesPage({
                   <p>Derived: {formatTime(serviceDetailRunning.derivedAt)}</p>
                 )}
                 <div className="helper space-8">
-                  Derived from DXCP deployment records.
+                  Running state is derived from DXCP deployment records.
                 </div>
               </div>
             ) : (
@@ -187,7 +198,7 @@ export default function ServicesPage({
             <h2>Latest delivery status</h2>
             {serviceDetailLatest ? (
               <div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div className="badge-row">
                   <span className={`badge ${outcomeTone(serviceDetailLatest.outcome, serviceDetailLatest.state)}`}>
                     Outcome: {outcomeLabel(serviceDetailLatest.outcome, serviceDetailLatest.state)}
                   </span>
@@ -224,30 +235,32 @@ export default function ServicesPage({
               <div className="helper">No deployments recorded yet.</div>
             )}
           </SectionCard>
-          <SectionCard>
+          <SectionCard data-testid="delivery-group-card">
             <h2>Delivery group</h2>
             {serviceDetailGroup ? (
-              <>
-              <p>{serviceDetailGroup.name}</p>
-              <div className="helper">Owner: {serviceDetailGroup.owner || 'Unassigned'}</div>
-              <div className="guardrails space-12">
-                <div className="helper space-4">Guardrails</div>
-                <div className="list">
-                  <div className="list-item">
-                    <div>Max concurrent deployments</div>
-                    <div>{serviceDetailGroup.guardrails?.max_concurrent_deployments || '-'}</div>
+              <div className="dg-rail">
+                <div className="dg-grid">
+                  <div className="dg-label">Name</div>
+                  <div className="dg-value">{serviceDetailGroup.name || '.'}</div>
+                  <div className="dg-label">Owner</div>
+                  <div className="dg-value">
+                    {serviceDetailGroup.owner || 'Unassigned'}
                   </div>
-                    <div className="list-item">
-                      <div>Daily deploy quota</div>
-                      <div>{serviceDetailGroup.guardrails?.daily_deploy_quota || '-'}</div>
-                    </div>
-                    <div className="list-item">
-                      <div>Daily rollback quota</div>
-                      <div>{serviceDetailGroup.guardrails?.daily_rollback_quota || '-'}</div>
-                    </div>
+                  <div className="dg-subhead">Guardrails</div>
+                  <div className="dg-label">Max concurrent deployments</div>
+                  <div className="dg-value">
+                    {serviceDetailGroup.guardrails?.max_concurrent_deployments ?? '.'}
+                  </div>
+                  <div className="dg-label">Daily deploy quota</div>
+                  <div className="dg-value">
+                    {serviceDetailGroup.guardrails?.daily_deploy_quota ?? '.'}
+                  </div>
+                  <div className="dg-label">Daily rollback quota</div>
+                  <div className="dg-value">
+                    {serviceDetailGroup.guardrails?.daily_rollback_quota ?? '.'}
                   </div>
                 </div>
-              </>
+              </div>
             ) : (
               <div className="helper">Service is not assigned to a delivery group.</div>
             )}

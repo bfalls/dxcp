@@ -1,5 +1,6 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
+import SectionCard from '../components/SectionCard.jsx'
 
 export default function AdminPage({
   adminReadOnly,
@@ -120,7 +121,7 @@ export default function AdminPage({
       </div>
       {adminTab === 'delivery-groups' && (
         <>
-          <div className="card">
+          <SectionCard>
             <h2>Delivery groups</h2>
             {deliveryGroups.length === 0 && <div className="helper">No delivery groups available.</div>}
             {deliveryGroups.length > 0 && (
@@ -154,8 +155,8 @@ export default function AdminPage({
                 ))}
               </div>
             )}
-          </div>
-          <div className="card">
+          </SectionCard>
+          <SectionCard>
             {adminGroupMode === 'view' && activeAdminGroup && (
               <>
                 <h2>Group detail</h2>
@@ -471,12 +472,12 @@ export default function AdminPage({
             {adminGroupMode === 'view' && !activeAdminGroup && (
               <div className="helper">Select a delivery group to view details.</div>
             )}
-          </div>
+          </SectionCard>
         </>
       )}
       {adminTab === 'recipes' && (
         <>
-          <div className="card">
+          <SectionCard>
             <h2>Recipes</h2>
             {recipes.length === 0 && <div className="helper">No recipes available.</div>}
             {recipes.length > 0 && (
@@ -520,8 +521,8 @@ export default function AdminPage({
                 })}
               </div>
             )}
-          </div>
-          <div className="card">
+          </SectionCard>
+          <SectionCard>
             {adminRecipeMode === 'view' && activeAdminRecipe && (
               <>
                 <h2>Recipe detail</h2>
@@ -800,11 +801,11 @@ export default function AdminPage({
             {adminRecipeMode === 'view' && !activeAdminRecipe && (
               <div className="helper">Select a recipe to view details.</div>
             )}
-          </div>
+          </SectionCard>
         </>
       )}
       {adminTab === 'audit' && isPlatformAdmin && (
-        <div className="card">
+        <SectionCard>
           <h2>Audit events</h2>
           {auditError && <div className="helper space-8">{auditError}</div>}
           {!auditError && auditEvents.length === 0 && (
@@ -826,7 +827,7 @@ export default function AdminPage({
               ))}
             </div>
           )}
-        </div>
+        </SectionCard>
       )}
     </div>
   )

@@ -1,5 +1,7 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
+import SectionCard from '../components/SectionCard.jsx'
+import TwoColumn from '../components/TwoColumn.jsx'
 
 export default function DeployPage({
   refreshData,
@@ -74,8 +76,8 @@ export default function DeployPage({
   const latestDeployment = deployResult || latestPolicyDeployment
 
   return (
-    <div className="shell two-column">
-      <div className="page-header-zone">
+    <TwoColumn
+      header={
         <PageHeader
           title="Deploy intent"
           meta={headerMeta}
@@ -85,8 +87,9 @@ export default function DeployPage({
             </button>
           }
         />
-      </div>
-      <div className="card">
+      }
+      primary={
+        <SectionCard>
         {deployStep === 'form' && (
           <>
             {/* Stable E2E selectors for deploy flow inputs */}
@@ -423,8 +426,10 @@ export default function DeployPage({
             )}
           </>
         )}
-      </div>
-      <div className="card">
+        </SectionCard>
+      }
+      secondary={
+        <SectionCard>
         <h2>Policy context</h2>
         {!currentDeliveryGroup && <div className="helper">Service is not assigned to a delivery group.</div>}
         {currentDeliveryGroup && (
@@ -483,8 +488,10 @@ export default function DeployPage({
             </div>
           </>
         )}
-      </div>
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
+        </SectionCard>
+      }
+      footer={
+        <SectionCard>
         <h2>Latest deployment</h2>
         {latestDeployment ? (
           <div>
@@ -502,7 +509,8 @@ export default function DeployPage({
         ) : (
           <div className="helper">No deployment created yet.</div>
         )}
-      </div>
-    </div>
+        </SectionCard>
+      }
+    />
   )
 }

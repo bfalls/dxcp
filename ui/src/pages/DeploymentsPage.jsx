@@ -1,5 +1,6 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
+import SectionCard from '../components/SectionCard.jsx'
 
 export default function DeploymentsPage({
   deployments,
@@ -22,7 +23,7 @@ export default function DeploymentsPage({
           }
         />
       </div>
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
+      <SectionCard style={{ gridColumn: '1 / -1' }}>
         {/* Stable E2E selectors for deployment history list */}
         <div className="list" data-testid="deployment-list">
           {deployments.length === 0 && <div className="helper">No deployments yet.</div>}
@@ -38,7 +39,7 @@ export default function DeploymentsPage({
             </div>
           ))}
         </div>
-      </div>
+      </SectionCard>
     </div>
   )
 }

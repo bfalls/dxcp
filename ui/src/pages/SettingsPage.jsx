@@ -1,5 +1,6 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
+import SectionCard from '../components/SectionCard.jsx'
 
 export default function SettingsPage({
   minRefreshSeconds,
@@ -22,7 +23,7 @@ export default function SettingsPage({
           subtitle="Control auto-refresh behavior for the UI."
         />
       </div>
-      <div className="card">
+      <SectionCard>
         <h2>User settings</h2>
         <div className="field">
           <label htmlFor="refresh-interval-minutes">Auto-refresh interval (minutes)</label>
@@ -43,9 +44,9 @@ export default function SettingsPage({
           {refreshClampNote && <div className="helper">{refreshClampNote}</div>}
           <div className="helper">Resolved refresh interval: {refreshIntervalMinutes} minutes.</div>
         </div>
-      </div>
+      </SectionCard>
       {isPlatformAdmin && (
-        <div className="card">
+        <SectionCard>
           <h2>Admin defaults</h2>
           <div className="helper">Config-driven defaults and guardrails.</div>
           <div className="list space-8">
@@ -62,7 +63,7 @@ export default function SettingsPage({
               <div>{Math.round((adminSettings?.max_refresh_interval_seconds ?? maxRefreshSeconds) / 60)} minutes</div>
             </div>
           </div>
-        </div>
+        </SectionCard>
       )}
     </div>
   )
