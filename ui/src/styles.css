@@ -108,6 +108,39 @@ body {
   flex-wrap: wrap;
 }
 
+.deployment-header-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.behavior-summary {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0d1919;
+  display: grid;
+  gap: 6px;
+}
+
+.behavior-summary-value {
+  font-weight: 600;
+}
+
+.technical-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.technical-details[open] summary {
+  margin-bottom: 10px;
+}
+
 .space-4 {
   margin-top: 4px;
 }
