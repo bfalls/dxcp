@@ -440,6 +440,10 @@ body {
   flex-wrap: wrap;
 }
 
+.meta-line {
+  margin-top: 6px;
+}
+
 .table {
   display: grid;
   gap: 6px;

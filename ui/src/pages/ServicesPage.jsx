@@ -41,6 +41,29 @@ export default function ServicesPage({
   listHeaderMeta,
   detailHeaderMeta
 }) {
+  const resolveLatestStatusLabel = (latest) => {
+    if (!latest) return 'In progress'
+    const normalizedState = String(latest.state || '').toUpperCase()
+    const stateMap = {
+      PENDING: 'QUEUED',
+      ACTIVE: 'RUNNING',
+      IN_PROGRESS: 'RUNNING',
+      QUEUED: 'QUEUED',
+      RUNNING: 'RUNNING'
+    }
+    const resolvedOutcome = resolveOutcome(latest.outcome, latest.state)
+    const statusKey = stateMap[normalizedState] || resolvedOutcome || normalizedState
+    const labelMap = {
+      SUCCEEDED: 'Succeeded',
+      FAILED: 'Failed',
+      CANCELED: 'Canceled',
+      ROLLED_BACK: 'Rolled back',
+      RUNNING: 'Running',
+      QUEUED: 'Queued'
+    }
+    return labelMap[statusKey] || (statusKey ? statusKey.replace(/_/g, ' ') : 'In progress')
+  }
+
   const headerMeta = mode === 'list' ? listHeaderMeta : detailHeaderMeta
   if (mode === 'list') {
     return (
@@ -200,13 +223,14 @@ export default function ServicesPage({
               <div>
                 <div className="badge-row">
                   <span className={`badge ${outcomeTone(serviceDetailLatest.outcome, serviceDetailLatest.state)}`}>
-                    Outcome: {outcomeLabel(serviceDetailLatest.outcome, serviceDetailLatest.state)}
+                    {resolveLatestStatusLabel(serviceDetailLatest)}
                   </span>
-                  <span className="badge neutral">
-                    Operation: {deploymentKindLabel(serviceDetailLatest.deploymentKind, serviceDetailLatest.rollbackOf)}
-                  </span>
-                  <span className="badge neutral">State: {serviceDetailLatest.state}</span>
                 </div>
+                {serviceDetailLatest.deploymentKind && (
+                  <div className="helper meta-line">
+                    Operation: {deploymentKindLabel(serviceDetailLatest.deploymentKind, serviceDetailLatest.rollbackOf)}
+                  </div>
+                )}
                 <p>Version: {serviceDetailLatest.version || '-'}</p>
                 <p>Updated: {formatTime(serviceDetailLatest.updatedAt || serviceDetailLatest.createdAt)}</p>
                 {serviceDetailLatest.rollbackOf && (
