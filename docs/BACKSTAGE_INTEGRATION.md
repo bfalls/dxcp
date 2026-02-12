@@ -1,99 +1,185 @@
-# Backstage integration (read-first)
+# Backstage Integration -- Governance-Aligned Model
 
-DXCP is the delivery control plane. Backstage remains the catalog and surface for service ownership.
-This integration is read-first and optional. DXCP runs without Backstage.
+This document defines the architectural and governance boundaries
+between:
 
-## Responsibility split
+-   **DXCP** --- Delivery Experience Control Plane\
+-   **Backstage** --- Internal Developer Portal
 
-DXCP owns:
-- Delivery intent, guardrails, and normalized delivery records.
-- Read endpoints for status, actions, and insights.
+This integration must preserve DXCP's role as the authoritative delivery
+control plane.
 
-Backstage owns:
-- Catalog, ownership, and discovery.
-- Rendering DXCP read data in service-centric views.
+DXCP is not extended by Backstage.\
+Backstage is a client of DXCP.
 
-Backstage should not perform write actions in DXCP.
+------------------------------------------------------------------------
 
-## Conceptual mapping
+# DXCP Identity (Reaffirmed)
 
-- Backstage system/group -> DXCP DeliveryGroup
-- Backstage component/service -> DXCP service
+DXCP exists to:
 
-Recommended link: store the DXCP DeliveryGroup id in Backstage metadata and use it when
-requesting insights or listing DeliveryGroup details.
+-   Make software delivery safe by default
+-   Act as the authoritative source of truth for delivery state
+-   Enforce delivery policy centrally
+-   Abstract execution engine complexity
+-   Provide consistent, explainable delivery outcomes
 
-## Service registry fields
+DXCP is NOT:
 
-DXCP can surface Backstage links in the Service detail view when these optional fields
-are present in the service registry. All fields are read-only in the UI.
+-   A CI system
+-   A build system
+-   A pipeline editor
+-   A developer portal
+-   A catalog manager
+-   A UI extension surface
 
-- `backstage_entity_ref`: Backstage entity ref (example: `component:default/demo-service`).
-- `backstage_entity_url_template`: Optional URL template. Supports `{service}` and SSM
-  resolution via `ssm:/path` entries (same pattern as `stable_service_url_template`).
-- `VITE_BACKSTAGE_BASE_URL`: Optional UI config. When set and no explicit URL template
-  is provided, the UI builds `https://<base>/catalog/<namespace>/<kind>/<name>`.
+Backstage integration must not change these boundaries.
 
-## Required endpoints
+------------------------------------------------------------------------
 
-These endpoints are safe for OBSERVER role.
+# Backstage Role
 
-### Service delivery status
+Backstage exists to:
 
-GET /v1/services/{service}/delivery-status
+-   Own catalog identity
+-   Provide service discovery
+-   Improve cross-tool visibility
+-   Offer workflow entry points
 
-Response example:
-```
-{
-  "service": "demo-service",
-  "hasDeployments": true,
-  "latest": {
-    "id": "dep-123",
-    "state": "SUCCEEDED",
-    "version": "1.0.0",
-    "recipeId": "default",
-    "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-01-01T00:05:00Z",
-    "engineExecutionUrl": "https://spinnaker.example/pipelines/dep-123",
-    "rollbackOf": null
-  }
-}
-```
+Backstage is not:
 
-### Allowed actions for service
+-   A delivery authority
+-   A policy engine
+-   A deployment orchestrator
+-   A delivery state store
 
-GET /v1/services/{service}/allowed-actions
+Backstage must never become an alternate deployment path.
 
-Response example:
-```
-{
-  "service": "demo-service",
-  "role": "OBSERVER",
-  "actions": {
-    "view": true,
-    "deploy": false,
-    "rollback": false
-  }
-}
-```
+------------------------------------------------------------------------
 
-### Failure insights (optional card)
+# Governance Boundary
 
-GET /v1/insights/failures?windowDays=7&groupId=default
+The integration enforces the following invariant:
 
-Render:
-- rollbackRate
-- failuresByCategory
-- deploymentsByRecipe
-- deploymentsByGroup
+Backstage renders.\
+DXCP evaluates and enforces.
 
-## Auth expectations
+All delivery actions initiated from Backstage must:
 
-Use a Bearer token. OBSERVER role is sufficient for read access.
+1.  Flow through DXCP APIs
+2.  Be evaluated against DXCP policy
+3.  Be recorded in DXCP audit history
+4.  Reflect DXCP's authoritative state
 
-## Backstage plugin guidance
+Backstage must not:
 
-Minimal card ideas:
-- Delivery status: show latest state, version, and updatedAt.
-- Actions: show which actions are allowed (read-only for OBSERVER).
-- Insights: show rollback rate and top failure categories.
+-   Cache canonical delivery state
+-   Recompute allowed actions
+-   Interpret policy independently
+-   Modify delivery strategy
+-   Modify guardrails
+
+DXCP remains the sole authority over delivery outcomes.
+
+------------------------------------------------------------------------
+
+# Architectural Invariants
+
+1.  **Single Control Plane**\
+    All deployments converge through DXCP.
+
+2.  **No Parallel Governance**\
+    Backstage must not introduce alternative policy paths.
+
+3.  **Execution Engine Abstraction Preserved**\
+    Backstage must never depend on underlying engine details.
+
+4.  **Authoritative State Ownership**\
+    Deployment status, history, and policy evaluation originate in DXCP.
+
+5.  **Portal as Lens, Not Brain**\
+    Backstage surfaces DXCP decisions but does not create them.
+
+------------------------------------------------------------------------
+
+# Integration Scope (Governed)
+
+Permitted:
+
+-   Read-only delivery status display
+-   Allowed actions display (as evaluated by DXCP)
+-   Optional action initiation (deploy, rollback, validate)
+-   Insights rendering (derived from DXCP records)
+
+Explicitly Out of Scope:
+
+-   Editing delivery recipes
+-   Managing environment strategy
+-   Modifying policy definitions
+-   Viewing execution engine internals
+-   Replicating audit logs
+-   Acting as policy decision authority
+
+------------------------------------------------------------------------
+
+# Identity and Mapping
+
+Backstage owns service identity.
+
+DXCP recognizes services via explicit mapping, e.g.:
+
+dxcp.io/service: demo-service
+
+DXCP validates service existence and governance alignment.
+
+Identity authority remains in Backstage.\
+Delivery authority remains in DXCP.
+
+------------------------------------------------------------------------
+
+# Authorization Model
+
+Backstage authenticates to DXCP using standard OIDC Bearer tokens.
+
+DXCP enforces:
+
+-   Role validation
+-   Policy evaluation
+-   Environment constraints
+-   Concurrency limits
+-   Guardrail checks
+
+Backstage may render permitted actions.\
+DXCP decides whether they execute.
+
+------------------------------------------------------------------------
+
+# Enterprise Integrity Clause
+
+This integration must:
+
+-   Reinforce DXCP as the delivery authority
+-   Avoid duplicating governance logic
+-   Preserve policy centralization
+-   Survive execution engine evolution
+-   Prevent scope drift into portal-managed delivery
+
+If DXCP evolves internally, Backstage integration must remain stable and
+abstracted from engine-level changes.
+
+------------------------------------------------------------------------
+
+# Strategic Positioning
+
+The integration should communicate:
+
+"This service is governed by DXCP."
+
+It must never imply:
+
+"Deployment happens in Backstage."
+
+DXCP is the control plane.\
+Backstage is the visibility layer.
+
+The boundary is deliberate and non-negotiable.

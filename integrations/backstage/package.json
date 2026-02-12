@@ -1,0 +1,16 @@
+{
+  "name": "dxcp-backstage-integrations",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Optional Backstage integration packages for DXCP (frontend + backend).",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm -w packages/dxcp-plugin run build && npm -w packages/dxcp-plugin-backend run build",
+    "test": "npm -w packages/dxcp-plugin run test && npm -w packages/dxcp-plugin-backend run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
