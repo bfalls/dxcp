@@ -4,7 +4,9 @@ declare module "@backstage/core-components" {
   export const InfoCard: React.ComponentType<{ title: string; children?: React.ReactNode }>;
   export const Progress: React.ComponentType;
   export const WarningPanel: React.ComponentType<{ title?: string; children?: React.ReactNode }>;
-  export const Link: React.ComponentType<React.AnchorHTMLAttributes<HTMLAnchorElement>>;
+  export const Link: React.ComponentType<
+    React.AnchorHTMLAttributes<HTMLAnchorElement> & { to?: string }
+  >;
 }
 
 declare module "@backstage/core-plugin-api" {

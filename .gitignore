@@ -29,3 +29,4 @@ cdk/cdk.context.json
 ui/.env.local
 dxcp-api/.env
 dxcp-api/data/*.db
+integrations/backstage/packages/dxcp-plugin/dist/

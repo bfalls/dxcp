@@ -4,6 +4,7 @@ import { configApiRef, Config, useApi } from "@backstage/core-plugin-api";
 import { useEntity } from "@backstage/plugin-catalog-react";
 import { fetchDxcpData } from "./api";
 import { buildDxcpViewModel, getDxcpServiceAnnotation } from "./utils";
+import { AllowedAction } from "./types";
 
 type DxcpCardProps = {
   requestTimeoutMs?: number;
@@ -125,7 +126,7 @@ export function DxcpCard(props: DxcpCardProps = {}) {
         <strong>Allowed actions</strong>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
           {allowedActions.length === 0 && <span>None</span>}
-          {allowedActions.map((action) => (
+          {allowedActions.map((action: AllowedAction) => (
             <button
               key={action.name}
               type="button"

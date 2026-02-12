@@ -5,7 +5,7 @@ const {
   DXCP_SERVICE_ANNOTATION,
   getDxcpServiceAnnotation,
   buildDxcpViewModel,
-} = require("../dist/index.js");
+} = require("../dist/utils.js");
 
 test("extracts dxcp.io/service annotation", () => {
   const entity = {
