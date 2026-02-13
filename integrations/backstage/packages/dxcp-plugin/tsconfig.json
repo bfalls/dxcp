@@ -1,16 +1,17 @@
 {
-  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "jsx": "react-jsx",
-    "types": [
-      "node",
-      "react",
-      "react-dom"
-    ]
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

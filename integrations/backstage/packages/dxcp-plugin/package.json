@@ -12,17 +12,18 @@
     "test": "npm run build && node --test tests/*.test.js"
   },
   "peerDependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "@backstage/catalog-model": "^1.4.0",
     "@backstage/core-components": "^0.14.0",
     "@backstage/core-plugin-api": "^1.9.0",
-    "@backstage/plugin-catalog-react": "^1.9.0"
+    "@backstage/plugin-catalog-react": "^1.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.18",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "typescript": "^5.9.3"
   }
 }
