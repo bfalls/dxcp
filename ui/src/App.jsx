@@ -282,6 +282,14 @@ function outcomeDisplayLabel(outcome, state, kind, rollbackOf) {
     if (resolved === 'ROLLED_BACK') return 'Rollback completed'
     if (resolved === 'SUPERSEDED') return 'Rollback superseded'
   }
+  if (operation === 'PROMOTE') {
+    if (!resolved) return 'Promotion in progress'
+    if (resolved === 'SUCCEEDED') return 'Promotion succeeded'
+    if (resolved === 'FAILED') return 'Promotion failed'
+    if (resolved === 'CANCELED') return 'Promotion canceled'
+    if (resolved === 'ROLLED_BACK') return 'Promotion rolled back'
+    if (resolved === 'SUPERSEDED') return 'Promotion superseded'
+  }
   return outcomeLabel(outcome, state)
 }
 
@@ -299,7 +307,9 @@ function resolveDeploymentKind(kind, rollbackOf) {
 
 function deploymentKindLabel(kind, rollbackOf) {
   const resolved = resolveDeploymentKind(kind, rollbackOf)
-  return resolved === 'ROLLBACK' ? 'Rollback' : 'Roll-forward'
+  if (resolved === 'ROLLBACK') return 'Rollback'
+  if (resolved === 'PROMOTE') return 'Promote'
+  return 'Roll-forward'
 }
 
 function findTimelineStep(steps, keys) {
@@ -624,6 +634,11 @@ export default function App() {
   const [serviceDetailFailures, setServiceDetailFailures] = useState([])
   const [serviceDetailLoading, setServiceDetailLoading] = useState(false)
   const [serviceDetailRefreshedAt, setServiceDetailRefreshedAt] = useState('')
+  const [promotionChangeSummary, setPromotionChangeSummary] = useState('')
+  const [promotionStep, setPromotionStep] = useState('form')
+  const [promotionValidation, setPromotionValidation] = useState(null)
+  const [promotionSubmitting, setPromotionSubmitting] = useState(false)
+  const [promotionInlineError, setPromotionInlineError] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
   const [deployInlineHeadline, setDeployInlineHeadline] = useState('')
   const [deployStep, setDeployStep] = useState('form')
@@ -723,6 +738,7 @@ export default function App() {
   )
   const serviceDetailLatest = serviceDetailStatus?.latest || null
   const serviceDetailRunning = serviceDetailStatus?.currentRunning || null
+  const servicePromotionCandidate = serviceDetailStatus?.promotionCandidate || null
   const enabledEnvironments = useMemo(
     () => environments.filter((env) => env && env.is_enabled !== false),
     [environments]
@@ -764,6 +780,7 @@ export default function App() {
     : 'UNKNOWN'
   const canDeploy = actionInfo.actions?.deploy === true && (deployEntryReady || debugDeployGatesEnabled)
   const canRollback = actionInfo.actions?.rollback === true
+  const canPromote = canDeploy
   const isPlatformAdmin = derivedRole === 'PLATFORM_ADMIN'
   const deployDisabledReason = !environmentReady
     ? 'Select an environment.'
@@ -2072,6 +2089,82 @@ export default function App() {
     await refreshDeployments()
   }
 
+  async function handleReviewPromotion() {
+    const candidate = servicePromotionCandidate
+    if (!candidate || !candidate.eligible) {
+      setPromotionInlineError('Promotion is not eligible from this environment.')
+      return
+    }
+    if (!promotionChangeSummary.trim()) {
+      setPromotionInlineError('Change summary is required.')
+      return
+    }
+    setPromotionInlineError('')
+    setPromotionSubmitting(true)
+    try {
+      const payload = {
+        service: serviceDetailName,
+        source_environment: candidate.source_environment,
+        target_environment: candidate.target_environment,
+        version: candidate.version,
+        recipeId: candidate.recipeId,
+        changeSummary: promotionChangeSummary.trim()
+      }
+      const result = await api.post('/promotions/validate', payload)
+      if (result && result.code) {
+        setPromotionValidation(null)
+        setPromotionInlineError(`${result.code}: ${result.message}`)
+        setPromotionStep('form')
+        return
+      }
+      setPromotionValidation(result)
+      setPromotionStep('confirm')
+    } finally {
+      setPromotionSubmitting(false)
+    }
+  }
+
+  async function handleConfirmPromotion() {
+    if (!promotionValidation) return
+    setPromotionInlineError('')
+    setPromotionSubmitting(true)
+    setErrorHeadline('')
+    setErrorMessage('')
+    setStatusMessage('')
+    try {
+      const payload = {
+        service: promotionValidation.service,
+        source_environment: promotionValidation.source_environment,
+        target_environment: promotionValidation.target_environment,
+        version: promotionValidation.version,
+        recipeId: promotionValidation.recipeId,
+        changeSummary: promotionChangeSummary.trim()
+      }
+      const key = `promote-${Date.now()}`
+      const result = await api.post('/promotions', payload, key)
+      if (result && result.code) {
+        setPromotionInlineError(`${result.code}: ${result.message}`)
+        return
+      }
+      setPromotionStep('form')
+      setPromotionValidation(null)
+      setPromotionChangeSummary('')
+      setStatusMessage(`Promotion started with id ${result.id}`)
+      await refreshDeployments()
+      if (serviceDetailName) {
+        await loadServiceDetail(serviceDetailName)
+      }
+      await openDeployment(result)
+    } finally {
+      setPromotionSubmitting(false)
+    }
+  }
+
+  function handleBackToPromotionEdit() {
+    setPromotionStep('form')
+    setPromotionInlineError('')
+  }
+
   const runPreflight = useCallback(
     async ({ advanceToConfirm }) => {
       if (!canRunPreflight || preflightStatus === 'checking') return false
@@ -2256,6 +2349,11 @@ export default function App() {
       setServiceDetailStatus(null)
       setServiceDetailHistory([])
       setServiceDetailFailures([])
+      setPromotionChangeSummary('')
+      setPromotionStep('form')
+      setPromotionValidation(null)
+      setPromotionSubmitting(false)
+      setPromotionInlineError('')
       setEnvironments([])
       setEnvironmentsLoading(false)
       setEnvironmentsError('')
@@ -2306,6 +2404,14 @@ export default function App() {
   }, [environmentOptions, selectedEnvironment, environmentsLoading])
 
   useEffect(() => {
+    setPromotionChangeSummary('')
+    setPromotionStep('form')
+    setPromotionValidation(null)
+    setPromotionSubmitting(false)
+    setPromotionInlineError('')
+  }, [serviceDetailName, selectedEnvironment])
+
+  useEffect(() => {
     if (!authReady || !isAuthenticated) return
     if (!accessToken) return
     cacheStore.deployments.ts = 0
@@ -2322,6 +2428,10 @@ export default function App() {
       setServiceDetailStatus(null)
       setServiceDetailHistory([])
       setServiceDetailFailures([])
+      setPromotionValidation(null)
+      setPromotionStep('form')
+      setPromotionSubmitting(false)
+      setPromotionInlineError('')
       setPolicyDeployments([])
       setPolicyDeploymentsError('')
       setPolicyDeploymentsLoading(false)
@@ -3114,6 +3224,16 @@ export default function App() {
     environmentLabel: environmentDisplayName,
     environmentReady,
     environmentNotice: servicesEnvironmentNotice,
+    servicePromotionCandidate,
+    promotionChangeSummary,
+    setPromotionChangeSummary,
+    promotionStep,
+    promotionValidation,
+    promotionSubmitting,
+    promotionInlineError,
+    handleReviewPromotion,
+    handleConfirmPromotion,
+    handleBackToPromotionEdit,
     listHeaderMeta: <HeaderStatus items={servicesListStatusItems} />,
     detailHeaderMeta: <HeaderStatus items={serviceDetailStatusItems} />
   }

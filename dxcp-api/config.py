@@ -74,6 +74,19 @@ class Settings:
                 self.runtime_artifact_bucket = value
         artifact_schemes = self._get("artifact_ref_schemes", "DXCP_ARTIFACT_REF_SCHEMES", "s3", str)
         self.artifact_ref_schemes = [s.strip().lower() for s in artifact_schemes.split(",") if s.strip()]
+        promotion_order = self._get(
+            "promotion_environment_order",
+            "DXCP_PROMOTION_ENVIRONMENT_ORDER",
+            "sandbox,dev,staging,prod",
+            str,
+        )
+        self.promotion_environment_order = [item.strip() for item in promotion_order.split(",") if item.strip()]
+        self.promotion_allow_jumps = self._get(
+            "promotion_allow_jumps",
+            "DXCP_PROMOTION_ALLOW_JUMPS",
+            "0",
+            str,
+        ) in ["1", "true", "TRUE", "True"]
 
     def _get(self, ssm_key: str, env_key: str, default, parser: Callable) -> Optional[object]:
         if env_key in os.environ:

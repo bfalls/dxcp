@@ -31,6 +31,8 @@ const buildFetchMock = ({
   servicesList,
   guardrailValidation,
   preflightResponse,
+  promotionValidateResponse,
+  promotionResponse,
   policySummaryResponse,
   versionsByService,
   environments
@@ -113,6 +115,45 @@ const buildFetchMock = ({
           deployments_remaining: 5
         },
         validatedAt: '2025-01-01T00:00:00Z'
+      })
+    }
+    if (pathname === '/v1/promotions/validate' && options.method === 'POST') {
+      if (promotionValidateResponse) {
+        return ok(promotionValidateResponse)
+      }
+      const body = JSON.parse(options.body || '{}')
+      return ok({
+        service: body.service,
+        source_environment: body.source_environment,
+        target_environment: body.target_environment,
+        version: body.version,
+        recipeId: body.recipeId,
+        deliveryGroupId: 'default',
+        versionEligible: true,
+        policy: {
+          max_concurrent_deployments: 1,
+          current_concurrent_deployments: 0,
+          daily_deploy_quota: 5,
+          deployments_used: 0,
+          deployments_remaining: 5
+        },
+        validatedAt: '2025-01-01T00:00:00Z'
+      })
+    }
+    if (pathname === '/v1/promotions' && options.method === 'POST') {
+      if (promotionResponse) {
+        return ok(promotionResponse)
+      }
+      const body = JSON.parse(options.body || '{}')
+      return ok({
+        id: 'dep-1',
+        service: body.service,
+        environment: body.target_environment,
+        sourceEnvironment: body.source_environment,
+        version: body.version,
+        recipeId: body.recipeId,
+        state: 'IN_PROGRESS',
+        deploymentKind: 'PROMOTE'
       })
     }
     if (pathname === '/v1/policy/summary' && options.method === 'POST') {
@@ -202,10 +243,21 @@ const buildFetchMock = ({
     }
     if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
       const environment = parsed.searchParams.get('environment') || 'sandbox'
+      const promotionCandidate =
+        environment === 'sandbox'
+          ? {
+              eligible: true,
+              source_environment: 'sandbox',
+              target_environment: 'staging',
+              version: '2.1.0',
+              recipeId: 'default'
+            }
+          : { eligible: false, reason: 'PROMOTION_AT_HIGHEST_ENVIRONMENT' }
       return ok({
         service: 'demo-service',
         environment,
         hasDeployments: true,
+        promotionCandidate,
         latest: {
           id: 'dep-1',
           state: 'SUCCEEDED',
@@ -1344,6 +1396,30 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
     await view.findByText('Service detail')
     await view.findByText('Version: 2.1.0')
+  })
+
+  await runTest('Service detail shows promotion action with structured summary', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'PLATFORM_ADMIN', deployAllowed: true, rollbackAllowed: true })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Services' }))
+    await view.findByText('demo-service')
+    fireEvent.click(view.getByRole('button', { name: /demo-service/ }))
+    await view.findByText('Service detail')
+    await view.findByText('Promote')
+    await view.findByText('Source environment')
+    await view.findByText('Target environment')
+    await view.findByText('staging')
+    assert.ok(view.getByRole('button', { name: 'Review promotion' }))
   })
 
   await runTest('Service detail shows Backstage link when configured', async () => {

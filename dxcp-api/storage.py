@@ -90,6 +90,7 @@ class Storage:
                 spinnaker_application TEXT,
                 spinnaker_pipeline TEXT,
                 rollback_of TEXT,
+                source_environment TEXT,
                 delivery_group_id TEXT
             )
             """
@@ -102,6 +103,7 @@ class Storage:
         self._ensure_column(cur, "deployments", "spinnaker_application", "TEXT")
         self._ensure_column(cur, "deployments", "spinnaker_pipeline", "TEXT")
         self._ensure_column(cur, "deployments", "delivery_group_id", "TEXT")
+        self._ensure_column(cur, "deployments", "source_environment", "TEXT")
         self._ensure_column(cur, "deployments", "recipe_id", "TEXT")
         self._ensure_column(cur, "deployments", "recipe_revision", "INTEGER")
         self._ensure_column(cur, "deployments", "effective_behavior_summary", "TEXT")
@@ -941,8 +943,8 @@ class Storage:
                 id, service, environment, version, recipe_id, recipe_revision, effective_behavior_summary, state, deployment_kind, outcome,
                 intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
                 engine_type, spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
-                rollback_of, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rollback_of, source_environment, delivery_group_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -966,6 +968,7 @@ class Storage:
                 record.get("spinnakerApplication"),
                 record.get("spinnakerPipeline"),
                 record.get("rollbackOf"),
+                record.get("sourceEnvironment"),
                 record.get("deliveryGroupId"),
             ),
         )
@@ -1109,6 +1112,7 @@ class Storage:
             "spinnakerApplication": row["spinnaker_application"],
             "spinnakerPipeline": row["spinnaker_pipeline"],
             "rollbackOf": row["rollback_of"],
+            "sourceEnvironment": row["source_environment"],
             "deliveryGroupId": row["delivery_group_id"],
             "failures": failures,
         }
@@ -1971,6 +1975,7 @@ class DynamoStorage:
             "spinnakerApplication": record.get("spinnakerApplication"),
             "spinnakerPipeline": record.get("spinnakerPipeline"),
             "rollbackOf": record.get("rollbackOf"),
+            "sourceEnvironment": record.get("sourceEnvironment"),
             "delivery_group_id": record.get("deliveryGroupId"),
             "failures": failures,
         }
@@ -2038,6 +2043,7 @@ class DynamoStorage:
             "spinnakerApplication": item.get("spinnakerApplication"),
             "spinnakerPipeline": item.get("spinnakerPipeline"),
             "rollbackOf": item.get("rollbackOf"),
+            "sourceEnvironment": item.get("sourceEnvironment"),
             "failures": item.get("failures", []),
         }
 
@@ -2080,6 +2086,7 @@ class DynamoStorage:
                     "spinnakerApplication": item.get("spinnakerApplication"),
                     "spinnakerPipeline": item.get("spinnakerPipeline"),
                     "rollbackOf": item.get("rollbackOf"),
+                    "sourceEnvironment": item.get("sourceEnvironment"),
                     "failures": item.get("failures", []),
                 }
             )

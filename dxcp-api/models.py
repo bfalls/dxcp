@@ -30,6 +30,7 @@ class DeploymentOutcome(str, Enum):
 class DeploymentKind(str, Enum):
     ROLL_FORWARD = "ROLL_FORWARD"
     ROLLBACK = "ROLLBACK"
+    PROMOTE = "PROMOTE"
 
 
 class RecipeStatus(str, Enum):
@@ -53,6 +54,15 @@ class DeploymentIntent(BaseModel):
     version: str
     changeSummary: str = Field(..., max_length=240)
     recipeId: str
+
+
+class PromotionIntent(BaseModel):
+    service: str
+    source_environment: str
+    target_environment: str
+    version: str
+    recipeId: str
+    changeSummary: str = Field(..., max_length=240)
 
 
 class PolicySummaryRequest(BaseModel):
@@ -90,6 +100,7 @@ class DeploymentRecord(BaseModel):
     engineExecutionId: Optional[str] = None
     engineExecutionUrl: Optional[str] = None
     rollbackOf: Optional[str] = None
+    sourceEnvironment: Optional[str] = None
     failures: List[NormalizedFailure] = []
 
 

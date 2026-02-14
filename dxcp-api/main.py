@@ -29,6 +29,7 @@ from models import (
     Environment,
     EngineType,
     PolicySummaryRequest,
+    PromotionIntent,
     Recipe,
     RecipeUpsert,
     Role,
@@ -304,6 +305,119 @@ def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -
         "daily_deploy_quota": daily_deploy_quota,
         "deployments_used": quota["used"],
         "deployments_remaining": quota["remaining"],
+    }
+
+
+def _promotion_environment_sequence(group: dict) -> list[str]:
+    configured = group.get("allowed_environments")
+    if isinstance(configured, list) and configured:
+        return [item for item in configured if isinstance(item, str) and item]
+    return list(SETTINGS.promotion_environment_order or [])
+
+
+def _promotion_path_allowed(group: dict, source_environment: str, target_environment: str) -> bool:
+    if SETTINGS.promotion_allow_jumps:
+        return True
+    sequence = _promotion_environment_sequence(group)
+    try:
+        source_index = sequence.index(source_environment)
+        target_index = sequence.index(target_environment)
+    except ValueError:
+        return False
+    return target_index == source_index + 1
+
+
+def _version_successful_in_environment(service: str, environment: str, version: str) -> bool:
+    deployments = storage.list_deployments(service, None, environment)
+    return any(
+        deployment.get("version") == version and deployment.get("state") == "SUCCEEDED"
+        for deployment in deployments
+    )
+
+
+def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[Optional[dict], Optional[JSONResponse]]:
+    if intent.source_environment == intent.target_environment:
+        return None, error_response(400, "PROMOTION_TARGET_REQUIRED", "source and target environments must differ")
+    group, group_error = resolve_delivery_group(intent.service, actor)
+    if group_error:
+        return None, group_error
+    source_env, source_error = resolve_environment_for_group(group, intent.source_environment, actor)
+    if source_error:
+        return None, source_error
+    target_env, target_error = resolve_environment_for_group(group, intent.target_environment, actor)
+    if target_error:
+        return None, target_error
+    if not _promotion_path_allowed(group, intent.source_environment, intent.target_environment):
+        return None, error_response(
+            400,
+            "PROMOTION_PATH_NOT_ALLOWED",
+            "Promotion target is not the next configured environment",
+        )
+    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
+    if recipe_error:
+        return None, recipe_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    if policy_recipe_error:
+        return None, policy_recipe_error
+    try:
+        service_entry = guardrails.validate_service(intent.service)
+        guardrails.validate_environment(intent.source_environment, service_entry, group)
+        guardrails.validate_environment(intent.target_environment, service_entry, group)
+        guardrails.validate_version(intent.version)
+    except PolicyError as exc:
+        return None, _capability_error(exc.code, exc.message, actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    if recipe_capability_error:
+        return None, recipe_capability_error
+    build = storage.find_latest_build(intent.service, intent.version)
+    if not build:
+        return None, error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
+    if not _version_successful_in_environment(intent.service, intent.source_environment, intent.version):
+        return None, error_response(
+            400,
+            "PROMOTION_VERSION_INELIGIBLE",
+            "Version must be running or previously successful in source environment",
+        )
+    return {
+        "group": group,
+        "source_env": source_env,
+        "target_env": target_env,
+        "recipe": recipe,
+        "build": build,
+    }, None
+
+
+def _promotion_candidate_for_service(service: str, source_environment: str, actor: Actor) -> dict:
+    group, group_error = resolve_delivery_group(service, actor)
+    if group_error:
+        return {"eligible": False, "reason": _error_code_from_response(group_error)}
+    source_env, source_error = resolve_environment_for_group(group, source_environment, actor)
+    if source_error:
+        return {"eligible": False, "reason": _error_code_from_response(source_error)}
+    _ = source_env
+    sequence = _promotion_environment_sequence(group)
+    if source_environment not in sequence:
+        return {"eligible": False, "reason": "PROMOTION_SOURCE_NOT_CONFIGURED"}
+    source_index = sequence.index(source_environment)
+    if source_index >= len(sequence) - 1:
+        return {"eligible": False, "reason": "PROMOTION_AT_HIGHEST_ENVIRONMENT"}
+    target_environment = sequence[source_index + 1]
+    target_env, target_error = resolve_environment_for_group(group, target_environment, actor)
+    if target_error:
+        return {"eligible": False, "reason": _error_code_from_response(target_error)}
+    _ = target_env
+    deployments = storage.list_deployments(service, None, source_environment)
+    promotable = next((item for item in deployments if item.get("state") == "SUCCEEDED"), None)
+    if not promotable:
+        return {"eligible": False, "reason": "PROMOTION_NO_SUCCESSFUL_SOURCE_VERSION", "target_environment": target_environment}
+    if not promotable.get("recipeId"):
+        return {"eligible": False, "reason": "RECIPE_ID_REQUIRED", "target_environment": target_environment}
+    return {
+        "eligible": True,
+        "source_environment": source_environment,
+        "target_environment": target_environment,
+        "version": promotable.get("version"),
+        "recipeId": promotable.get("recipeId"),
     }
 
 
@@ -612,6 +726,35 @@ def _record_deploy_denied(actor: Actor, intent: DeploymentIntent, code: str, gro
     )
 
 
+def _record_promotion_denied(actor: Actor, intent: PromotionIntent, code: str, group_id: Optional[str] = None) -> None:
+    summary = (
+        f"Promotion rejected ({code}) for {intent.service} "
+        f"{intent.source_environment}->{intent.target_environment}"
+    )
+    log_event(
+        "promotion_intent_denied",
+        actor_id=actor.actor_id,
+        actor_role=actor.role.value,
+        delivery_group_id=group_id,
+        service_name=intent.service,
+        recipe_id=intent.recipeId,
+        environment=intent.target_environment,
+        outcome="DENIED",
+        summary=summary,
+    )
+    _record_audit_event(
+        actor,
+        "PROMOTION_DENIED",
+        "Deployment",
+        intent.service,
+        AuditOutcome.DENIED,
+        summary,
+        delivery_group_id=group_id,
+        service_name=intent.service,
+        environment=intent.target_environment,
+    )
+
+
 def _error_code_from_response(response: JSONResponse) -> str:
     try:
         payload = json.loads(response.body.decode("utf-8"))
@@ -641,6 +784,12 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "IDMP_KEY_REQUIRED",
         "VERSION_NOT_FOUND",
         "RECIPE_NOT_FOUND",
+        "PROMOTION_TARGET_REQUIRED",
+        "PROMOTION_PATH_NOT_ALLOWED",
+        "PROMOTION_VERSION_INELIGIBLE",
+        "PROMOTION_SOURCE_NOT_CONFIGURED",
+        "PROMOTION_AT_HIGHEST_ENVIRONMENT",
+        "PROMOTION_NO_SUCCESSFUL_SOURCE_VERSION",
     }
     policy_change_codes = {
         "SERVICE_NOT_ALLOWLISTED",
@@ -827,6 +976,7 @@ def _deployment_public_view(
         "service": deployment.get("service"),
         "environment": deployment.get("environment"),
         "version": deployment.get("version"),
+        "sourceEnvironment": deployment.get("sourceEnvironment"),
         "recipeId": deployment.get("recipeId"),
         "recipeRevision": deployment.get("recipeRevision"),
         "effectiveBehaviorSummary": deployment.get("effectiveBehaviorSummary"),
@@ -1375,6 +1525,167 @@ def validate_deployment(
     }
 
 
+@app.post("/v1/promotions/validate")
+def validate_promotion(
+    intent: PromotionIntent,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "promote")
+    if role_error:
+        return role_error
+    rate_limiter.check_read(actor.actor_id)
+    guardrails.require_mutations_enabled()
+    context, context_error = _resolve_promotion_context(intent, actor)
+    if context_error:
+        _record_promotion_denied(actor, intent, _error_code_from_response(context_error))
+        return context_error
+    group = context["group"]
+    target_env = context["target_env"]
+    recipe = context["recipe"]
+    policy_snapshot = _policy_snapshot_for_environment(group, target_env)
+    if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
+        return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
+    if policy_snapshot["deployments_remaining"] <= 0:
+        return error_response(429, "QUOTA_EXCEEDED", "Daily quota exceeded")
+    return {
+        "service": intent.service,
+        "source_environment": intent.source_environment,
+        "target_environment": intent.target_environment,
+        "version": intent.version,
+        "recipeId": recipe.get("id"),
+        "deliveryGroupId": group.get("id"),
+        "versionEligible": True,
+        "policy": policy_snapshot,
+        "validatedAt": utc_now(),
+    }
+
+
+@app.post("/v1/promotions", status_code=201)
+def create_promotion(
+    intent: PromotionIntent,
+    request: Request,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "promote")
+    if role_error:
+        return role_error
+    try:
+        guardrails.require_mutations_enabled()
+        guardrails.require_idempotency_key(idempotency_key)
+    except PolicyError as exc:
+        _record_promotion_denied(actor, intent, exc.code)
+        raise
+    context, context_error = _resolve_promotion_context(intent, actor)
+    if context_error:
+        _record_promotion_denied(actor, intent, _error_code_from_response(context_error))
+        return context_error
+    group = context["group"]
+    target_env = context["target_env"]
+    recipe = context["recipe"]
+    build = context["build"]
+    policy_snapshot = _policy_snapshot_for_environment(group, target_env)
+    if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
+        _record_promotion_denied(actor, intent, "CONCURRENCY_LIMIT_REACHED", group.get("id"))
+        return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
+    if policy_snapshot["deployments_remaining"] <= 0:
+        _record_promotion_denied(actor, intent, "QUOTA_EXCEEDED", group.get("id"))
+        return error_response(429, "QUOTA_EXCEEDED", "Daily quota exceeded")
+    max_concurrent = _environment_guardrail_value(group, target_env, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _environment_guardrail_value(
+        group,
+        target_env,
+        "daily_deploy_quota",
+        SETTINGS.daily_quota_deploy,
+    )
+    rate_limiter.check_mutate(
+        actor.actor_id,
+        "promote",
+        quota_scope=_quota_scope(group["id"], target_env.get("name")),
+        quota_limit=daily_deploy_quota,
+    )
+    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, target_env.get("name"))
+    cached = enforce_idempotency(request, idempotency_key)
+    if cached:
+        return cached
+    payload = {
+        "service": intent.service,
+        "environment": intent.target_environment,
+        "version": intent.version,
+        "sourceEnvironment": intent.source_environment,
+        "targetEnvironment": intent.target_environment,
+    }
+    _apply_recipe_mapping(payload, recipe)
+    if spinnaker.mode == "http":
+        if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
+            _record_promotion_denied(actor, intent, "INVALID_REQUEST", group.get("id"))
+            return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for promotion")
+        payload["artifactRef"] = build["artifactRef"]
+    try:
+        execution = spinnaker.trigger_deploy(payload, idempotency_key)
+    except Exception as exc:
+        return _engine_error_response(actor, "Unable to start promotion", exc)
+    record = {
+        "id": str(uuid.uuid4()),
+        "service": intent.service,
+        "environment": intent.target_environment,
+        "sourceEnvironment": intent.source_environment,
+        "version": intent.version,
+        "recipeId": recipe.get("id"),
+        "recipeRevision": recipe.get("recipe_revision"),
+        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary"),
+        "state": "IN_PROGRESS",
+        "deploymentKind": "PROMOTE",
+        "outcome": None,
+        "intentCorrelationId": idempotency_key,
+        "supersededBy": None,
+        "changeSummary": intent.changeSummary,
+        "createdAt": utc_now(),
+        "updatedAt": utc_now(),
+        "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
+        "spinnakerExecutionId": execution["executionId"],
+        "spinnakerExecutionUrl": execution["executionUrl"],
+        "spinnakerApplication": payload.get("spinnakerApplication"),
+        "spinnakerPipeline": payload.get("spinnakerPipeline"),
+        "deliveryGroupId": group["id"],
+        "failures": [],
+    }
+    storage.insert_deployment(record, [])
+    store_idempotency(request, idempotency_key, record, 201)
+    _record_audit_event(
+        actor,
+        "PROMOTION_SUBMIT",
+        "Deployment",
+        record["id"],
+        AuditOutcome.SUCCESS,
+        (
+            f"Promotion submitted for {intent.service} "
+            f"{intent.source_environment}->{intent.target_environment}"
+        ),
+        delivery_group_id=group.get("id"),
+        service_name=intent.service,
+        environment=intent.target_environment,
+    )
+    log_event(
+        "promotion_intent_submitted",
+        actor_id=actor.actor_id,
+        actor_role=actor.role.value,
+        delivery_group_id=group.get("id"),
+        service_name=intent.service,
+        recipe_id=recipe.get("id"),
+        environment=intent.target_environment,
+        outcome="SUCCESS",
+        summary=(
+            f"Promotion submitted for {intent.service} "
+            f"{intent.source_environment}->{intent.target_environment}"
+        ),
+    )
+    return _deployment_public_view(actor, record)
+
+
 @app.get("/v1/deployments")
 def list_deployments(
     request: Request,
@@ -1638,6 +1949,7 @@ def get_service_delivery_status(
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
     deployments = storage.list_deployments(service, None, environment)
+    promotion_candidate = _promotion_candidate_for_service(service, environment, actor)
     if not deployments:
         return {
             "service": service,
@@ -1645,6 +1957,7 @@ def get_service_delivery_status(
             "hasDeployments": False,
             "latest": None,
             "currentRunning": None,
+            "promotionCandidate": promotion_candidate,
         }
     latest = deployments[0]
     latest_success_by_scope = _latest_success_by_scope(deployments)
@@ -1657,6 +1970,7 @@ def get_service_delivery_status(
             "id": latest.get("id"),
             "state": latest.get("state"),
             "version": latest.get("version"),
+            "sourceEnvironment": latest.get("sourceEnvironment"),
             "recipeId": latest.get("recipeId"),
             "createdAt": latest.get("createdAt"),
             "updatedAt": latest.get("updatedAt"),
@@ -1668,6 +1982,7 @@ def get_service_delivery_status(
             ),
         },
         "currentRunning": _current_running_state(service, environment, deployments, latest_success_id),
+        "promotionCandidate": promotion_candidate,
     }
     if actor.role == Role.PLATFORM_ADMIN:
         payload["latest"]["engineExecutionId"] = latest.get("spinnakerExecutionId")

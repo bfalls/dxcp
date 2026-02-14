@@ -42,7 +42,17 @@ export default function ServicesPage({
   detailHeaderMeta,
   environmentLabel,
   environmentReady,
-  environmentNotice
+  environmentNotice,
+  servicePromotionCandidate,
+  promotionChangeSummary,
+  setPromotionChangeSummary,
+  promotionStep,
+  promotionValidation,
+  promotionSubmitting,
+  promotionInlineError,
+  handleReviewPromotion,
+  handleConfirmPromotion,
+  handleBackToPromotionEdit
 }) {
   const resolveLatestStatusLabel = (latest) => {
     if (!latest) return 'In progress'
@@ -72,6 +82,16 @@ export default function ServicesPage({
     ? `Deployable services and their latest delivery status in ${environmentLabel}.`
     : environmentNotice || 'Select an environment to see latest delivery status.'
   const runningEnvironment = serviceDetailRunning?.environment || environmentLabel || '-'
+  const promotionReasonMap = {
+    PROMOTION_AT_HIGHEST_ENVIRONMENT: 'Already at the highest configured environment.',
+    PROMOTION_NO_SUCCESSFUL_SOURCE_VERSION: 'No successful source version is eligible to promote.',
+    PROMOTION_SOURCE_NOT_CONFIGURED: 'Source environment is not configured for promotion order.',
+    ENVIRONMENT_NOT_ALLOWED: 'Target environment is not allowed by delivery group policy.',
+    ENVIRONMENT_DISABLED: 'Target environment is currently disabled.',
+    SERVICE_NOT_IN_DELIVERY_GROUP: 'Service is not assigned to a delivery group.',
+    INVALID_ENVIRONMENT: 'Environment is not valid for this service.'
+  }
+  const promotionReason = promotionReasonMap[servicePromotionCandidate?.reason] || 'Promotion is not eligible.'
   if (mode === 'list') {
     return (
       <div className="shell">
@@ -270,6 +290,93 @@ export default function ServicesPage({
               </div>
             ) : (
               <div className="helper">No deployments recorded yet.</div>
+            )}
+          </SectionCard>
+          <SectionCard>
+            <h2>Promote</h2>
+            <div className="helper space-8">Promotion path follows configured environment order.</div>
+            {!environmentReady && (
+              <div className="helper space-8">
+                Select an environment to evaluate promotion eligibility.
+              </div>
+            )}
+            {environmentReady && servicePromotionCandidate?.eligible && promotionStep === 'form' && (
+              <>
+                <div className="list space-12">
+                  <div className="list-item">
+                    <div>Source environment</div>
+                    <div>{servicePromotionCandidate.source_environment}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Target environment</div>
+                    <div>{servicePromotionCandidate.target_environment}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Version</div>
+                    <div>{servicePromotionCandidate.version}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Recipe</div>
+                    <div>{servicePromotionCandidate.recipeId}</div>
+                  </div>
+                </div>
+                <div className="field space-12">
+                  <label htmlFor="promotion-change-summary">Promotion change summary</label>
+                  <input
+                    id="promotion-change-summary"
+                    value={promotionChangeSummary}
+                    onChange={(e) => setPromotionChangeSummary(e.target.value)}
+                    placeholder="Describe why this version is being promoted"
+                  />
+                </div>
+                {promotionInlineError && <div className="helper space-8">{promotionInlineError}</div>}
+                <button className="button" onClick={handleReviewPromotion} disabled={promotionSubmitting}>
+                  {promotionSubmitting ? 'Validating promotion...' : 'Review promotion'}
+                </button>
+              </>
+            )}
+            {environmentReady && servicePromotionCandidate?.eligible && promotionStep === 'confirm' && (
+              <>
+                <div className="helper space-8">Confirm promotion intent</div>
+                <div className="list space-12">
+                  <div className="list-item">
+                    <div>Service</div>
+                    <div>{serviceDetailName || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Source</div>
+                    <div>{promotionValidation?.source_environment || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Target</div>
+                    <div>{promotionValidation?.target_environment || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Version</div>
+                    <div>{promotionValidation?.version || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Recipe</div>
+                    <div>{promotionValidation?.recipeId || '-'}</div>
+                  </div>
+                  <div className="list-item">
+                    <div>Change summary</div>
+                    <div>{promotionChangeSummary || '-'}</div>
+                  </div>
+                </div>
+                {promotionInlineError && <div className="helper space-8">{promotionInlineError}</div>}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="button" onClick={handleConfirmPromotion} disabled={promotionSubmitting}>
+                    {promotionSubmitting ? 'Starting promotion...' : 'Confirm promotion'}
+                  </button>
+                  <button className="button secondary" onClick={handleBackToPromotionEdit} disabled={promotionSubmitting}>
+                    Back to edit
+                  </button>
+                </div>
+              </>
+            )}
+            {environmentReady && !servicePromotionCandidate?.eligible && (
+              <div className="helper">{promotionReason}</div>
             )}
           </SectionCard>
           <SectionCard data-testid="delivery-group-card">

@@ -3,7 +3,7 @@ from typing import Optional
 
 IN_PROGRESS_STATES = {"PENDING", "ACTIVE", "IN_PROGRESS"}
 TERMINAL_OUTCOMES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"}
-DEPLOYMENT_KINDS = {"ROLL_FORWARD", "ROLLBACK"}
+DEPLOYMENT_KINDS = {"ROLL_FORWARD", "ROLLBACK", "PROMOTE"}
 
 
 def normalize_deployment_kind(deployment_kind: Optional[str], rollback_of: Optional[str]) -> str:
