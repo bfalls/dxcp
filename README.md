@@ -66,6 +66,8 @@ This repository contains:
   - docs/EVAL_SCORECARD.md
 - Environments
   - docs/ENVIRONMENTS.md
+- Migrations
+  - docs/MIGRATIONS.md
 - CI
   - GitHub Actions runs lint and tests on every push and PR.
 - Tests
