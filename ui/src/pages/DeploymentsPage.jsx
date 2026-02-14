@@ -8,6 +8,8 @@ export default function DeploymentsPage({
   openDeployment,
   statusClass,
   formatTime,
+  environmentLabel,
+  environmentNotice,
   headerMeta
 }) {
   return (
@@ -15,6 +17,7 @@ export default function DeploymentsPage({
       <div className="page-header-zone">
         <PageHeader
           title="Recent deployments"
+          subtitle={`Environment: ${environmentLabel}`}
           meta={headerMeta}
           actions={
             <button className="button secondary" onClick={() => refreshDeployments({ bypassCache: true })}>
@@ -24,6 +27,7 @@ export default function DeploymentsPage({
         />
       </div>
       <SectionCard style={{ gridColumn: '1 / -1' }}>
+        {environmentNotice && <div className="helper space-8">{environmentNotice}</div>}
         {/* Stable E2E selectors for deployment history list */}
         <div className="list" data-testid="deployment-list">
           {deployments.length === 0 && <div className="helper">No deployments yet.</div>}

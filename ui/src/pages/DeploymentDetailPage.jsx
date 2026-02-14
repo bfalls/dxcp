@@ -42,6 +42,7 @@ function DeploymentHeader({
             </span>
             <span className="badge neutral">Service: {selected.service}</span>
             <span className="badge neutral">Version: {selected.version || '-'}</span>
+            <span className="badge neutral">Environment: {selected.environment || '-'}</span>
           </div>
         </>
       )}

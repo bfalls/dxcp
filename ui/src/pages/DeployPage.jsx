@@ -62,6 +62,10 @@ export default function DeployPage({
   openDeployment,
   versionVerified,
   trimmedChangeSummary,
+  environmentLabel,
+  environmentNotice,
+  environmentScopeNote,
+  environmentAutoApplied,
   headerMeta
 }) {
   const policySnapshot = preflightResult?.policy || policySummary?.policy || null
@@ -74,6 +78,11 @@ export default function DeployPage({
     ? Math.max(currentDeliveryGroup.guardrails.daily_rollback_quota - policyQuotaStats.rollbackUsed, 0)
     : '-'
   const latestDeployment = deployResult || latestPolicyDeployment
+  const recipeCompatibility = selectedRecipe
+    ? filteredRecipes.some((recipe) => recipe.id === selectedRecipe.id)
+      ? 'Compatible'
+      : 'Incompatible'
+    : '-'
 
   return (
     <TwoColumn
@@ -171,7 +180,13 @@ export default function DeployPage({
             <div className="row">
               <div className="field">
                 <label>Environment</label>
-                <div className="helper">sandbox (default)</div>
+                <div className="helper">{environmentLabel}</div>
+                <div className="helper">Use the header selector to change the environment.</div>
+                {environmentNotice && <div className="helper">{environmentNotice}</div>}
+                {environmentScopeNote && <div className="helper">{environmentScopeNote}</div>}
+                {!environmentNotice && !environmentScopeNote && environmentAutoApplied && (
+                  <div className="helper">Default applied.</div>
+                )}
               </div>
               <div className="field">
                 <label htmlFor="deploy-version">Version</label>
@@ -266,6 +281,10 @@ export default function DeployPage({
                     ? `${policySnapshot.current_concurrent_deployments} / ${policySnapshot.max_concurrent_deployments}`
                     : '-'}
                 </div>
+              </div>
+              <div className="list-item two-col">
+                <div>Recipe compatibility</div>
+                <div>{recipeCompatibility}</div>
               </div>
               <div className="list-item two-col">
                 <div>Version status</div>
@@ -381,7 +400,7 @@ export default function DeployPage({
               </div>
               <div className="list-item">
                 <div>Environment</div>
-                <div>sandbox (default)</div>
+                <div>{environmentLabel}</div>
               </div>
             </div>
             <div className="helper space-12">Guardrails</div>
@@ -498,6 +517,7 @@ export default function DeployPage({
             <div className={statusClass(latestDeployment.state)}>{latestDeployment.state}</div>
             <p>Service: {latestDeployment.service}</p>
             <p>Version: {latestDeployment.version}</p>
+            <p>Environment: {environmentLabel}</p>
             <p>Deployment id: {latestDeployment.id}</p>
             {isPlatformAdmin && latestDeployment.engineExecutionId && (
               <p>Execution id: {latestDeployment.engineExecutionId}</p>

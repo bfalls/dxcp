@@ -380,6 +380,30 @@ function strategyNarrative(recipe) {
   }
 }
 
+const SAFE_ENV_NAME_RE = /(sandbox|dev|test|staging|stage|qa|nonprod|non-prod)/i
+
+function sortEnvironments(list) {
+  return list
+    .slice()
+    .sort((a, b) => {
+      const aType = String(a?.type || '').toLowerCase()
+      const bType = String(b?.type || '').toLowerCase()
+      const aOrder = aType === 'prod' ? 1 : 0
+      const bOrder = bType === 'prod' ? 1 : 0
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return String(a?.name || '').localeCompare(String(b?.name || ''))
+    })
+}
+
+function pickDefaultEnvironment(list) {
+  if (!Array.isArray(list) || list.length === 0) return ''
+  const safeByName = list.find((env) => SAFE_ENV_NAME_RE.test(env?.name || ''))
+  if (safeByName?.name) return safeByName.name
+  const safeByType = list.find((env) => String(env?.type || '').toLowerCase() === 'non_prod')
+  if (safeByType?.name) return safeByType.name
+  return list[0]?.name || ''
+}
+
 function shortId(value) {
   if (!value) return ''
   const text = String(value)
@@ -567,6 +591,11 @@ export default function App() {
   const [deploymentsUrlSyncEnabled, setDeploymentsUrlSyncEnabled] = useState(false)
   const [deploymentsLoading, setDeploymentsLoading] = useState(false)
   const [deploymentsRefreshedAt, setDeploymentsRefreshedAt] = useState('')
+  const [environments, setEnvironments] = useState([])
+  const [environmentsLoading, setEnvironmentsLoading] = useState(false)
+  const [environmentsError, setEnvironmentsError] = useState('')
+  const [selectedEnvironment, setSelectedEnvironment] = useState('')
+  const [environmentAutoApplied, setEnvironmentAutoApplied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
@@ -694,7 +723,37 @@ export default function App() {
   )
   const serviceDetailLatest = serviceDetailStatus?.latest || null
   const serviceDetailRunning = serviceDetailStatus?.currentRunning || null
-  const defaultEnvironment = 'sandbox'
+  const enabledEnvironments = useMemo(
+    () => environments.filter((env) => env && env.is_enabled !== false),
+    [environments]
+  )
+  const sortedEnvironments = useMemo(() => sortEnvironments(enabledEnvironments), [enabledEnvironments])
+  const environmentScopeGroup = useMemo(() => {
+    if (view === 'service') return serviceDetailGroup
+    if (view === 'deploy') return currentDeliveryGroup
+    return null
+  }, [view, serviceDetailGroup, currentDeliveryGroup])
+  const environmentScopeGroupId = environmentScopeGroup?.id || ''
+  const environmentOptions = useMemo(() => {
+    if (!environmentScopeGroupId) return sortedEnvironments
+    return sortedEnvironments.filter((env) => env.delivery_group_id === environmentScopeGroupId)
+  }, [sortedEnvironments, environmentScopeGroupId])
+  const environmentBlockedCount = useMemo(() => {
+    if (!environmentScopeGroupId) return 0
+    return sortedEnvironments.filter((env) => env.delivery_group_id !== environmentScopeGroupId).length
+  }, [sortedEnvironments, environmentScopeGroupId])
+  const hasEnvironmentsConfigured = sortedEnvironments.length > 0
+  const environmentReady = Boolean(selectedEnvironment)
+  const environmentScopeNote = useMemo(() => {
+    if (!environmentScopeGroupId) return ''
+    if (environmentOptions.length === 0) {
+      return 'No environments are enabled for this delivery group.'
+    }
+    if (environmentBlockedCount > 0) {
+      return 'Some environments are unavailable for this service based on delivery group policy.'
+    }
+    return ''
+  }, [environmentScopeGroupId, environmentOptions.length, environmentBlockedCount])
   // UI-only role display; API permissions are authoritative.
   const derivedRole = Array.isArray(derivedRoles)
     ? derivedRoles.includes('dxcp-platform-admins')
@@ -706,13 +765,15 @@ export default function App() {
   const canDeploy = actionInfo.actions?.deploy === true && deployEntryReady
   const canRollback = actionInfo.actions?.rollback === true
   const isPlatformAdmin = derivedRole === 'PLATFORM_ADMIN'
-  const deployDisabledReason = !deployEntryReady
-    ? 'Refreshing policy and versions.'
-    : actionInfo.loading
-      ? 'Loading access policy.'
-      : derivedRole === 'OBSERVER'
-        ? 'Observers are read-only.'
-        : `Role ${derivedRole} cannot deploy.`
+  const deployDisabledReason = !environmentReady
+    ? 'Select an environment.'
+    : !deployEntryReady
+      ? 'Refreshing policy and versions.'
+      : actionInfo.loading
+        ? 'Loading access policy.'
+        : derivedRole === 'OBSERVER'
+          ? 'Observers are read-only.'
+          : `Role ${derivedRole} cannot deploy.`
   const rollbackDisabledReason = actionInfo.loading
     ? 'Loading access policy.'
     : derivedRole === 'OBSERVER'
@@ -747,12 +808,18 @@ export default function App() {
   const trimmedChangeSummary = useMemo(() => changeSummary.trim(), [changeSummary])
   const selectedRecipeNarrative = useMemo(() => strategyNarrative(selectedRecipe), [selectedRecipe])
   const preflightKey = useMemo(
-    () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version, environment: defaultEnvironment }) : ''),
-    [service, recipeId, version, defaultEnvironment]
+    () =>
+      service && recipeId && version && selectedEnvironment
+        ? JSON.stringify({ service, recipeId, version, environment: selectedEnvironment })
+        : '',
+    [service, recipeId, version, selectedEnvironment]
   )
   const policySummaryKey = useMemo(
-    () => (service ? JSON.stringify({ service, recipeId: recipeId || '', environment: defaultEnvironment }) : ''),
-    [service, recipeId, defaultEnvironment]
+    () =>
+      service && selectedEnvironment
+        ? JSON.stringify({ service, recipeId: recipeId || '', environment: selectedEnvironment })
+        : '',
+    [service, recipeId, selectedEnvironment]
   )
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const lastAutoPreflightKeyRef = useRef('')
@@ -762,6 +829,7 @@ export default function App() {
   const canRunPreflight = Boolean(
     deployEntryReady &&
     canDeploy &&
+    environmentReady &&
     recipeId &&
     trimmedChangeSummary &&
     validVersion &&
@@ -1057,9 +1125,15 @@ export default function App() {
   const refreshDeployments = useCallback(async (options = {}) => {
     setErrorMessage('')
     setErrorHeadline('')
+    if (!selectedEnvironment) {
+      setDeployments([])
+      setDeploymentsRefreshedAt('')
+      setDeploymentsLoading(false)
+      return
+    }
     setDeploymentsLoading(true)
     try {
-      const data = await api.get(`/deployments?environment=${encodeURIComponent(defaultEnvironment)}`, options)
+      const data = await api.get(`/deployments?environment=${encodeURIComponent(selectedEnvironment)}`, options)
       setDeployments(Array.isArray(data) ? data : [])
       const now = Date.now()
       cacheStore.deployments.ts = now
@@ -1071,7 +1145,7 @@ export default function App() {
     } finally {
       setDeploymentsLoading(false)
     }
-  }, [api, defaultEnvironment])
+  }, [api, selectedEnvironment])
 
   const loadAllowedActions = useCallback(async (serviceName) => {
     if (!serviceName) return
@@ -1174,6 +1248,24 @@ export default function App() {
     return null
   }, [api])
 
+  const loadEnvironments = useCallback(async (options = {}) => {
+    setEnvironmentsError('')
+    setEnvironmentsLoading(true)
+    try {
+      const data = await api.get('/environments', options)
+      const list = Array.isArray(data) ? data : []
+      setEnvironments(list)
+      return list
+    } catch (err) {
+      if (isLoginRequiredError(err)) return null
+      setEnvironments([])
+      setEnvironmentsError('Failed to load environments')
+    } finally {
+      setEnvironmentsLoading(false)
+    }
+    return null
+  }, [api])
+
   const loadAuditEvents = useCallback(async () => {
     setAuditError('')
     setAuditLoading(true)
@@ -1197,15 +1289,19 @@ export default function App() {
       const list = Array.isArray(data) ? data : []
       const groups =
         deliveryGroups.length > 0 ? deliveryGroups : (await loadDeliveryGroups(options)) || []
-      const statusResults = await Promise.allSettled(
-        list.map((svc) =>
-          api.get(
-            `/services/${encodeURIComponent(svc.service_name)}/delivery-status?environment=${encodeURIComponent(defaultEnvironment)}`
+      const statusResults = selectedEnvironment
+        ? await Promise.allSettled(
+            list.map((svc) =>
+              api.get(
+                `/services/${encodeURIComponent(svc.service_name)}/delivery-status?environment=${encodeURIComponent(selectedEnvironment)}`
+              )
+            )
           )
-        )
-      )
+        : []
       const rows = list.map((svc, idx) => {
-        const status = statusResults[idx].status === 'fulfilled' ? statusResults[idx].value : null
+        const status = selectedEnvironment && statusResults[idx]?.status === 'fulfilled'
+          ? statusResults[idx].value
+          : null
         const latest = status?.latest || null
         const group =
           groups.find((entry) => Array.isArray(entry.services) && entry.services.includes(svc.service_name)) || null
@@ -1231,20 +1327,28 @@ export default function App() {
     } finally {
       setServicesViewLoading(false)
     }
-  }, [api, deliveryGroups, loadDeliveryGroups, defaultEnvironment])
+  }, [api, deliveryGroups, loadDeliveryGroups, selectedEnvironment])
 
   const loadServiceDetail = useCallback(async (serviceName) => {
     if (!serviceName) return
     setServiceDetailLoading(true)
     setErrorMessage('')
     setErrorHeadline('')
+    if (!selectedEnvironment) {
+      setServiceDetailStatus(null)
+      setServiceDetailHistory([])
+      setServiceDetailFailures([])
+      setServiceDetailRefreshedAt('')
+      setServiceDetailLoading(false)
+      return
+    }
     try {
       const [status, deployments] = await Promise.all([
         api.get(
-          `/services/${encodeURIComponent(serviceName)}/delivery-status?environment=${encodeURIComponent(defaultEnvironment)}`
+          `/services/${encodeURIComponent(serviceName)}/delivery-status?environment=${encodeURIComponent(selectedEnvironment)}`
         ),
         api.get(
-          `/deployments?service=${encodeURIComponent(serviceName)}&environment=${encodeURIComponent(defaultEnvironment)}`
+          `/deployments?service=${encodeURIComponent(serviceName)}&environment=${encodeURIComponent(selectedEnvironment)}`
         )
       ])
       const history = Array.isArray(deployments) ? deployments : []
@@ -1268,7 +1372,7 @@ export default function App() {
     } finally {
       setServiceDetailLoading(false)
     }
-  }, [api, defaultEnvironment])
+  }, [api, selectedEnvironment])
 
   const loadPublicSettings = useCallback(async () => {
     try {
@@ -1305,7 +1409,11 @@ export default function App() {
     setPolicyDeploymentsError('')
     setPolicyDeploymentsLoading(true)
     try {
-      const data = await api.get(`/deployments?environment=${encodeURIComponent(defaultEnvironment)}`, options)
+      if (!selectedEnvironment) {
+        setPolicyDeployments([])
+        return false
+      }
+      const data = await api.get(`/deployments?environment=${encodeURIComponent(selectedEnvironment)}`, options)
       setPolicyDeployments(Array.isArray(data) ? data : [])
       cacheStore.policy.ts = Date.now()
       return true
@@ -1317,14 +1425,14 @@ export default function App() {
       setPolicyDeploymentsLoading(false)
     }
     return false
-  }, [api, defaultEnvironment])
+  }, [api, selectedEnvironment])
 
   const loadPolicySummary = useCallback(async () => {
-    if (!service) return false
+    if (!service || !selectedEnvironment) return false
     setPolicySummaryStatus('checking')
     setPolicySummaryError('')
     try {
-      const payload = { service, environment: defaultEnvironment }
+      const payload = { service, environment: selectedEnvironment }
       if (recipeId) {
         payload.recipeId = recipeId
       }
@@ -1345,7 +1453,7 @@ export default function App() {
       setPolicySummaryError('Failed to load policy summary.')
     }
     return false
-  }, [api, recipeId, service])
+  }, [api, recipeId, service, selectedEnvironment])
 
   const refreshPolicyContext = useCallback(async (options = {}) => {
     const results = await Promise.allSettled([
@@ -1842,10 +1950,14 @@ export default function App() {
       setErrorMessage('Change summary is required')
       return
     }
+    if (!selectedEnvironment) {
+      setErrorMessage('Select an environment before deploying.')
+      return
+    }
     const key = `deploy-${Date.now()}`
     const payload = {
       service,
-      environment: defaultEnvironment,
+      environment: selectedEnvironment,
       version,
       changeSummary,
       recipeId
@@ -1965,7 +2077,7 @@ export default function App() {
       try {
         const payload = {
           service,
-          environment: defaultEnvironment,
+          environment: selectedEnvironment,
           version,
           changeSummary: trimmedChangeSummary,
           recipeId
@@ -2014,7 +2126,8 @@ export default function App() {
       recipeId,
       version,
       trimmedChangeSummary,
-      preflightKey
+      preflightKey,
+      selectedEnvironment
     ]
   )
 
@@ -2032,7 +2145,8 @@ export default function App() {
     loadServices()
     loadRecipes()
     loadDeliveryGroups()
-  }, [authReady, isAuthenticated, loadServices, loadRecipes, loadDeliveryGroups])
+    loadEnvironments()
+  }, [authReady, isAuthenticated, loadServices, loadRecipes, loadDeliveryGroups, loadEnvironments])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || !isPlatformAdmin) {
@@ -2141,6 +2255,11 @@ export default function App() {
       setServiceDetailStatus(null)
       setServiceDetailHistory([])
       setServiceDetailFailures([])
+      setEnvironments([])
+      setEnvironmentsLoading(false)
+      setEnvironmentsError('')
+      setSelectedEnvironment('')
+      setEnvironmentAutoApplied(false)
       setPublicSettings({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
@@ -2166,6 +2285,82 @@ export default function App() {
   useEffect(() => {
     previousServiceRef.current = service
   }, [service])
+
+  useEffect(() => {
+    if (environmentsLoading) return
+    if (environmentOptions.length === 0) {
+      if (selectedEnvironment) {
+        setSelectedEnvironment('')
+        setEnvironmentAutoApplied(false)
+      }
+      return
+    }
+    const exists = environmentOptions.some((env) => env.name === selectedEnvironment)
+    if (exists) return
+    const next = pickDefaultEnvironment(environmentOptions)
+    if (next) {
+      setSelectedEnvironment(next)
+      setEnvironmentAutoApplied(true)
+    }
+  }, [environmentOptions, selectedEnvironment, environmentsLoading])
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated) return
+    cacheStore.deployments.ts = 0
+    cacheStore.servicesView.ts = 0
+    cacheStore.policy.ts = 0
+    setDeployStep('form')
+    setPreflightStatus('idle')
+    setPreflightResult(null)
+    setPreflightError('')
+    setPreflightErrorHeadline('')
+    setValidatedIntentKey('')
+    setPolicySummary(null)
+    setPolicySummaryStatus('idle')
+    setPolicySummaryError('')
+    setDeployInlineMessage('')
+    setDeployInlineHeadline('')
+    if (!selectedEnvironment) {
+      setDeployments([])
+      setServicesView([])
+      setServiceDetailStatus(null)
+      setServiceDetailHistory([])
+      setServiceDetailFailures([])
+      setPolicyDeployments([])
+      setPolicyDeploymentsError('')
+      setPolicyDeploymentsLoading(false)
+      setDeployEntryReady(false)
+      return
+    }
+    if (view === 'services') {
+      loadServicesList({ bypassCache: true })
+    }
+    if (view === 'deployments') {
+      refreshDeployments({ bypassCache: true })
+    }
+    if (view === 'service' && serviceDetailName) {
+      loadServiceDetail(serviceDetailName)
+    }
+    if (view === 'deploy') {
+      setDeployEntryReady(false)
+      refreshPolicyContext({ bypassCache: true })
+      if (service) {
+        loadVersions(true, { bypassCache: true })
+      }
+    }
+  }, [
+    selectedEnvironment,
+    authReady,
+    isAuthenticated,
+    view,
+    serviceDetailName,
+    service,
+    loadServicesList,
+    refreshDeployments,
+    loadServiceDetail,
+    refreshPolicyContext,
+    loadVersions
+  ])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -2788,6 +2983,11 @@ export default function App() {
     navigate('/services')
   }, [navigate])
 
+  const handleEnvironmentChange = useCallback((value) => {
+    setSelectedEnvironment(value)
+    setEnvironmentAutoApplied(false)
+  }, [])
+
   const navigateToService = useCallback(
     (serviceName) => {
       if (!serviceName) return
@@ -2811,6 +3011,23 @@ export default function App() {
     : serviceDetailRefreshedAt
       ? [{ label: 'Data refreshed', value: formatTime(serviceDetailRefreshedAt) }]
       : [{ label: 'Data', value: 'ready' }]
+
+  const environmentHeaderMessage = environmentsLoading
+    ? 'Loading environments...'
+    : environmentsError
+      ? environmentsError
+      : !hasEnvironmentsConfigured
+        ? 'No environments configured.'
+        : ''
+  const environmentHeaderNote = environmentHeaderMessage || environmentScopeNote
+  const environmentDisplayName = selectedEnvironment || (hasEnvironmentsConfigured ? 'Not selected' : 'None configured')
+  const environmentEmptyState = !hasEnvironmentsConfigured ? 'No environments configured. Ask a platform admin.' : ''
+  const servicesEnvironmentNotice =
+    environmentEmptyState || (selectedEnvironment ? '' : 'Select an environment to view running state.')
+  const deploymentsEnvironmentNotice =
+    environmentEmptyState || (selectedEnvironment ? '' : 'Select an environment to view deployments.')
+  const deployEnvironmentNotice =
+    environmentEmptyState || (selectedEnvironment ? '' : 'Select an environment to deploy.')
 
   const policyStatusItems = [
     {
@@ -2869,6 +3086,9 @@ export default function App() {
     getRollbackIdFor,
     renderFailures,
     setService,
+    environmentLabel: environmentDisplayName,
+    environmentReady,
+    environmentNotice: servicesEnvironmentNotice,
     listHeaderMeta: <HeaderStatus items={servicesListStatusItems} />,
     detailHeaderMeta: <HeaderStatus items={serviceDetailStatusItems} />
   }
@@ -2932,6 +3152,10 @@ export default function App() {
     openDeployment,
     versionVerified,
     trimmedChangeSummary,
+    environmentLabel: environmentDisplayName,
+    environmentNotice: deployEnvironmentNotice,
+    environmentScopeNote,
+    environmentAutoApplied,
     headerMeta: <HeaderStatus items={policyStatusItems} />
   }
 
@@ -2941,6 +3165,8 @@ export default function App() {
     openDeployment,
     statusClass,
     formatTime,
+    environmentLabel: environmentDisplayName,
+    environmentNotice: deploymentsEnvironmentNotice,
     headerMeta: <HeaderStatus items={deploymentsStatusItems} />
   }
 
@@ -3077,6 +3303,12 @@ export default function App() {
       handleLogout={handleLogout}
       derivedRole={derivedRole}
       currentDeliveryGroup={currentDeliveryGroup}
+      environmentOptions={environmentOptions}
+      selectedEnvironment={selectedEnvironment}
+      onEnvironmentChange={handleEnvironmentChange}
+      environmentLoading={environmentsLoading}
+      environmentNote={environmentHeaderNote}
+      environmentAutoApplied={environmentAutoApplied}
       alertRail={
         <AlertRail
           errorMessage={errorMessage}

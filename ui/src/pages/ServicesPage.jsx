@@ -39,7 +39,10 @@ export default function ServicesPage({
   renderFailures,
   setService,
   listHeaderMeta,
-  detailHeaderMeta
+  detailHeaderMeta,
+  environmentLabel,
+  environmentReady,
+  environmentNotice
 }) {
   const resolveLatestStatusLabel = (latest) => {
     if (!latest) return 'In progress'
@@ -65,13 +68,17 @@ export default function ServicesPage({
   }
 
   const headerMeta = mode === 'list' ? listHeaderMeta : detailHeaderMeta
+  const listSubtitle = environmentReady
+    ? `Deployable services and their latest delivery status in ${environmentLabel}.`
+    : environmentNotice || 'Select an environment to see latest delivery status.'
+  const runningEnvironment = serviceDetailRunning?.environment || environmentLabel || '-'
   if (mode === 'list') {
     return (
       <div className="shell">
         <div className="page-header-zone">
           <PageHeader
             title="Services"
-            subtitle="Deployable services and their latest delivery status."
+            subtitle={listSubtitle}
             meta={headerMeta}
             actions={
               <button
@@ -94,6 +101,7 @@ export default function ServicesPage({
           </div>
         </SectionCard>
         <SectionCard style={{ gridColumn: '1 / -1' }}>
+          {environmentNotice && <div className="helper space-8">{environmentNotice}</div>}
           {servicesViewLoading && <div className="helper space-8">Loading services...</div>}
           {!servicesViewLoading && servicesView.length === 0 && (
             <div className="helper space-8">
@@ -167,6 +175,10 @@ export default function ServicesPage({
         <>
           <SectionCard>
             <h2>What is running</h2>
+            <div className="helper space-8">Environment context: {environmentLabel}</div>
+            {!environmentReady && environmentNotice && (
+              <div className="helper space-8">{environmentNotice}</div>
+            )}
             {serviceDetailRunning ? (
               <div>
               <div className="badge-row">
@@ -188,7 +200,7 @@ export default function ServicesPage({
                 <p className="space-8">
                   Version: <strong>{serviceDetailRunning.version || '-'}</strong>
                 </p>
-                <p>Environment: {serviceDetailRunning.environment || 'sandbox'}</p>
+                <p>Environment: {runningEnvironment}</p>
                 <p>
                   Established by: {deploymentKindLabel(serviceDetailRunning.deploymentKind)}{' '}
                   {serviceDetailRunning.deploymentId ? (
@@ -219,6 +231,7 @@ export default function ServicesPage({
           </SectionCard>
           <SectionCard>
             <h2>Latest delivery status</h2>
+            <div className="helper space-8">Environment context: {environmentLabel}</div>
             {serviceDetailLatest ? (
               <div>
                 <div className="badge-row">
@@ -341,6 +354,7 @@ export default function ServicesPage({
       {!serviceDetailLoading && serviceDetailTab === 'history' && (
         <SectionCard style={{ gridColumn: '1 / -1' }}>
           <h2>Deployment history</h2>
+          <div className="helper space-8">Showing history for {environmentLabel}.</div>
           {serviceDetailHistory.length === 0 && <div className="helper">No deployments yet.</div>}
           {serviceDetailHistory.length > 0 && (
             <div className="table space-12">

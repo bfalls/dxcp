@@ -388,6 +388,7 @@ if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
   PYTHONPATH_DIR="$API_BUILD_DIR_WIN"
 fi
 PYTHONPATH="$PYTHONPATH_DIR" python "$SEED_SCRIPT" --table "$DDB_TABLE"
+python "$ROOT_DIR/scripts/run_migrations.py" --table "$DDB_TABLE"
 
 cat <<EOF
 

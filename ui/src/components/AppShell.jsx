@@ -12,6 +12,12 @@ export default function AppShell({
   handleLogout,
   derivedRole,
   currentDeliveryGroup,
+  environmentOptions,
+  selectedEnvironment,
+  onEnvironmentChange,
+  environmentLoading,
+  environmentNote,
+  environmentAutoApplied,
   alertRail,
   children
 }) {
@@ -38,6 +44,31 @@ export default function AppShell({
             <div className="context-item">
               <span className="context-label">Role</span>
               <span className="context-value">{derivedRole}</span>
+            </div>
+            <div className="context-item">
+              <span className="context-label">Environment</span>
+              {environmentLoading ? (
+                <span className="context-value">Loading...</span>
+              ) : environmentOptions.length === 0 ? (
+                <span className="context-value">No environments available</span>
+              ) : (
+                <select
+                  className="context-select"
+                  value={selectedEnvironment}
+                  onChange={(e) => onEnvironmentChange(e.target.value)}
+                  data-testid="environment-selector"
+                >
+                  {environmentOptions.map((env) => (
+                    <option key={env.id || env.name} value={env.name}>
+                      {env.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {environmentNote && <span className="context-helper">{environmentNote}</span>}
+              {!environmentNote && environmentAutoApplied && selectedEnvironment && (
+                <span className="context-helper">Default applied.</span>
+              )}
             </div>
             {currentDeliveryGroup && (
               <div className="context-item">

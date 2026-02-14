@@ -30,7 +30,8 @@ const buildFetchMock = ({
   guardrailValidation,
   preflightResponse,
   policySummaryResponse,
-  versionsByService
+  versionsByService,
+  environments
 }) => {
   let groups = deliveryGroups || [
     {
@@ -52,6 +53,15 @@ const buildFetchMock = ({
       }
     ]
   const serviceList = servicesList || [{ service_name: 'demo-service' }]
+  const resolveEnvironments = () =>
+    environments ||
+    groups.map((group, idx) => ({
+      id: `env-${group.id || idx}`,
+      name: idx === 0 ? 'sandbox' : `${group.id || `group-${idx}`}-env`,
+      type: 'non_prod',
+      delivery_group_id: group.id || 'default',
+      is_enabled: true
+    }))
   return async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
@@ -136,6 +146,9 @@ const buildFetchMock = ({
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
       })
+    }
+    if (pathname === '/v1/environments') {
+      return ok(resolveEnvironments())
     }
     if (pathname === '/v1/admin/guardrails/validate') {
       return ok(

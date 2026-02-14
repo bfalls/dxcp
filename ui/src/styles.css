@@ -301,6 +301,21 @@ body {
   color: var(--ink);
 }
 
+.context-select {
+  background: #0c1717;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.context-helper {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
 .session {
   display: flex;
   align-items: center;

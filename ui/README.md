@@ -41,7 +41,7 @@ VITE_SERVICE_URL_BASE=
 ```
 
 Notes:
-- Environment is fixed to sandbox.
+- Environment is selected from /v1/environments and scopes deploy, running state, and deployment history.
 - Version input is validated locally before submit.
 - Rollback prompts for confirmation and uses idempotency keys.
 - Services come from the backend registry (/v1/services).

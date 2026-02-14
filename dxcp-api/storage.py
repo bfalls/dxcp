@@ -1419,6 +1419,115 @@ class DynamoStorage:
                 return group
         return None
 
+    def _scan_environments(self, limit: Optional[int] = None) -> List[dict]:
+        params = {
+            "FilterExpression": Attr("pk").eq("ENVIRONMENT"),
+        }
+        if limit:
+            params["Limit"] = limit
+        response = self.table.scan(**params)
+        return response.get("Items", [])
+
+    def list_environments(self) -> List[dict]:
+        items = self._scan_environments()
+        environments = []
+        for item in items:
+            environments.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "type": item.get("type"),
+                    "delivery_group_id": item.get("delivery_group_id"),
+                    "is_enabled": bool(item.get("is_enabled", True)),
+                    "guardrails": item.get("guardrails"),
+                    "created_at": item.get("created_at"),
+                    "created_by": item.get("created_by"),
+                    "updated_at": item.get("updated_at"),
+                    "updated_by": item.get("updated_by"),
+                    "last_change_reason": item.get("last_change_reason"),
+                }
+            )
+        environments.sort(key=lambda env: env.get("name", ""))
+        return environments
+
+    def get_environment(self, environment_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "ENVIRONMENT", "sk": environment_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "type": item.get("type"),
+            "delivery_group_id": item.get("delivery_group_id"),
+            "is_enabled": bool(item.get("is_enabled", True)),
+            "guardrails": item.get("guardrails"),
+            "created_at": item.get("created_at"),
+            "created_by": item.get("created_by"),
+            "updated_at": item.get("updated_at"),
+            "updated_by": item.get("updated_by"),
+            "last_change_reason": item.get("last_change_reason"),
+        }
+
+    def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
+        items = self._scan_environments()
+        for item in items:
+            if item.get("name") == name and item.get("delivery_group_id") == delivery_group_id:
+                return {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "type": item.get("type"),
+                    "delivery_group_id": item.get("delivery_group_id"),
+                    "is_enabled": bool(item.get("is_enabled", True)),
+                    "guardrails": item.get("guardrails"),
+                    "created_at": item.get("created_at"),
+                    "created_by": item.get("created_by"),
+                    "updated_at": item.get("updated_at"),
+                    "updated_by": item.get("updated_by"),
+                    "last_change_reason": item.get("last_change_reason"),
+                }
+        return None
+
+    def insert_environment(self, environment: dict) -> dict:
+        if self.get_environment(environment["id"]):
+            return environment
+        item = {
+            "pk": "ENVIRONMENT",
+            "sk": environment["id"],
+            "id": environment["id"],
+            "name": environment["name"],
+            "type": environment["type"],
+            "delivery_group_id": environment["delivery_group_id"],
+            "is_enabled": environment.get("is_enabled", True),
+            "guardrails": environment.get("guardrails"),
+            "created_at": environment.get("created_at"),
+            "created_by": environment.get("created_by"),
+            "updated_at": environment.get("updated_at"),
+            "updated_by": environment.get("updated_by"),
+            "last_change_reason": environment.get("last_change_reason"),
+        }
+        self.table.put_item(Item=item)
+        return environment
+
+    def update_environment(self, environment: dict) -> dict:
+        item = {
+            "pk": "ENVIRONMENT",
+            "sk": environment["id"],
+            "id": environment["id"],
+            "name": environment["name"],
+            "type": environment["type"],
+            "delivery_group_id": environment["delivery_group_id"],
+            "is_enabled": environment.get("is_enabled", True),
+            "guardrails": environment.get("guardrails"),
+            "created_at": environment.get("created_at"),
+            "created_by": environment.get("created_by"),
+            "updated_at": environment.get("updated_at"),
+            "updated_by": environment.get("updated_by"),
+            "last_change_reason": environment.get("last_change_reason"),
+        }
+        self.table.put_item(Item=item)
+        return environment
+
     def insert_delivery_group(self, group: dict) -> dict:
         item = {
             "pk": "DELIVERY_GROUP",
@@ -2200,7 +2309,4 @@ def build_storage():
             os.getenv("DXCP_DB_PATH", "./data/dxcp.db"),
             os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
         )
-    storage.ensure_default_delivery_group()
-    storage.ensure_default_environments()
-    storage.ensure_default_recipe()
     return storage
