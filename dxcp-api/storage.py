@@ -191,7 +191,9 @@ class Storage:
             CREATE TABLE IF NOT EXISTS environments (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                display_name TEXT,
                 type TEXT NOT NULL,
+                promotion_order INTEGER,
                 delivery_group_id TEXT NOT NULL,
                 is_enabled INTEGER NOT NULL,
                 guardrails TEXT,
@@ -203,6 +205,8 @@ class Storage:
             )
             """
         )
+        self._ensure_column(cur, "environments", "display_name", "TEXT")
+        self._ensure_column(cur, "environments", "promotion_order", "INTEGER")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS recipes (
@@ -421,10 +425,10 @@ class Storage:
 
     def _ensure_group_environments(self, group: dict) -> None:
         allowed = group.get("allowed_environments")
-        if not allowed:
-            allowed = ["sandbox"]
+        if not isinstance(allowed, list):
+            return
         now = utc_now()
-        for env_name in allowed:
+        for index, env_name in enumerate(allowed):
             if not isinstance(env_name, str) or not env_name.strip():
                 continue
             existing = self.get_environment_for_group(env_name, group["id"])
@@ -435,6 +439,8 @@ class Storage:
                     "id": f"{group['id']}:{env_name}",
                     "name": env_name,
                     "type": self._derive_environment_type(env_name),
+                    "display_name": None,
+                    "promotion_order": index + 1,
                     "delivery_group_id": group["id"],
                     "is_enabled": True,
                     "guardrails": None,
@@ -680,7 +686,9 @@ class Storage:
         return {
             "id": row["id"],
             "name": row["name"],
+            "display_name": row["display_name"],
             "type": row["type"],
+            "promotion_order": row["promotion_order"],
             "delivery_group_id": row["delivery_group_id"],
             "is_enabled": bool(row["is_enabled"]),
             "guardrails": self._deserialize_json(row["guardrails"], None),
@@ -730,14 +738,16 @@ class Storage:
         cur.execute(
             """
             INSERT INTO environments (
-                id, name, type, delivery_group_id, is_enabled, guardrails,
+                id, name, display_name, type, promotion_order, delivery_group_id, is_enabled, guardrails,
                 created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 environment["id"],
                 environment["name"],
+                environment.get("display_name"),
                 environment["type"],
+                environment.get("promotion_order"),
                 environment["delivery_group_id"],
                 1 if environment.get("is_enabled", True) else 0,
                 self._serialize_json(environment.get("guardrails")),
@@ -758,13 +768,15 @@ class Storage:
         cur.execute(
             """
             UPDATE environments
-            SET name = ?, type = ?, delivery_group_id = ?, is_enabled = ?, guardrails = ?,
+            SET name = ?, display_name = ?, type = ?, promotion_order = ?, delivery_group_id = ?, is_enabled = ?, guardrails = ?,
                 created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
             WHERE id = ?
             """,
             (
                 environment["name"],
+                environment.get("display_name"),
                 environment["type"],
+                environment.get("promotion_order"),
                 environment["delivery_group_id"],
                 1 if environment.get("is_enabled", True) else 0,
                 self._serialize_json(environment.get("guardrails")),
@@ -815,20 +827,27 @@ class Storage:
         now = utc_now()
         created = []
         for group in self.list_delivery_groups():
-            env = {
-                "id": f"{group['id']}:sandbox",
-                "name": "sandbox",
-                "type": "non_prod",
-                "delivery_group_id": group["id"],
-                "is_enabled": True,
-                "guardrails": None,
-                "created_at": now,
-                "created_by": "system",
-                "updated_at": now,
-                "updated_by": "system",
-            }
-            self.insert_environment(env)
-            created.append(env)
+            configured = group.get("allowed_environments")
+            env_names = configured if isinstance(configured, list) and configured else ["sandbox"]
+            for index, env_name in enumerate(env_names):
+                if not isinstance(env_name, str) or not env_name.strip():
+                    continue
+                env = {
+                    "id": f"{group['id']}:{env_name}",
+                    "name": env_name,
+                    "display_name": None,
+                    "type": self._derive_environment_type(env_name),
+                    "promotion_order": index + 1,
+                    "delivery_group_id": group["id"],
+                    "is_enabled": True,
+                    "guardrails": None,
+                    "created_at": now,
+                    "created_by": "system",
+                    "updated_at": now,
+                    "updated_by": "system",
+                }
+                self.insert_environment(env)
+                created.append(env)
         return created
 
     def ensure_default_recipe(self) -> Optional[dict]:
@@ -1441,7 +1460,9 @@ class DynamoStorage:
                 {
                     "id": item.get("id"),
                     "name": item.get("name"),
+                    "display_name": item.get("display_name"),
                     "type": item.get("type"),
+                    "promotion_order": item.get("promotion_order"),
                     "delivery_group_id": item.get("delivery_group_id"),
                     "is_enabled": bool(item.get("is_enabled", True)),
                     "guardrails": item.get("guardrails"),
@@ -1463,7 +1484,9 @@ class DynamoStorage:
         return {
             "id": item.get("id"),
             "name": item.get("name"),
+            "display_name": item.get("display_name"),
             "type": item.get("type"),
+            "promotion_order": item.get("promotion_order"),
             "delivery_group_id": item.get("delivery_group_id"),
             "is_enabled": bool(item.get("is_enabled", True)),
             "guardrails": item.get("guardrails"),
@@ -1481,7 +1504,9 @@ class DynamoStorage:
                 return {
                     "id": item.get("id"),
                     "name": item.get("name"),
+                    "display_name": item.get("display_name"),
                     "type": item.get("type"),
+                    "promotion_order": item.get("promotion_order"),
                     "delivery_group_id": item.get("delivery_group_id"),
                     "is_enabled": bool(item.get("is_enabled", True)),
                     "guardrails": item.get("guardrails"),
@@ -1501,7 +1526,9 @@ class DynamoStorage:
             "sk": environment["id"],
             "id": environment["id"],
             "name": environment["name"],
+            "display_name": environment.get("display_name"),
             "type": environment["type"],
+            "promotion_order": environment.get("promotion_order"),
             "delivery_group_id": environment["delivery_group_id"],
             "is_enabled": environment.get("is_enabled", True),
             "guardrails": environment.get("guardrails"),
@@ -1520,7 +1547,9 @@ class DynamoStorage:
             "sk": environment["id"],
             "id": environment["id"],
             "name": environment["name"],
+            "display_name": environment.get("display_name"),
             "type": environment["type"],
+            "promotion_order": environment.get("promotion_order"),
             "delivery_group_id": environment["delivery_group_id"],
             "is_enabled": environment.get("is_enabled", True),
             "guardrails": environment.get("guardrails"),
@@ -1582,10 +1611,10 @@ class DynamoStorage:
 
     def _ensure_group_environments(self, group: dict) -> None:
         allowed = group.get("allowed_environments")
-        if not allowed:
-            allowed = ["sandbox"]
+        if not isinstance(allowed, list):
+            return
         now = utc_now()
-        for env_name in allowed:
+        for index, env_name in enumerate(allowed):
             if not isinstance(env_name, str) or not env_name.strip():
                 continue
             if self.get_environment_for_group(env_name, group["id"]):
@@ -1594,7 +1623,9 @@ class DynamoStorage:
                 {
                     "id": f"{group['id']}:{env_name}",
                     "name": env_name,
+                    "display_name": None,
                     "type": self._derive_environment_type(env_name),
+                    "promotion_order": index + 1,
                     "delivery_group_id": group["id"],
                     "is_enabled": True,
                     "guardrails": None,
@@ -1843,20 +1874,27 @@ class DynamoStorage:
         now = utc_now()
         created = []
         for group in self.list_delivery_groups():
-            env = {
-                "id": f"{group['id']}:sandbox",
-                "name": "sandbox",
-                "type": "non_prod",
-                "delivery_group_id": group["id"],
-                "is_enabled": True,
-                "guardrails": None,
-                "created_at": now,
-                "created_by": "system",
-                "updated_at": now,
-                "updated_by": "system",
-            }
-            self.insert_environment(env)
-            created.append(env)
+            configured = group.get("allowed_environments")
+            env_names = configured if isinstance(configured, list) and configured else ["sandbox"]
+            for index, env_name in enumerate(env_names):
+                if not isinstance(env_name, str) or not env_name.strip():
+                    continue
+                env = {
+                    "id": f"{group['id']}:{env_name}",
+                    "name": env_name,
+                    "display_name": None,
+                    "type": self._derive_environment_type(env_name),
+                    "promotion_order": index + 1,
+                    "delivery_group_id": group["id"],
+                    "is_enabled": True,
+                    "guardrails": None,
+                    "created_at": now,
+                    "created_by": "system",
+                    "updated_at": now,
+                    "updated_by": "system",
+                }
+                self.insert_environment(env)
+                created.append(env)
         return created
 
     def ensure_default_recipe(self) -> Optional[dict]:

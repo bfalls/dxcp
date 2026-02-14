@@ -7,7 +7,7 @@ info:
 
     Policy and guardrails (enforced):
     - Allowlisted service only.
-    - Environment must be configured and enabled for the delivery group.
+    - Environment name must be configured and enabled for the delivery group.
     - One active deployment at a time per delivery group.
     - Idempotency-Key required for mutating operations.
     - Rate limits (default): 60 rpm read, 10 rpm mutate.
@@ -358,7 +358,7 @@ components:
           description: Must be allowlisted.
         environment:
           type: string
-          description: Environment name.
+          description: Environment name identifier (for example sandbox, staging, prod).
         version:
           type: string
           pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
@@ -573,10 +573,21 @@ components:
       properties:
         id:
           type: string
+          description: Internal environment id (storage key).
         name:
           type: string
+          description: Canonical environment name used by deploy intent and history filtering.
+        display_name:
+          type: string
+          nullable: true
+          description: Optional UI label for the environment.
         type:
           $ref: '#/components/schemas/EnvironmentType'
+        promotion_order:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Optional ordering hint for promotion path evaluation within a delivery group.
         delivery_group_id:
           type: string
         is_enabled:

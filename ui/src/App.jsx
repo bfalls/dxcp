@@ -396,13 +396,21 @@ function sortEnvironments(list) {
   return list
     .slice()
     .sort((a, b) => {
+      const aOrder = Number.isInteger(a?.promotion_order) && a?.promotion_order > 0 ? a.promotion_order : Number.MAX_SAFE_INTEGER
+      const bOrder = Number.isInteger(b?.promotion_order) && b?.promotion_order > 0 ? b.promotion_order : Number.MAX_SAFE_INTEGER
+      if (aOrder !== bOrder) return aOrder - bOrder
       const aType = String(a?.type || '').toLowerCase()
       const bType = String(b?.type || '').toLowerCase()
-      const aOrder = aType === 'prod' ? 1 : 0
-      const bOrder = bType === 'prod' ? 1 : 0
-      if (aOrder !== bOrder) return aOrder - bOrder
+      const aTypeOrder = aType === 'prod' ? 1 : 0
+      const bTypeOrder = bType === 'prod' ? 1 : 0
+      if (aTypeOrder !== bTypeOrder) return aTypeOrder - bTypeOrder
       return String(a?.name || '').localeCompare(String(b?.name || ''))
     })
+}
+
+function environmentLabel(env) {
+  if (!env) return ''
+  return env.display_name || env.name || ''
 }
 
 function pickDefaultEnvironment(list) {
@@ -3155,7 +3163,10 @@ export default function App() {
         ? 'No environments configured.'
         : ''
   const environmentHeaderNote = environmentHeaderMessage || environmentScopeNote
-  const environmentDisplayName = selectedEnvironment || (hasEnvironmentsConfigured ? 'Not selected' : 'None configured')
+  const selectedEnvironmentEntry = environmentOptions.find((env) => env.name === selectedEnvironment)
+  const environmentDisplayName = selectedEnvironment
+    ? environmentLabel(selectedEnvironmentEntry) || selectedEnvironment
+    : (hasEnvironmentsConfigured ? 'Not selected' : 'None configured')
   const environmentEmptyState = !hasEnvironmentsConfigured ? 'No environments configured. Ask a platform admin.' : ''
   const servicesEnvironmentNotice =
     environmentEmptyState || (selectedEnvironment ? '' : 'Select an environment to view running state.')

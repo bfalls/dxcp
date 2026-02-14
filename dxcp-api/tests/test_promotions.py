@@ -220,3 +220,26 @@ async def test_create_promotion_creates_promote_record(tmp_path: Path, monkeypat
         assert stored["deploymentKind"] == "PROMOTE"
         assert stored["sourceEnvironment"] == "sandbox"
 
+
+async def test_validate_promotion_uses_environment_promotion_order_when_present(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        _seed_successful_source(main)
+        group = main.storage.get_delivery_group("group-1")
+        assert group is not None
+        # Intentionally out of order relative to desired promotion progression.
+        group["allowed_environments"] = ["sandbox", "prod", "staging"]
+        main.storage.update_delivery_group(group)
+        for env_name, order in [("sandbox", 1), ("staging", 2), ("prod", 3)]:
+            env = main.storage.get_environment_for_group(env_name, "group-1")
+            assert env is not None
+            env["promotion_order"] = order
+            main.storage.update_environment(env)
+
+        response = await client.post(
+            "/v1/promotions/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_promotion_payload(target_environment="staging"),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target_environment"] == "staging"

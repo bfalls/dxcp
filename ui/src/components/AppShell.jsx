@@ -60,7 +60,7 @@ export default function AppShell({
                 >
                   {environmentOptions.map((env) => (
                     <option key={env.id || env.name} value={env.name}>
-                      {env.name}
+                      {env.display_name || env.name}
                     </option>
                   ))}
                 </select>

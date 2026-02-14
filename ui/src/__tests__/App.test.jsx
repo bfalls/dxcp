@@ -866,6 +866,42 @@ export async function runAllTests() {
     assert.equal(values.includes('prod'), false)
   })
 
+  await runTest('Environment selector excludes disabled environments', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      environments: [
+        { id: 'env-default', name: 'sandbox', type: 'non_prod', delivery_group_id: 'default', is_enabled: true },
+        { id: 'env-default-disabled', name: 'staging', type: 'non_prod', delivery_group_id: 'default', is_enabled: false }
+      ]
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    const selector = await view.findByTestId('environment-selector')
+    const values = Array.from(selector.options || []).map((opt) => opt.value)
+    assert.deepEqual(values, ['sandbox'])
+    assert.equal(values.includes('staging'), false)
+  })
+
   await runTest('Change summary triggers preflight validation when filled', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

@@ -308,7 +308,37 @@ def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -
     }
 
 
+def _environment_sort_key(environment: dict) -> tuple[int, str]:
+    promotion_order = environment.get("promotion_order")
+    if isinstance(promotion_order, int) and promotion_order > 0:
+        return promotion_order, str(environment.get("name", ""))
+    return 1_000_000, str(environment.get("name", ""))
+
+
+def _group_environment_names(group: dict, enabled_only: bool = True) -> list[str]:
+    group_id = group.get("id")
+    if not group_id:
+        return []
+    environments = [
+        env
+        for env in storage.list_environments()
+        if env.get("delivery_group_id") == group_id
+    ]
+    if enabled_only:
+        environments = [env for env in environments if env.get("is_enabled", True)]
+    environments.sort(key=_environment_sort_key)
+    ordered: list[str] = []
+    for env in environments:
+        name = env.get("name")
+        if isinstance(name, str) and name and name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
 def _promotion_environment_sequence(group: dict) -> list[str]:
+    configured_from_environments = _group_environment_names(group, enabled_only=True)
+    if configured_from_environments:
+        return configured_from_environments
     configured = group.get("allowed_environments")
     if isinstance(configured, list) and configured:
         return [item for item in configured if isinstance(item, str) and item]
@@ -623,9 +653,17 @@ def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None
     if allowed_envs is not None:
         if not isinstance(allowed_envs, list):
             return error_response(400, "INVALID_ENVIRONMENTS", "allowed_environments must be a list")
+        seen_envs: set[str] = set()
+        normalized_envs: list[str] = []
         for env in allowed_envs:
             if not isinstance(env, str) or not env.strip():
                 return error_response(400, "INVALID_ENVIRONMENTS", "allowed_environments must be a list of strings")
+            normalized = env.strip()
+            if normalized in seen_envs:
+                return error_response(400, "INVALID_ENVIRONMENTS", "allowed_environments must not contain duplicates")
+            seen_envs.add(normalized)
+            normalized_envs.append(normalized)
+        group["allowed_environments"] = normalized_envs
     if not isinstance(recipes, list):
         return error_response(400, "INVALID_RECIPES", "allowed_recipes must be a list")
     allowlisted_services = {entry.get("service_name") for entry in storage.list_services()}
@@ -1716,7 +1754,9 @@ def list_environments(request: Request, authorization: Optional[str] = Header(No
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     environments = storage.list_environments()
-    return [Environment(**env).dict() for env in environments]
+    allowed_group_ids = {group.get("id") for group in _delivery_groups_for_actor(actor)}
+    filtered = [env for env in environments if env.get("delivery_group_id") in allowed_group_ids]
+    return [Environment(**env).dict() for env in filtered]
 
 
 @app.get("/v1/delivery-groups")

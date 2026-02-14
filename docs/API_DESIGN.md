@@ -62,9 +62,10 @@ Kill switch:
   - service must be in server allowlist
   - non-allowlisted services return 403 SERVICE_NOT_ALLOWLISTED
 
-- Single environment only
-  - environment must be "sandbox"
-  - any other value returns 400 INVALID_ENVIRONMENT
+- Delivery-group scoped environments only
+  - environment is the canonical environment name in intent and queries
+  - environment must be configured and enabled for the service's delivery group
+  - disallowed or missing values return 403 ENVIRONMENT_NOT_ALLOWED (or 403 ENVIRONMENT_DISABLED)
 
 - One active deployment at a time per delivery group (default)
   - when a deployment is in ACTIVE or IN_PROGRESS in a group, new deploy/rollback requests return 409 CONCURRENCY_LIMIT_REACHED
@@ -93,7 +94,7 @@ Kill switch:
 
 Fields:
 - service (string, allowlisted)
-- environment (string, must be "sandbox")
+- environment (string, canonical environment name)
 - version (string, validated format)
 - changeSummary (string, required, max 240 chars)
 - recipeId (string, required)
@@ -182,6 +183,7 @@ Fields:
 - description (optional)
 - owner (optional)
 - services (list of allowlisted service names)
+- allowed_environments (optional ordered list of environment names)
 - allowed_recipes (list of recipe ids or names)
 - guardrails (optional, DeliveryGroupGuardrails)
 - created_at
@@ -199,6 +201,22 @@ Fields:
 - max_concurrent_deployments
 - daily_deploy_quota
 - daily_rollback_quota
+
+### Environment
+
+Fields:
+- id
+- name (canonical environment identifier used in deploy intent and queries)
+- display_name (optional)
+- type (non_prod|prod)
+- promotion_order (optional, integer)
+- delivery_group_id
+- is_enabled
+- guardrails (optional)
+
+Lifecycle:
+- Environment creation is implicit via delivery-group updates (`allowed_environments`) and storage seeding workflows.
+- Deletion is discouraged; disable via `is_enabled=false` to preserve safe behavior.
 
 ### Recipe
 

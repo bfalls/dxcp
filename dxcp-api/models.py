@@ -123,6 +123,7 @@ class DeliveryGroup(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
+    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     created_at: Optional[str] = None
@@ -138,6 +139,7 @@ class DeliveryGroupUpsert(BaseModel):
     description: Optional[str] = None
     owner: Optional[str] = None
     services: List[str]
+    allowed_environments: Optional[List[str]] = None
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     change_reason: Optional[str] = None
@@ -146,7 +148,9 @@ class DeliveryGroupUpsert(BaseModel):
 class Environment(BaseModel):
     id: str
     name: str
+    display_name: Optional[str] = None
     type: EnvironmentType
+    promotion_order: Optional[int] = None
     delivery_group_id: str
     is_enabled: bool
     guardrails: Optional[DeliveryGroupGuardrails] = None

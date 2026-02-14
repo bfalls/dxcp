@@ -5,7 +5,7 @@
     "api-dev": "bash -lc 'cd dxcp-api && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000'",
     "api-test": "node scripts/api_test.js",
     "api-test-verbose": "node scripts/api_test.js --verbose",
-    "test": "npm run api-test && set PYTHONPATH=dxcp-api && pytest dxcp-api spinnaker-adapter",
+    "test": "npm run api-test && set PYTHONPATH=dxcp-api && py -m pytest dxcp-api spinnaker-adapter",
     "lint": "ruff check --select F dxcp-api",
     "api-ping": "bash -lc 'curl -sS ${DXCP_API_BASE:-http://127.0.0.1:8000}/v1/health'",
     "api-smoke": "bash -lc 'curl -sS ${DXCP_API_BASE:-http://127.0.0.1:8000}/v1/health && echo'",

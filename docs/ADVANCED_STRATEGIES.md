@@ -17,14 +17,14 @@ DXCP guarantees for each strategy.
   (deploymentKind = ROLLBACK) that references the failed deployment via
   rollbackOf. The original deployment outcome becomes ROLLED_BACK after a
   successful rollback.
-- Only the sandbox environment is supported in v1.
+- Environments are delivery-group scoped; recipe semantics stay environment-agnostic.
 
 ## Shared Guardrails (All Recipes)
 
 The following validations are enforced before any engine call:
 
 - Service must be allowlisted.
-- Environment must be "sandbox".
+- Environment name must be configured and enabled for the service's delivery group.
 - Version must be registered for the service.
 - Recipe must be allowed by the DeliveryGroup.
 - Recipe must be compatible with the service (RECIPE_INCOMPATIBLE when not).
@@ -91,7 +91,7 @@ Guardrails:
 
 | name      | recipe_revision | effective_behavior_summary | required_validations | expected_outcomes |
 |-----------|-----------------|----------------------------|----------------------|-------------------|
-| Standard  | 1               | Direct deploy to sandbox with single-pass execution. | Allowlisted service; sandbox environment; registered version; recipe allowed by delivery group; recipe compatible with service; concurrency and quota limits. | SUCCEEDED if deployment completes; FAILED or CANCELED on error; ROLLED_BACK if later rolled back; SUPERSEDED when a later success becomes current. |
+| Standard  | 1               | Direct deploy to the selected delivery-group environment with single-pass execution. | Allowlisted service; environment configured/enabled for delivery group; registered version; recipe allowed by delivery group; recipe compatible with service; concurrency and quota limits. | SUCCEEDED if deployment completes; FAILED or CANCELED on error; ROLLED_BACK if later rolled back; SUPERSEDED when a later success becomes current. |
 | Canary    | 1               | Progressive rollout with automated verification and rollback on failed analysis. | All Standard validations plus canary compatibility checks for required analysis/metrics. | SUCCEEDED if verification completes; FAILED if verification fails; ROLLED_BACK when auto-rollback succeeds; CANCELED if terminated. |
 | BlueGreen | 1               | Parallel rollout with controlled cutover and rollback capability. | All Standard validations plus blue/green compatibility checks for dual-capacity and cutover readiness. | SUCCEEDED if cutover completes; FAILED if validation or cutover fails; ROLLED_BACK when rollback succeeds; CANCELED if terminated. |
 

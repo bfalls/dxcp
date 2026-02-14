@@ -15,7 +15,7 @@ Represents what a user wants to deploy and how.
 Fields (required unless noted):
 - service: allowlisted service name
 - version: registered build version
-- environment: single allowed environment (sandbox)
+- environment: canonical environment name (for example sandbox, staging, prod)
 - changeSummary: required change summary
 - recipeId: selects a Recipe by id
 
@@ -61,7 +61,7 @@ Authoritative "what is running" snapshot for a single service.
 
 Fields:
 - service: allowlisted service name
-- environment: always "sandbox"
+- environment: canonical environment name
 - scope: always "service"
 - version: currently running version (latest successful deployment)
 - deploymentId: deployment record that established the running version
@@ -156,6 +156,7 @@ Fields:
 - description (optional): short summary of the group
 - owner (optional): team or user identifier
 - services: list of allowlisted service names
+- allowed_environments (optional): ordered list of allowed environment names for policy and implicit environment creation
 - allowed_recipes: list of recipe ids or names (can be empty)
 - guardrails (optional): policy limits scoped to the group
   - max_concurrent_deployments
@@ -170,6 +171,24 @@ Fields:
 Notes:
 - DeliveryGroups do not change deploy semantics in Phase A.
 - Service membership must align with the service allowlist.
+- DeliveryGroups are authoritative for environment policy scope.
+
+## Environment
+
+Fields:
+- id: internal storage identifier
+- name: canonical environment name (authoritative deploy intent identifier)
+- display_name (optional): UI label
+- type: non_prod or prod
+- promotion_order (optional): explicit promotion ordering within a delivery group
+- delivery_group_id: parent delivery group
+- is_enabled: disable/enable lifecycle flag
+- guardrails (optional): per-environment overrides
+
+Notes:
+- Environment `name` is the single identifier used in deployment intent, running state, and deployment history filters.
+- Environment records are managed by DXCP storage workflows; static service registry files are not authoritative for environment lifecycle.
+- Disable is preferred to deletion for safety and auditability.
 
 ## AuditEvent
 
@@ -196,7 +215,7 @@ Notes:
 
 - CurrentRunningState is computed from DeploymentRecord history stored by DXCP.
 - Deployment state is refreshed from the engine only when specific deployment records are fetched; list endpoints do not poll the engine.
-- DXCP exposes a single environment ("sandbox") and does not model traffic splits or multi-environment rollouts in Phase 3.
+- DXCP supports multiple named environments under delivery-group policy.
 - ArtifactRef is a URI with a scheme and opaque reference.
 - ArtifactRef is AWS S3-scoped today (s3://bucket/key) and validated against allowlisted sources.
 - Only the s3 scheme is supported in v1.
