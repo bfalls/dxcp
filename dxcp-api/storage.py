@@ -285,14 +285,15 @@ class Storage:
         if not name or not isinstance(name, str):
             print("service registry invalid entry: missing service_name")
             return False
-        allowed_envs = entry.get("allowed_environments", [])
-        if not isinstance(allowed_envs, list) or not allowed_envs:
-            print(f"service registry invalid entry for {name}: allowed_environments must be a non-empty list")
-            return False
-        for env in allowed_envs:
-            if not isinstance(env, str) or not env.strip():
-                print(f"service registry invalid entry for {name}: allowed_environments must be strings")
+        allowed_envs = entry.get("allowed_environments")
+        if allowed_envs is not None:
+            if not isinstance(allowed_envs, list):
+                print(f"service registry invalid entry for {name}: allowed_environments must be a list when provided")
                 return False
+            for env in allowed_envs:
+                if not isinstance(env, str) or not env.strip():
+                    print(f"service registry invalid entry for {name}: allowed_environments must be strings")
+                    return False
         for field in ["allowed_recipes", "allowed_artifact_sources"]:
             value = entry.get(field, [])
             if not isinstance(value, list):

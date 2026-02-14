@@ -34,12 +34,9 @@ class Guardrails:
             raise PolicyError(403, "SERVICE_NOT_ALLOWLISTED", "Service is not allowlisted")
         return entry
 
-    def validate_environment(self, env: str, service_entry: dict, delivery_group: Optional[dict] = None) -> dict:
+    def validate_environment(self, env: str, _service_entry: dict, delivery_group: Optional[dict] = None) -> dict:
         if not env or not isinstance(env, str):
             raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment is required")
-        allowed = service_entry.get("allowed_environments", [])
-        if env not in allowed:
-            raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment not allowed for service")
         if delivery_group:
             group_allowed = delivery_group.get("allowed_environments")
             if group_allowed is not None and env not in group_allowed:
