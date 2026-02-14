@@ -737,6 +737,83 @@ export async function runAllTests() {
     assert.ok(view.queryByText('No delivery group assigned.') === null)
   })
 
+  await runTest('No environments configured shows clear empty state', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      environments: []
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    await view.findByText('No environments available')
+    await view.findByText('No environments configured.')
+    const emptyState = await view.findAllByText('No environments configured. Ask a platform admin.')
+    assert.ok(emptyState.length > 0)
+    assert.equal(view.queryByTestId('environment-selector'), null)
+
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    const deployEmptyState = await view.findAllByText('No environments configured. Ask a platform admin.')
+    assert.ok(deployEmptyState.length > 0)
+  })
+
+  await runTest('Deploy hides blocked environments from selector', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        },
+        {
+          id: 'payments',
+          name: 'Payments Delivery Group',
+          services: ['payments-service'],
+          allowed_recipes: ['default'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      environments: [
+        { id: 'env-default', name: 'sandbox', type: 'non_prod', delivery_group_id: 'default', is_enabled: true },
+        { id: 'env-payments', name: 'prod', type: 'prod', delivery_group_id: 'payments', is_enabled: true }
+      ]
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    const blockedNote = await view.findAllByText(
+      'Some environments are unavailable for this service based on delivery group policy.'
+    )
+    assert.ok(blockedNote.length > 0)
+    const selector = await view.findByTestId('environment-selector')
+    const values = Array.from(selector.options || []).map((opt) => opt.value)
+    assert.deepEqual(values, ['sandbox'])
+    assert.equal(values.includes('prod'), false)
+  })
+
   await runTest('Change summary triggers preflight validation when filled', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
