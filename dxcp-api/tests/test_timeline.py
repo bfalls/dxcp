@@ -9,6 +9,8 @@ import pytest
 from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
+from test_helpers import seed_defaults
+
 pytestmark = pytest.mark.anyio
 
 
@@ -63,6 +65,7 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     fake = FakeSpinnaker()
     main.spinnaker = fake
     main.storage = main.build_storage()
+    seed_defaults(main.storage)
     main.guardrails = main.Guardrails(main.storage)
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

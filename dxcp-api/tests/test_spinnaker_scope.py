@@ -6,6 +6,8 @@ from pathlib import Path
 from auth_utils import configure_auth_env
 
 
+from test_helpers import seed_defaults
+
 def _write_service_registry(path: Path) -> None:
     data = [
         {
@@ -45,6 +47,7 @@ def _load_main(tmp_path: Path):
 def test_spinnaker_scope_intersects_group_and_service_recipes(tmp_path):
     main = _load_main(tmp_path)
     main.storage = main.build_storage()
+    seed_defaults(main.storage)
     main.guardrails = main.Guardrails(main.storage)
 
     main.storage.insert_recipe(

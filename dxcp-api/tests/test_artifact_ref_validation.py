@@ -10,6 +10,8 @@ import pytest
 from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
+from test_helpers import seed_defaults
+
 pytestmark = pytest.mark.anyio
 
 
@@ -56,6 +58,7 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     main.idempotency = main.IdempotencyStore()
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
+    seed_defaults(main.storage)
     main.guardrails = main.Guardrails(main.storage)
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
     main.storage.insert_upload_capability(

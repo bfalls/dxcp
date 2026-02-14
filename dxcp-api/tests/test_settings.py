@@ -9,6 +9,8 @@ import pytest
 from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
+from test_helpers import seed_defaults
+
 def _write_service_registry(path: Path) -> None:
     data = [
         {
@@ -52,6 +54,7 @@ async def _client(tmp_path: Path, monkeypatch):
     main.idempotency = main.IdempotencyStore()
     main.rate_limiter = main.RateLimiter()
     main.storage = main.build_storage()
+    seed_defaults(main.storage)
     main.guardrails = main.Guardrails(main.storage)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

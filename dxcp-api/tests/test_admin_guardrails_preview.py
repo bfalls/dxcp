@@ -8,6 +8,8 @@ import pytest
 from auth_utils import auth_header, configure_auth_env, mock_jwks
 
 
+from test_helpers import seed_defaults
+
 def _load_main(tmp_path: Path):
     dxcp_api_dir = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(dxcp_api_dir))
@@ -34,6 +36,7 @@ async def _client(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
     mock_jwks(monkeypatch)
     main.storage = main.build_storage()
+    seed_defaults(main.storage)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://testserver",
