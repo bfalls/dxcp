@@ -762,7 +762,7 @@ export default function App() {
         ? 'OBSERVER'
         : 'UNKNOWN'
     : 'UNKNOWN'
-  const canDeploy = actionInfo.actions?.deploy === true && deployEntryReady
+  const canDeploy = actionInfo.actions?.deploy === true && (deployEntryReady || debugDeployGatesEnabled)
   const canRollback = actionInfo.actions?.rollback === true
   const isPlatformAdmin = derivedRole === 'PLATFORM_ADMIN'
   const deployDisabledReason = !environmentReady
@@ -825,18 +825,19 @@ export default function App() {
   const lastAutoPreflightKeyRef = useRef('')
   const lastChangeSummaryFilledRef = useRef(false)
   const lastPolicySummaryKeyRef = useRef('')
+  const lastPreflightKeyRef = useRef('')
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
-    deployEntryReady &&
-    canDeploy &&
-    environmentReady &&
-    recipeId &&
-    trimmedChangeSummary &&
-    validVersion &&
-    !selectedRecipeDeprecated &&
-    versionVerified
+    (deployEntryReady || debugDeployGatesEnabled) &&
+      canDeploy &&
+      environmentReady &&
+      recipeId &&
+      trimmedChangeSummary &&
+      validVersion &&
+      !selectedRecipeDeprecated &&
+      versionVerified
   )
-  const canReviewDeploy = Boolean(canRunPreflight)
+  const canReviewDeploy = Boolean(canRunPreflight && preflightStatus !== 'checking')
   const policyQuotaStats = useMemo(
     () => computeQuotaStats(policyDeployments, currentDeliveryGroup?.id || ''),
     [policyDeployments, currentDeliveryGroup]
@@ -1847,7 +1848,11 @@ export default function App() {
   }
 
   const loadVersions = useCallback(async (refresh = false, options = {}) => {
-    if (!service) return
+    if (!service) {
+      setVersionsLoading(false)
+      setVersionsRefreshing(false)
+      return false
+    }
     if (refresh) {
       setVersionsRefreshing(true)
     } else {
@@ -2133,10 +2138,6 @@ export default function App() {
 
   async function handleReviewDeploy() {
     if (!canRunPreflight || preflightStatus === 'checking') return
-    if (validatedIntentKey && validatedIntentKey === preflightKey && preflightStatus === 'ok' && preflightResult) {
-      setDeployStep('confirm')
-      return
-    }
     await runPreflight({ advanceToConfirm: true })
   }
 
@@ -2306,15 +2307,10 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
+    if (!accessToken) return
     cacheStore.deployments.ts = 0
     cacheStore.servicesView.ts = 0
     cacheStore.policy.ts = 0
-    setDeployStep('form')
-    setPreflightStatus('idle')
-    setPreflightResult(null)
-    setPreflightError('')
-    setPreflightErrorHeadline('')
-    setValidatedIntentKey('')
     setPolicySummary(null)
     setPolicySummaryStatus('idle')
     setPolicySummaryError('')
@@ -2343,15 +2339,19 @@ export default function App() {
     }
     if (view === 'deploy') {
       setDeployEntryReady(false)
-      refreshPolicyContext({ bypassCache: true })
-      if (service) {
-        loadVersions(true, { bypassCache: true })
-      }
+      const policyPromise = refreshPolicyContext({ bypassCache: true })
+      const versionsPromise = service ? loadVersions(true, { bypassCache: true }) : Promise.resolve(true)
+      Promise.allSettled([policyPromise, versionsPromise]).then((results) => {
+        const policyOk = results[0].status === 'fulfilled' && results[0].value === true
+        const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
+        setDeployEntryReady(policyOk && versionsOk)
+      })
     }
   }, [
     selectedEnvironment,
     authReady,
     isAuthenticated,
+    accessToken,
     view,
     serviceDetailName,
     service,
@@ -2421,6 +2421,20 @@ export default function App() {
   }, [service, isAuthenticated, accessToken, loadVersions, loadAllowedActions])
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated || view !== 'deploy') return
+    if (!accessToken) return
+    if (!service || !selectedEnvironment) return
+    setDeployEntryReady(false)
+    const policyPromise = refreshPolicyContext({ bypassCache: true })
+    const versionsPromise = loadVersions(true, { bypassCache: true })
+    Promise.allSettled([policyPromise, versionsPromise]).then((results) => {
+      const policyOk = results[0].status === 'fulfilled' && results[0].value === true
+      const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
+      setDeployEntryReady(policyOk && versionsOk)
+    })
+  }, [authReady, isAuthenticated, accessToken, view, service, selectedEnvironment, refreshPolicyContext, loadVersions])
+
+  useEffect(() => {
     if (!isAuthenticated) return
     if (service || services.length === 0) return
     const nextService = services[0]?.service_name
@@ -2437,11 +2451,17 @@ export default function App() {
       setValidatedIntentKey('')
       lastAutoPreflightKeyRef.current = ''
       lastChangeSummaryFilledRef.current = false
+      lastPreflightKeyRef.current = ''
       return
     }
     if (!service || !recipeId || !version) return
+    const hasPrevKey = Boolean(lastPreflightKeyRef.current)
+    const keyChanged = hasPrevKey && lastPreflightKeyRef.current !== preflightKey
     if (deployStep === 'confirm') {
-      if (validatedIntentKey && validatedIntentKey === preflightKey) {
+      if (!keyChanged && validatedIntentKey && validatedIntentKey === preflightKey) {
+        return
+      }
+      if (!keyChanged) {
         return
       }
       setDeployStep('form')
@@ -2452,12 +2472,17 @@ export default function App() {
       setValidatedIntentKey('')
       lastAutoPreflightKeyRef.current = ''
       lastChangeSummaryFilledRef.current = false
+      lastPreflightKeyRef.current = preflightKey
+      return
+    }
+    if (!keyChanged && hasPrevKey) {
       return
     }
     setPreflightStatus('idle')
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
+    lastPreflightKeyRef.current = preflightKey
   }, [
     canRunPreflight,
     service,

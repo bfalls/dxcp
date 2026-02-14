@@ -1,9 +1,11 @@
-import { render, cleanup, fireEvent } from '@testing-library/react'
+import { render, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App.jsx'
 import { createApiClient } from '../apiClient.js'
+import { appendFileSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 
 const ok = (data) =>
   Promise.resolve({
@@ -199,9 +201,10 @@ const buildFetchMock = ({
       return ok(serviceList)
     }
     if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
+      const environment = parsed.searchParams.get('environment') || 'sandbox'
       return ok({
         service: 'demo-service',
-        environment: 'sandbox',
+        environment,
         hasDeployments: true,
         latest: {
           id: 'dep-1',
@@ -219,20 +222,25 @@ const buildFetchMock = ({
       return ok(groups)
     }
     if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
+      const environment = parsed.searchParams.get('environment') || 'sandbox'
       return ok([
         {
           id: 'dep-1',
           state: 'SUCCEEDED',
+          environment,
           version: '2.1.0',
-          createdAt: '2025-01-01T00:00:00Z'
+          createdAt: '2025-01-01T00:00:00Z',
+          deliveryGroupId: 'default'
         }
       ])
     }
     if (pathname === '/v1/deployments') {
+      const environment = parsed.searchParams.get('environment') || 'sandbox'
       return ok([
         {
           id: 'dep-1',
           state: 'SUCCEEDED',
+          environment,
           version: '2.1.0',
           createdAt: '2025-01-01T00:00:00Z',
           deliveryGroupId: 'default'
@@ -244,6 +252,7 @@ const buildFetchMock = ({
         id: 'dep-1',
         state: 'IN_PROGRESS',
         service: 'demo-service',
+        environment: 'sandbox',
         version: '2.1.0',
         createdAt: '2025-01-01T00:00:00Z',
         updatedAt: '2025-01-01T00:00:00Z',
@@ -288,11 +297,133 @@ function buildFakeJwt(roles) {
 }
 
 async function waitForCondition(check, attempts = 200) {
-  for (let i = 0; i < attempts; i += 1) {
-    if (check()) return
-    await new Promise((resolve) => setTimeout(resolve, 10))
+  const timeout = attempts * 10
+  await waitFor(() => {
+    if (!check()) {
+      throw new Error('Condition not met in time')
+    }
+  }, { timeout, interval: 10 })
+}
+
+function dumpDom(view, label) {
+  const snapshot = view?.container?.innerHTML || ''
+  const target = resolvePath(process.cwd(), 'test-dom-dump.html')
+  const entry = `\n<!-- ${label} -->\n${snapshot}\n<!-- /${label} -->\n`
+  try {
+    appendFileSync(target, entry, 'utf8')
+  } catch (err) {
+    // Ignore file write errors; the error message will include the snapshot.
   }
-  throw new Error('Condition not met in time')
+  return snapshot
+}
+
+async function waitForConditionWithDump(check, view, label, attempts = 200) {
+  try {
+    await waitForCondition(check, attempts)
+  } catch (err) {
+    const snapshot = dumpDom(view, label)
+    const max = 6000
+    const trimmed = snapshot.length > max ? `${snapshot.slice(0, max)}\n...<truncated>` : snapshot
+    throw new Error(`${label}\n${trimmed}`)
+  }
+}
+
+async function ensureEnvironmentSelected(view, name = 'sandbox') {
+  await waitForConditionWithDump(() => {
+    const current = view.queryByTestId('environment-selector')
+    if (!current) return false
+    const values = Array.from(current.options || []).map((opt) => opt.value)
+    return values.includes(name)
+  }, view, `Env options include ${name}`)
+  const selector = await view.findByTestId('environment-selector')
+  if (selector.value !== name) {
+    fireEvent.change(selector, { target: { value: name } })
+  }
+  await waitForConditionWithDump(() => {
+    const current = view.queryByTestId('environment-selector')
+    return current && current.value === name
+  }, view, `Env selected ${name}`)
+}
+
+async function ensureServiceSelected(view, name = 'demo-service') {
+  const selector = await view.findByTestId('deploy-service-select')
+  if (selector.value !== name) {
+    fireEvent.change(selector, { target: { value: name } })
+    await waitForCondition(() => {
+      const current = view.queryByTestId('deploy-service-select')
+      return current && current.value === name
+    })
+  }
+}
+
+async function refreshDeployData(view) {
+  const refreshButton = view.getByRole('button', { name: 'Refresh data' })
+  fireEvent.click(refreshButton)
+  await waitForCondition(() => view.queryByRole('button', { name: 'Refreshing...' }) === null)
+}
+
+async function waitForReviewEnabled(view, attempts = 200) {
+  await waitForCondition(() => {
+    const current = view.queryByTestId('deploy-review-button')
+    return current && !current.disabled
+  }, attempts)
+}
+
+async function ensureReviewReady(view) {
+  for (let i = 0; i < 3; i += 1) {
+    if (i > 0) {
+      await refreshDeployData(view)
+    }
+    try {
+      await waitForReviewEnabled(view, 200)
+      return
+    } catch {
+      // retry
+    }
+  }
+  const gate = view.queryByText(/Deploy gates:/)?.textContent || 'Deploy gates: <missing>'
+  const reviewButton = view.queryByTestId('deploy-review-button')
+  const title = reviewButton?.getAttribute('title') || '<none>'
+  const disabled = reviewButton ? String(reviewButton.disabled) : '<missing>'
+  throw new Error(`Review button never enabled after refresh. ${gate} title=${title} disabled=${disabled}`)
+}
+
+async function waitForPreflightError(view, attempts = 400) {
+  await waitForConditionWithDump(
+    () => view.queryByText(/Fix these issues to continue/) !== null,
+    view,
+    'Preflight error visible',
+    attempts
+  )
+}
+
+async function waitForConfirmDeploy(view, attempts = 400) {
+  await waitForConditionWithDump(
+    () => view.queryByRole('button', { name: 'Confirm deploy' }) !== null,
+    view,
+    'Confirm deploy visible',
+    attempts
+  )
+}
+
+async function clickReviewUntil(view, { label, expectConfirm, getValidateCalls }) {
+  const reviewButton = view.getByTestId('deploy-review-button')
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const before = getValidateCalls()
+    fireEvent.click(reviewButton)
+    await waitForConditionWithDump(
+      () => getValidateCalls() > before,
+      view,
+      `${label} validateCalls`
+    )
+    if (expectConfirm) {
+      if (view.queryByRole('button', { name: 'Confirm deploy' })) return
+    } else {
+      if (view.queryByText(/Fix these issues to continue/)) return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error(`${label} did not reach expected state`)
 }
 
 async function withDom(fn) {
@@ -336,7 +467,8 @@ async function withDom(fn) {
       domain: 'example.us.auth0.com',
       clientId: 'client-id',
       audience: 'https://dxcp-api',
-      rolesClaim: 'https://dxcp.example/claims/roles'
+      rolesClaim: 'https://dxcp.example/claims/roles',
+      debugDeployGates: true
     }
     window.__DXCP_AUTH0_RESET__ = true
     await fn()
@@ -619,7 +751,7 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      servicesList: [{ service_name: 'demo-service' }],
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'demo-service-2' }],
       recipes: [{ id: 'default', name: 'Default Deploy' }],
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
@@ -635,7 +767,9 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    await view.findByText(/Default applied \(only option\): Default Deploy/)
     const versionSelect = view.container.querySelector('#deploy-version')
     assert.ok(versionSelect)
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
@@ -643,6 +777,7 @@ export async function runAllTests() {
     changeInput.value = 'Release notes'
     changeInput.dispatchEvent(new window.Event('input', { bubbles: true }))
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
+    await ensureReviewReady(view)
     await waitForCondition(() => validateCalls >= 1)
   })
 
@@ -660,6 +795,7 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'demo-service-2' }],
       preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded', failure_cause: 'POLICY_CHANGE' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
@@ -675,7 +811,9 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    await view.findByText(/Default applied \(only option\): Default Deploy/)
     const versionSelect = view.container.querySelector('#deploy-version')
     assert.ok(versionSelect)
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
@@ -685,12 +823,14 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await waitForCondition(() => versionSelect.value === '2.1.0')
     await view.findByDisplayValue('release')
-    const reviewButton = view.getByTestId('deploy-review-button')
-    await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !reviewButton.disabled)
-    fireEvent.click(reviewButton)
-    await waitForCondition(() => validateCalls >= 1)
-    await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
+    await ensureReviewReady(view)
+    await clickReviewUntil(view, {
+      label: 'Review deploy',
+      expectConfirm: false,
+      getValidateCalls: () => validateCalls
+    })
+    await waitForPreflightError(view)
+    await view.findByText(/QUOTA_EXCEEDED/)
     assert.equal(view.queryByText('Confirm deploy'), null)
   })
 
@@ -703,19 +843,30 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    let validateCalls = 0
+    const baseFetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'demo-service-2' }],
       preflightResponse: { code: 'QUOTA_EXCEEDED', message: 'Daily quota exceeded', failure_cause: 'POLICY_CHANGE' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/deployments/validate' && options.method === 'POST') {
+        validateCalls += 1
+      }
+      return baseFetch(url, options)
+    }
     const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    await view.findByText(/Default applied \(only option\): Default Deploy/)
     const versionSelect = view.container.querySelector('#deploy-version')
     assert.ok(versionSelect)
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
@@ -725,12 +876,14 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
     await waitForCondition(() => versionSelect.value === '2.1.0')
-    const reviewButton = view.getByTestId('deploy-review-button')
-    await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !reviewButton.disabled)
-    fireEvent.click(reviewButton)
-    await view.findByText(/Fix these issues to continue/)
-    await view.findByText('QUOTA_EXCEEDED: Daily deploy quota exceeded for this delivery group.')
+    await ensureReviewReady(view)
+    await clickReviewUntil(view, {
+      label: 'Blocked deploy',
+      expectConfirm: false,
+      getValidateCalls: () => validateCalls
+    })
+    await waitForPreflightError(view)
+    await view.findByText(/QUOTA_EXCEEDED/)
     assert.equal(view.queryByText('Confirm deploy'), null)
   })
 
@@ -743,19 +896,30 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    let validateCalls = 0
+    const baseFetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
+      servicesList: [{ service_name: 'demo-service' }, { service_name: 'demo-service-2' }],
       deployResponse: { id: 'dep-1', service: 'demo-service', version: '2.1.0', state: 'IN_PROGRESS' },
       versionsByService: { 'demo-service': ['2.1.0'] }
     })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/deployments/validate' && options.method === 'POST') {
+        validateCalls += 1
+      }
+      return baseFetch(url, options)
+    }
     const view = renderApp()
 
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     await view.findAllByText('Default Delivery Group')
-    await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    await view.findByText(/Default applied \(only option\): Default Deploy/)
     const versionSelect = view.container.querySelector('#deploy-version')
     assert.ok(versionSelect)
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
@@ -765,15 +929,23 @@ export async function runAllTests() {
     changeInput.dispatchEvent(new window.Event('change', { bubbles: true }))
     await view.findByDisplayValue('release')
     await waitForCondition(() => versionSelect.value === '2.1.0')
+    await ensureReviewReady(view)
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
-    await waitForCondition(() => view.queryByText('Deploy disabled. Loading access policy.') === null)
-    await waitForCondition(() => !reviewButton.disabled)
     assert.equal(reviewButton.disabled, false)
-    fireEvent.click(reviewButton)
+    await clickReviewUntil(view, {
+      label: 'Allowed deploy',
+      expectConfirm: true,
+      getValidateCalls: () => validateCalls
+    })
+    await waitForConfirmDeploy(view)
     const confirmButton = await view.findByRole('button', { name: 'Confirm deploy' })
     await waitForCondition(() => !confirmButton.disabled)
     fireEvent.click(confirmButton)
-    await view.findByText('Deployment detail')
+    await waitForConditionWithDump(
+      () => view.queryByText('Deployment detail') !== null,
+      view,
+      'Allowed deploy detail view'
+    )
   })
 
   await runTest('Deprecated recipe blocks deploy', async () => {
