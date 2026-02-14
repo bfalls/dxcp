@@ -107,6 +107,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch, group_a_guardrails: dic
             },
         }
     )
+    main.storage.insert_environment(
+        {
+            "id": "group-a:sandbox",
+            "name": "sandbox",
+            "type": "non_prod",
+            "delivery_group_id": "group-a",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
     main.storage.insert_delivery_group(
         {
             "id": "group-b",
@@ -120,6 +134,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch, group_a_guardrails: dic
                 "daily_deploy_quota": 5,
                 "daily_rollback_quota": 5,
             },
+        }
+    )
+    main.storage.insert_environment(
+        {
+            "id": "group-b:sandbox",
+            "name": "sandbox",
+            "type": "non_prod",
+            "delivery_group_id": "group-b",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
         }
     )
     async with httpx.AsyncClient(

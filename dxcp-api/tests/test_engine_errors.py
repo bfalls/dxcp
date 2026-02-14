@@ -105,6 +105,20 @@ async def test_engine_error_schema_non_admin(tmp_path: Path, monkeypatch):
                 "guardrails": None,
             }
         )
+        main.storage.insert_environment(
+            {
+                "id": "group-1:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-1",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         token = build_token(["dxcp-observers"], subject="observer-1")
         response = await client.get(
             "/v1/spinnaker/applications",

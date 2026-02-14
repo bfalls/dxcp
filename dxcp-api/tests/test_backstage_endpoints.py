@@ -91,7 +91,7 @@ async def test_delivery_status_latest_deployment(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         _insert_deployment(main.storage, "dep-1", "SUCCEEDED", "2024-01-01T00:00:00Z")
         response = await client.get(
-            "/v1/services/demo-service/delivery-status",
+            "/v1/services/demo-service/delivery-status?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
     assert response.status_code == 200
@@ -110,7 +110,7 @@ async def test_delivery_status_current_running_and_superseded(tmp_path: Path, mo
         _insert_deployment(main.storage, "dep-2", "FAILED", "2024-01-02T00:00:00Z", version="1.0.1")
         _insert_deployment(main.storage, "dep-3", "SUCCEEDED", "2024-01-03T00:00:00Z", version="1.0.2")
         response = await client.get(
-            "/v1/services/demo-service/delivery-status",
+            "/v1/services/demo-service/delivery-status?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
     assert response.status_code == 200

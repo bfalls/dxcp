@@ -100,6 +100,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             },
         }
     )
+    main.storage.insert_environment(
+        {
+            "id": "group-1:sandbox",
+            "name": "sandbox",
+            "type": "non_prod",
+            "delivery_group_id": "group-1",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

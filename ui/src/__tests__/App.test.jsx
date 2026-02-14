@@ -188,6 +188,7 @@ const buildFetchMock = ({
     if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
       return ok({
         service: 'demo-service',
+        environment: 'sandbox',
         hasDeployments: true,
         latest: {
           id: 'dep-1',

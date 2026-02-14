@@ -141,6 +141,20 @@ async def test_service_permitted_but_not_compatible(tmp_path: Path, monkeypatch)
                 "guardrails": None,
             }
         )
+        main.storage.insert_environment(
+            {
+                "id": "group-a:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-a",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-2", **auth_header(["dxcp-platform-admins"])},
@@ -152,7 +166,8 @@ async def test_service_permitted_but_not_compatible(tmp_path: Path, monkeypatch)
                 "recipeId": "recipe-a",
             },
         )
-    assert response.status_code == 400
+    assert response.status_code == 403
+    assert response.json()["code"] == "ENVIRONMENT_NOT_ALLOWED"
 
 
 async def test_permitted_and_compatible(tmp_path: Path, monkeypatch):
@@ -177,6 +192,20 @@ async def test_permitted_and_compatible(tmp_path: Path, monkeypatch):
                 "services": ["service-a"],
                 "allowed_recipes": ["recipe-a"],
                 "guardrails": None,
+            }
+        )
+        main.storage.insert_environment(
+            {
+                "id": "group-a:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-a",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
             }
         )
         response = await client.post(
@@ -217,6 +246,20 @@ async def test_recipe_allowed_by_service_not_delivery_group(tmp_path: Path, monk
                 "guardrails": None,
             }
         )
+        main.storage.insert_environment(
+            {
+                "id": "group-a:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-a",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-4", **auth_header(["dxcp-platform-admins"])},
@@ -254,6 +297,20 @@ async def test_group_allows_recipe_but_service_incompatible(tmp_path: Path, monk
                 "services": ["service-b"],
                 "allowed_recipes": ["recipe-a"],
                 "guardrails": None,
+            }
+        )
+        main.storage.insert_environment(
+            {
+                "id": "group-b:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-b",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
             }
         )
         response = await client.post(

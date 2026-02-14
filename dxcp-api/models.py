@@ -42,6 +42,11 @@ class EngineType(str, Enum):
     SPINNAKER = "SPINNAKER"
 
 
+class EnvironmentType(str, Enum):
+    NON_PROD = "non_prod"
+    PROD = "prod"
+
+
 class DeploymentIntent(BaseModel):
     service: str
     environment: str
@@ -125,6 +130,15 @@ class DeliveryGroupUpsert(BaseModel):
     allowed_recipes: List[str]
     guardrails: Optional[DeliveryGroupGuardrails] = None
     change_reason: Optional[str] = None
+
+
+class Environment(BaseModel):
+    id: str
+    name: str
+    type: EnvironmentType
+    delivery_group_id: str
+    is_enabled: bool
+    guardrails: Optional[DeliveryGroupGuardrails] = None
 
 
 class Recipe(BaseModel):

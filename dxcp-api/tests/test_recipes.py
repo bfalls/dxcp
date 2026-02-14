@@ -97,6 +97,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
                 "guardrails": None,
             }
         )
+        main.storage.insert_environment(
+            {
+                "id": "default:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "default",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
     extra_recipe = {
         "id": "extra",
         "name": "Extra Recipe",

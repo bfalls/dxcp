@@ -16,7 +16,7 @@ def _write_service_registry(path: Path) -> None:
     data = [
         {
             "service_name": "demo-service",
-            "allowed_environments": ["sandbox"],
+            "allowed_environments": ["sandbox", "prod"],
             "allowed_recipes": ["default"],
             "allowed_artifact_sources": [],
         }
@@ -48,6 +48,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     mock_jwks(monkeypatch)
     main.storage = main.build_storage()
     main.guardrails = main.Guardrails(main.storage)
+    main.storage.insert_environment(
+        {
+            "id": "default:prod",
+            "name": "prod",
+            "type": "prod",
+            "delivery_group_id": "default",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
         base_url="http://testserver",
@@ -65,11 +79,12 @@ def _insert_deployment(
     created_at: str,
     version: str,
     rollback_of: str | None = None,
+    environment: str = "sandbox",
 ):
     record = {
         "id": deployment_id,
         "service": "demo-service",
-        "environment": "sandbox",
+        "environment": environment,
         "version": version,
         "recipeId": "default",
         "state": state,
@@ -91,23 +106,30 @@ async def test_running_state_rollforward_and_rollback(tmp_path: Path, monkeypatc
     async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         _insert_deployment(main.storage, "dep-a", "SUCCEEDED", "2024-01-01T00:00:00Z", "1.0.0")
         response = await client.get(
-            "/v1/services/demo-service/running",
+            "/v1/services/demo-service/running?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
         assert response.status_code == 200
         assert response.json()["version"] == "1.0.0"
 
         _insert_deployment(main.storage, "dep-b", "SUCCEEDED", "2024-01-02T00:00:00Z", "1.0.1")
+        _insert_deployment(main.storage, "dep-prod", "SUCCEEDED", "2024-01-02T00:00:00Z", "9.9.9", environment="prod")
         response = await client.get(
-            "/v1/services/demo-service/running",
+            "/v1/services/demo-service/running?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
         assert response.status_code == 200
         assert response.json()["version"] == "1.0.1"
+        response = await client.get(
+            "/v1/services/demo-service/running?environment=prod",
+            headers=auth_header(["dxcp-observers"]),
+        )
+        assert response.status_code == 200
+        assert response.json()["version"] == "9.9.9"
 
         _insert_deployment(main.storage, "dep-c", "FAILED", "2024-01-03T00:00:00Z", "1.0.2")
         response = await client.get(
-            "/v1/services/demo-service/running",
+            "/v1/services/demo-service/running?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
         assert response.status_code == 200
@@ -129,7 +151,7 @@ async def test_running_state_rollforward_and_rollback(tmp_path: Path, monkeypatc
             superseded_by="dep-r",
         )
         response = await client.get(
-            "/v1/services/demo-service/running",
+            "/v1/services/demo-service/running?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
         assert response.status_code == 200
@@ -138,7 +160,7 @@ async def test_running_state_rollforward_and_rollback(tmp_path: Path, monkeypatc
         assert body["deploymentKind"] == "ROLLBACK"
 
         history = await client.get(
-            "/v1/deployments",
+            "/v1/deployments?service=demo-service&environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
         )
         assert history.status_code == 200

@@ -8,7 +8,7 @@ class _FakeStorage:
         self._active_by_group = active_by_group or {}
         self._global_active = global_active
 
-    def count_active_deployments_for_group(self, group_id: str) -> int:
+    def count_active_deployments_for_group(self, group_id: str, environment: str | None = None) -> int:
         return self._active_by_group.get(group_id, 0)
 
     def has_active_deployment(self) -> bool:

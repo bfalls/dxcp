@@ -26,6 +26,7 @@ from models import (
     DeliveryGroup,
     DeliveryGroupUpsert,
     DeploymentIntent,
+    Environment,
     EngineType,
     PolicySummaryRequest,
     Recipe,
@@ -214,17 +215,34 @@ def resolve_recipe(recipe_id: Optional[str], actor: Optional[Actor] = None):
     return recipe, None
 
 
-def _policy_check_environment(group: dict, environment: str, actor: Optional[Actor] = None) -> Optional[JSONResponse]:
+def resolve_environment_for_group(
+    group: dict,
+    environment: str,
+    actor: Optional[Actor] = None,
+) -> tuple[Optional[dict], Optional[JSONResponse]]:
+    if not environment:
+        return None, error_response(400, "ENVIRONMENT_REQUIRED", "environment is required")
     allowed = group.get("allowed_environments")
-    if allowed is None:
-        return None
-    if environment not in allowed:
-        return _policy_denied(
+    if allowed is not None and environment not in allowed:
+        return None, _policy_denied(
             "ENVIRONMENT_NOT_ALLOWED",
             f"Environment {environment} not allowed for delivery group {group.get('id')}",
             actor,
         )
-    return None
+    env_entry = storage.get_environment_for_group(environment, group.get("id"))
+    if not env_entry:
+        return None, _policy_denied(
+            "ENVIRONMENT_NOT_ALLOWED",
+            f"Environment {environment} not configured for delivery group {group.get('id')}",
+            actor,
+        )
+    if not env_entry.get("is_enabled", True):
+        return None, _policy_denied(
+            "ENVIRONMENT_DISABLED",
+            f"Environment {environment} is disabled for delivery group {group.get('id')}",
+            actor,
+        )
+    return env_entry, None
 
 
 def _policy_check_recipe_allowed(group: dict, recipe_id: str, actor: Optional[Actor] = None) -> Optional[JSONResponse]:
@@ -259,11 +277,27 @@ def _group_guardrail_value(group: dict, key: str, default_value: int) -> int:
     return default_value
 
 
-def _policy_snapshot_for_group(group: dict) -> dict:
-    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
-    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
-    active = storage.count_active_deployments_for_group(group["id"])
-    quota = rate_limiter.get_daily_remaining(group["id"], "deploy", daily_deploy_quota)
+def _environment_guardrail_value(group: dict, environment: Optional[dict], key: str, default_value: int) -> int:
+    if environment:
+        guardrails = environment.get("guardrails") or {}
+        value = guardrails.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return _group_guardrail_value(group, key, default_value)
+
+
+def _quota_scope(group_id: str, environment_name: Optional[str]) -> str:
+    if environment_name:
+        return f"{group_id}:{environment_name}"
+    return group_id
+
+
+def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -> dict:
+    env_name = environment.get("name") if environment else None
+    max_concurrent = _environment_guardrail_value(group, environment, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _environment_guardrail_value(group, environment, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    active = storage.count_active_deployments_for_group(group["id"], env_name)
+    quota = rate_limiter.get_daily_remaining(_quota_scope(group["id"], env_name), "deploy", daily_deploy_quota)
     return {
         "max_concurrent_deployments": max_concurrent,
         "current_concurrent_deployments": active,
@@ -601,6 +635,7 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "MISSING_ENGINE_PIPELINE",
         "INVALID_STATUS",
         "INVALID_ENVIRONMENT",
+        "ENVIRONMENT_REQUIRED",
         "INVALID_VERSION",
         "INVALID_ARTIFACT",
         "IDMP_KEY_REQUIRED",
@@ -611,6 +646,7 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "SERVICE_NOT_ALLOWLISTED",
         "SERVICE_NOT_IN_DELIVERY_GROUP",
         "ENVIRONMENT_NOT_ALLOWED",
+        "ENVIRONMENT_DISABLED",
         "RECIPE_NOT_ALLOWED",
         "RECIPE_INCOMPATIBLE",
         "RECIPE_DEPRECATED",
@@ -733,30 +769,35 @@ def _deployment_outcome(deployment: dict, latest_success_id: Optional[str]) -> O
     )
 
 
-def _latest_success_by_service(deployments: list[dict]) -> dict[str, dict]:
-    latest: dict[str, dict] = {}
+def _latest_success_by_scope(deployments: list[dict]) -> dict[tuple[str, str], dict]:
+    latest: dict[tuple[str, str], dict] = {}
     for deployment in deployments:
         if deployment.get("state") != "SUCCEEDED":
             continue
         if deployment.get("outcome") == "SUPERSEDED":
             continue
         service = deployment.get("service")
-        if service and service not in latest:
-            latest[service] = deployment
+        environment = deployment.get("environment")
+        key = (service, environment)
+        if service and environment and key not in latest:
+            latest[key] = deployment
     return latest
 
 
 def _current_running_state(
     service: str,
+    environment: str,
     deployments: list[dict],
     latest_success_id: Optional[str],
 ) -> Optional[dict]:
     for deployment in deployments:
+        if deployment.get("environment") != environment:
+            continue
         outcome = _deployment_outcome(deployment, latest_success_id)
         if outcome == "SUCCEEDED":
             return {
                 "service": service,
-                "environment": deployment.get("environment") or "sandbox",
+                "environment": environment,
                 "scope": "service",
                 "version": deployment.get("version"),
                 "deploymentId": deployment.get("id"),
@@ -769,7 +810,7 @@ def _current_running_state(
 def _deployment_public_view(
     actor: Actor,
     deployment: dict,
-    latest_success_by_service: Optional[dict[str, dict]] = None,
+    latest_success_by_scope: Optional[dict[tuple[str, str], dict]] = None,
 ) -> dict:
     delivery_group_id = deployment.get("deliveryGroupId")
     if not delivery_group_id and deployment.get("service"):
@@ -777,8 +818,8 @@ def _deployment_public_view(
         if group:
             delivery_group_id = group.get("id")
     latest_success_id = None
-    if latest_success_by_service is not None:
-        latest = latest_success_by_service.get(deployment.get("service"))
+    if latest_success_by_scope is not None:
+        latest = latest_success_by_scope.get((deployment.get("service"), deployment.get("environment")))
         if latest:
             latest_success_id = latest.get("id")
     payload = {
@@ -1119,10 +1160,10 @@ def create_deployment(
     if group_error:
         _record_deploy_denied(actor, intent, _error_code_from_response(group_error))
         return group_error
-    policy_env_error = _policy_check_environment(group, intent.environment, actor)
-    if policy_env_error:
-        _record_deploy_denied(actor, intent, _error_code_from_response(policy_env_error), group.get("id"))
-        return policy_env_error
+    env_entry, env_error = resolve_environment_for_group(group, intent.environment, actor)
+    if env_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(env_error), group.get("id"))
+        return env_error
     recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
     if recipe_error:
         _record_deploy_denied(actor, intent, _error_code_from_response(recipe_error), group.get("id"))
@@ -1133,7 +1174,7 @@ def create_deployment(
         return policy_recipe_error
     try:
         service_entry = guardrails.validate_service(intent.service)
-        guardrails.validate_environment(intent.environment, service_entry)
+        guardrails.validate_environment(intent.environment, service_entry, group)
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
@@ -1144,11 +1185,16 @@ def create_deployment(
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
     if recipe_capability_error:
         return recipe_capability_error
-    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
-    daily_deploy_quota = _group_guardrail_value(group, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    max_concurrent = _environment_guardrail_value(group, env_entry, "max_concurrent_deployments", 1)
+    daily_deploy_quota = _environment_guardrail_value(group, env_entry, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
     try:
-        rate_limiter.check_mutate(actor.actor_id, "deploy", quota_scope=group["id"], quota_limit=daily_deploy_quota)
-        guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
+        rate_limiter.check_mutate(
+            actor.actor_id,
+            "deploy",
+            quota_scope=_quota_scope(group["id"], env_entry.get("name")),
+            quota_limit=daily_deploy_quota,
+        )
+        guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
     except PolicyError as exc:
         _record_deploy_denied(actor, intent, exc.code, group.get("id"))
         raise
@@ -1242,9 +1288,9 @@ def get_policy_summary(
     group, group_error = resolve_delivery_group(req.service, actor)
     if group_error:
         return group_error
-    policy_env_error = _policy_check_environment(group, req.environment, actor)
-    if policy_env_error:
-        return policy_env_error
+    env_entry, env_error = resolve_environment_for_group(group, req.environment, actor)
+    if env_error:
+        return env_error
     recipe = None
     if req.recipeId:
         recipe, recipe_error = resolve_recipe(req.recipeId, actor)
@@ -1255,7 +1301,7 @@ def get_policy_summary(
             return policy_recipe_error
     try:
         service_entry = guardrails.validate_service(req.service)
-        guardrails.validate_environment(req.environment, service_entry)
+        guardrails.validate_environment(req.environment, service_entry, group)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
     if recipe:
@@ -1263,7 +1309,7 @@ def get_policy_summary(
         if recipe_capability_error:
             return recipe_capability_error
 
-    policy_snapshot = _policy_snapshot_for_group(group)
+    policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     return {
         "service": req.service,
         "environment": req.environment,
@@ -1289,9 +1335,9 @@ def validate_deployment(
     group, group_error = resolve_delivery_group(intent.service, actor)
     if group_error:
         return group_error
-    policy_env_error = _policy_check_environment(group, intent.environment, actor)
-    if policy_env_error:
-        return policy_env_error
+    env_entry, env_error = resolve_environment_for_group(group, intent.environment, actor)
+    if env_error:
+        return env_error
     recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
     if recipe_error:
         return recipe_error
@@ -1300,7 +1346,7 @@ def validate_deployment(
         return policy_recipe_error
     try:
         service_entry = guardrails.validate_service(intent.service)
-        guardrails.validate_environment(intent.environment, service_entry)
+        guardrails.validate_environment(intent.environment, service_entry, group)
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
@@ -1311,7 +1357,7 @@ def validate_deployment(
     if not build:
         return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
 
-    policy_snapshot = _policy_snapshot_for_group(group)
+    policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
         return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
     if policy_snapshot["deployments_remaining"] <= 0:
@@ -1334,14 +1380,15 @@ def list_deployments(
     request: Request,
     service: Optional[str] = None,
     state: Optional[str] = None,
+    environment: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    deployments = storage.list_deployments(service, state)
-    latest_success_by_service = _latest_success_by_service(deployments)
+    deployments = storage.list_deployments(service, state, environment)
+    latest_success_by_scope = _latest_success_by_scope(deployments)
     return [
-        _deployment_public_view(actor, deployment, latest_success_by_service)
+        _deployment_public_view(actor, deployment, latest_success_by_scope)
         for deployment in deployments
     ]
 
@@ -1351,6 +1398,14 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
     return storage.list_services()
+
+
+@app.get("/v1/environments")
+def list_environments(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    environments = storage.list_environments()
+    return [Environment(**env).dict() for env in environments]
 
 
 @app.get("/v1/delivery-groups")
@@ -1566,24 +1621,37 @@ def list_service_versions(
 def get_service_delivery_status(
     service: str,
     request: Request,
+    environment: str = Query(...),
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    guardrails.validate_service(service)
-    deployments = storage.list_deployments(service, None)
+    service_entry = guardrails.validate_service(service)
+    group, group_error = resolve_delivery_group(service, actor)
+    if group_error:
+        return group_error
+    env_entry, env_error = resolve_environment_for_group(group, environment, actor)
+    if env_error:
+        return env_error
+    try:
+        guardrails.validate_environment(environment, service_entry, group)
+    except PolicyError as exc:
+        return _capability_error(exc.code, exc.message, actor)
+    deployments = storage.list_deployments(service, None, environment)
     if not deployments:
         return {
             "service": service,
+            "environment": environment,
             "hasDeployments": False,
             "latest": None,
             "currentRunning": None,
         }
     latest = deployments[0]
-    latest_success_by_service = _latest_success_by_service(deployments)
-    latest_success_id = latest_success_by_service.get(service, {}).get("id")
+    latest_success_by_scope = _latest_success_by_scope(deployments)
+    latest_success_id = latest_success_by_scope.get((service, environment), {}).get("id")
     payload = {
         "service": service,
+        "environment": environment,
         "hasDeployments": True,
         "latest": {
             "id": latest.get("id"),
@@ -1599,7 +1667,7 @@ def get_service_delivery_status(
                 latest_success_id,
             ),
         },
-        "currentRunning": _current_running_state(service, deployments, latest_success_id),
+        "currentRunning": _current_running_state(service, environment, deployments, latest_success_id),
     }
     if actor.role == Role.PLATFORM_ADMIN:
         payload["latest"]["engineExecutionId"] = latest.get("spinnakerExecutionId")
@@ -1611,16 +1679,27 @@ def get_service_delivery_status(
 def get_service_running(
     service: str,
     request: Request,
+    environment: str = Query(...),
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    guardrails.validate_service(service)
-    deployments = storage.list_deployments(service, None)
+    service_entry = guardrails.validate_service(service)
+    group, group_error = resolve_delivery_group(service, actor)
+    if group_error:
+        return group_error
+    env_entry, env_error = resolve_environment_for_group(group, environment, actor)
+    if env_error:
+        return env_error
+    try:
+        guardrails.validate_environment(environment, service_entry, group)
+    except PolicyError as exc:
+        return _capability_error(exc.code, exc.message, actor)
+    deployments = storage.list_deployments(service, None, environment)
     if not deployments:
         return None
-    latest_success_id = _latest_success_by_service(deployments).get(service, {}).get("id")
-    return _current_running_state(service, deployments, latest_success_id)
+    latest_success_id = _latest_success_by_scope(deployments).get((service, environment), {}).get("id")
+    return _current_running_state(service, environment, deployments, latest_success_id)
 
 
 @app.get("/v1/services/{service}/allowed-actions")
@@ -1677,9 +1756,9 @@ def get_deployment(
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
     deployment = refresh_from_spinnaker(deployment)
-    deployments = storage.list_deployments(deployment.get("service"), None)
-    latest_success_by_service = _latest_success_by_service(deployments)
-    return _deployment_public_view(actor, deployment, latest_success_by_service)
+    deployments = storage.list_deployments(deployment.get("service"), None, deployment.get("environment"))
+    latest_success_by_scope = _latest_success_by_scope(deployments)
+    return _deployment_public_view(actor, deployment, latest_success_by_scope)
 
 
 @app.get("/v1/deployments/{deployment_id}/failures")
@@ -1947,28 +2026,33 @@ def rollback_deployment(
     group, group_error = resolve_delivery_group(deployment["service"], actor)
     if group_error:
         return group_error
-    policy_env_error = _policy_check_environment(group, deployment["environment"], actor)
-    if policy_env_error:
-        return policy_env_error
+    env_entry, env_error = resolve_environment_for_group(group, deployment["environment"], actor)
+    if env_error:
+        return env_error
     recipe_id = deployment.get("recipeId") or "default"
     policy_recipe_error = _policy_check_recipe_allowed(group, recipe_id, actor)
     if policy_recipe_error:
         return policy_recipe_error
     try:
         service_entry = guardrails.validate_service(deployment["service"])
-        guardrails.validate_environment(deployment["environment"], service_entry)
+        guardrails.validate_environment(deployment["environment"], service_entry, group)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe_id, actor)
     if recipe_capability_error:
         return recipe_capability_error
-    max_concurrent = _group_guardrail_value(group, "max_concurrent_deployments", 1)
-    daily_rollback_quota = _group_guardrail_value(group, "daily_rollback_quota", SETTINGS.daily_quota_rollback)
-    rate_limiter.check_mutate(actor.actor_id, "rollback", quota_scope=group["id"], quota_limit=daily_rollback_quota)
+    max_concurrent = _environment_guardrail_value(group, env_entry, "max_concurrent_deployments", 1)
+    daily_rollback_quota = _environment_guardrail_value(group, env_entry, "daily_rollback_quota", SETTINGS.daily_quota_rollback)
+    rate_limiter.check_mutate(
+        actor.actor_id,
+        "rollback",
+        quota_scope=_quota_scope(group["id"], env_entry.get("name")),
+        quota_limit=daily_rollback_quota,
+    )
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
-    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent)
+    guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
 
     prior = storage.find_prior_successful_deployment(deployment_id)
     if not prior:

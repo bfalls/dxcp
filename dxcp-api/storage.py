@@ -186,6 +186,23 @@ class Storage:
         self._ensure_column(cur, "delivery_groups", "allowed_environments", "TEXT")
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS environments (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                delivery_group_id TEXT NOT NULL,
+                is_enabled INTEGER NOT NULL,
+                guardrails TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                updated_at TEXT,
+                updated_by TEXT,
+                last_change_reason TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS recipes (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -267,9 +284,13 @@ class Storage:
             print("service registry invalid entry: missing service_name")
             return False
         allowed_envs = entry.get("allowed_environments", [])
-        if not isinstance(allowed_envs, list) or "sandbox" not in allowed_envs:
-            print(f"service registry invalid entry for {name}: allowed_environments must include sandbox")
+        if not isinstance(allowed_envs, list) or not allowed_envs:
+            print(f"service registry invalid entry for {name}: allowed_environments must be a non-empty list")
             return False
+        for env in allowed_envs:
+            if not isinstance(env, str) or not env.strip():
+                print(f"service registry invalid entry for {name}: allowed_environments must be strings")
+                return False
         for field in ["allowed_recipes", "allowed_artifact_sources"]:
             value = entry.get(field, [])
             if not isinstance(value, list):
@@ -358,6 +379,7 @@ class Storage:
         )
         conn.commit()
         conn.close()
+        self._ensure_group_environments(group)
         return group
 
     def update_delivery_group(self, group: dict) -> dict:
@@ -388,7 +410,37 @@ class Storage:
         )
         conn.commit()
         conn.close()
+        self._ensure_group_environments(group)
         return group
+
+    def _derive_environment_type(self, name: str) -> str:
+        return "prod" if name.lower() == "prod" else "non_prod"
+
+    def _ensure_group_environments(self, group: dict) -> None:
+        allowed = group.get("allowed_environments")
+        if not allowed:
+            allowed = ["sandbox"]
+        now = utc_now()
+        for env_name in allowed:
+            if not isinstance(env_name, str) or not env_name.strip():
+                continue
+            existing = self.get_environment_for_group(env_name, group["id"])
+            if existing:
+                continue
+            self.insert_environment(
+                {
+                    "id": f"{group['id']}:{env_name}",
+                    "name": env_name,
+                    "type": self._derive_environment_type(env_name),
+                    "delivery_group_id": group["id"],
+                    "is_enabled": True,
+                    "guardrails": None,
+                    "created_at": now,
+                    "created_by": "system",
+                    "updated_at": now,
+                    "updated_by": "system",
+                }
+            )
 
     def _has_recipes(self) -> bool:
         conn = self._connect()
@@ -621,6 +673,110 @@ class Storage:
                 return group
         return None
 
+    def _row_to_environment(self, row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "type": row["type"],
+            "delivery_group_id": row["delivery_group_id"],
+            "is_enabled": bool(row["is_enabled"]),
+            "guardrails": self._deserialize_json(row["guardrails"], None),
+            "created_at": row["created_at"],
+            "created_by": row["created_by"],
+            "updated_at": row["updated_at"],
+            "updated_by": row["updated_by"],
+            "last_change_reason": row["last_change_reason"],
+        }
+
+    def list_environments(self) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM environments ORDER BY name ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [self._row_to_environment(row) for row in rows]
+
+    def get_environment(self, environment_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM environments WHERE id = ?", (environment_id,))
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_environment(row)
+
+    def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM environments WHERE name = ? AND delivery_group_id = ?",
+            (name, delivery_group_id),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_environment(row)
+
+    def insert_environment(self, environment: dict) -> dict:
+        if self.get_environment(environment["id"]):
+            return environment
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO environments (
+                id, name, type, delivery_group_id, is_enabled, guardrails,
+                created_at, created_by, updated_at, updated_by, last_change_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                environment["id"],
+                environment["name"],
+                environment["type"],
+                environment["delivery_group_id"],
+                1 if environment.get("is_enabled", True) else 0,
+                self._serialize_json(environment.get("guardrails")),
+                environment.get("created_at"),
+                environment.get("created_by"),
+                environment.get("updated_at"),
+                environment.get("updated_by"),
+                environment.get("last_change_reason"),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return environment
+
+    def update_environment(self, environment: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE environments
+            SET name = ?, type = ?, delivery_group_id = ?, is_enabled = ?, guardrails = ?,
+                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
+            WHERE id = ?
+            """,
+            (
+                environment["name"],
+                environment["type"],
+                environment["delivery_group_id"],
+                1 if environment.get("is_enabled", True) else 0,
+                self._serialize_json(environment.get("guardrails")),
+                environment.get("created_at"),
+                environment.get("created_by"),
+                environment.get("updated_at"),
+                environment.get("updated_by"),
+                environment.get("last_change_reason"),
+                environment["id"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return environment
+
     def ensure_default_delivery_group(self) -> Optional[dict]:
         if self._has_delivery_groups():
             return None
@@ -641,6 +797,36 @@ class Storage:
             "updated_by": "system",
         }
         return self.insert_delivery_group(group)
+
+    def _has_environments(self) -> bool:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM environments LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        return row is not None
+
+    def ensure_default_environments(self) -> List[dict]:
+        if self._has_environments():
+            return []
+        now = utc_now()
+        created = []
+        for group in self.list_delivery_groups():
+            env = {
+                "id": f"{group['id']}:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": group["id"],
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            }
+            self.insert_environment(env)
+            created.append(env)
+        return created
 
     def ensure_default_recipe(self) -> Optional[dict]:
         now = utc_now()
@@ -717,17 +903,21 @@ class Storage:
         conn.close()
         return row is not None
 
-    def count_active_deployments_for_group(self, group_id: str) -> int:
+    def count_active_deployments_for_group(self, group_id: str, environment: Optional[str] = None) -> int:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COUNT(1) AS total
-            FROM deployments
-            WHERE state IN (?, ?) AND delivery_group_id = ?
-            """,
-            ("ACTIVE", "IN_PROGRESS", group_id),
+        params = ["ACTIVE", "IN_PROGRESS", group_id]
+        env_clause = ""
+        if environment:
+            env_clause = " AND environment = ?"
+            params.append(environment)
+        query = (
+            "SELECT COUNT(1) AS total "
+            "FROM deployments "
+            "WHERE state IN (?, ?) AND delivery_group_id = ?"
+            f"{env_clause}"
         )
+        cur.execute(query, tuple(params))
         row = cur.fetchone()
         conn.close()
         return int(row["total"]) if row else 0
@@ -848,7 +1038,12 @@ class Storage:
         conn.close()
         return self._row_to_deployment(row, failures)
 
-    def list_deployments(self, service: Optional[str], state: Optional[str]) -> List[dict]:
+    def list_deployments(
+        self,
+        service: Optional[str],
+        state: Optional[str],
+        environment: Optional[str] = None,
+    ) -> List[dict]:
         conn = self._connect()
         cur = conn.cursor()
         query = "SELECT * FROM deployments"
@@ -857,6 +1052,9 @@ class Storage:
         if service:
             conditions.append("service = ?")
             params.append(service)
+        if environment:
+            conditions.append("environment = ?")
+            params.append(environment)
         if state:
             conditions.append("state = ?")
             params.append(state)
@@ -921,7 +1119,8 @@ class Storage:
         service = record.get("service")
         if not service:
             return
-        deployments = self.list_deployments(service, None)
+        environment = record.get("environment")
+        deployments = self.list_deployments(service, None, environment)
         latest_success = None
         for deployment in deployments:
             if deployment.get("state") == "SUCCEEDED":
@@ -1239,6 +1438,7 @@ class DynamoStorage:
             "last_change_reason": group.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
+        self._ensure_group_environments(group)
         return group
 
     def update_delivery_group(self, group: dict) -> dict:
@@ -1260,7 +1460,36 @@ class DynamoStorage:
             "last_change_reason": group.get("last_change_reason"),
         }
         self.table.put_item(Item=item)
+        self._ensure_group_environments(group)
         return group
+
+    def _derive_environment_type(self, name: str) -> str:
+        return "prod" if str(name).lower() == "prod" else "non_prod"
+
+    def _ensure_group_environments(self, group: dict) -> None:
+        allowed = group.get("allowed_environments")
+        if not allowed:
+            allowed = ["sandbox"]
+        now = utc_now()
+        for env_name in allowed:
+            if not isinstance(env_name, str) or not env_name.strip():
+                continue
+            if self.get_environment_for_group(env_name, group["id"]):
+                continue
+            self.insert_environment(
+                {
+                    "id": f"{group['id']}:{env_name}",
+                    "name": env_name,
+                    "type": self._derive_environment_type(env_name),
+                    "delivery_group_id": group["id"],
+                    "is_enabled": True,
+                    "guardrails": None,
+                    "created_at": now,
+                    "created_by": "system",
+                    "updated_at": now,
+                    "updated_by": "system",
+                }
+            )
 
     def _scan_recipes(self, limit: Optional[int] = None) -> List[dict]:
         params = {
@@ -1485,6 +1714,37 @@ class DynamoStorage:
             return None
         return group
 
+    def ensure_default_environments(self) -> List[dict]:
+        try:
+            existing = self.table.get_item(
+                Key={"pk": "ENVIRONMENT", "sk": "default:sandbox"},
+                ConsistentRead=True,
+            ).get("Item")
+            if existing:
+                return []
+        except Exception:
+            existing = self._scan_environments(limit=1)
+            if existing:
+                return []
+        now = utc_now()
+        created = []
+        for group in self.list_delivery_groups():
+            env = {
+                "id": f"{group['id']}:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": group["id"],
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": now,
+                "created_by": "system",
+                "updated_at": now,
+                "updated_by": "system",
+            }
+            self.insert_environment(env)
+            created.append(env)
+        return created
+
     def ensure_default_recipe(self) -> Optional[dict]:
         now = utc_now()
         recipes = [
@@ -1556,12 +1816,15 @@ class DynamoStorage:
         )
         return response.get("Count", 0) > 0
 
-    def count_active_deployments_for_group(self, group_id: str) -> int:
-        response = self.table.scan(
-            FilterExpression=Attr("pk").eq("DEPLOYMENT")
+    def count_active_deployments_for_group(self, group_id: str, environment: Optional[str] = None) -> int:
+        filter_expression = (
+            Attr("pk").eq("DEPLOYMENT")
             & Attr("state").is_in(["ACTIVE", "IN_PROGRESS"])
             & Attr("delivery_group_id").eq(group_id)
         )
+        if environment:
+            filter_expression = filter_expression & Attr("environment").eq(environment)
+        response = self.table.scan(FilterExpression=filter_expression)
         return int(response.get("Count", 0))
 
     def insert_deployment(self, record: dict, failures: List[dict]) -> None:
@@ -1669,12 +1932,19 @@ class DynamoStorage:
             "failures": item.get("failures", []),
         }
 
-    def list_deployments(self, service: Optional[str], state: Optional[str]) -> List[dict]:
+    def list_deployments(
+        self,
+        service: Optional[str],
+        state: Optional[str],
+        environment: Optional[str] = None,
+    ) -> List[dict]:
         response = self.table.query(KeyConditionExpression=Key("pk").eq("DEPLOYMENT"))
         items = response.get("Items", [])
         deployments = []
         for item in items:
             if service and item.get("service") != service:
+                continue
+            if environment and item.get("environment") != environment:
                 continue
             if state and item.get("state") != state:
                 continue
@@ -1716,7 +1986,8 @@ class DynamoStorage:
         service = record.get("service")
         if not service:
             return
-        deployments = self.list_deployments(service, None)
+        environment = record.get("environment")
+        deployments = self.list_deployments(service, None, environment)
         latest_success = None
         for deployment in deployments:
             if deployment.get("state") == "SUCCEEDED":
@@ -1930,5 +2201,6 @@ def build_storage():
             os.getenv("DXCP_SERVICE_REGISTRY_PATH", "./data/services.json"),
         )
     storage.ensure_default_delivery_group()
+    storage.ensure_default_environments()
     storage.ensure_default_recipe()
     return storage

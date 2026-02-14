@@ -171,7 +171,7 @@ export default function DeployPage({
             <div className="row">
               <div className="field">
                 <label>Environment</label>
-                <div className="helper">sandbox (fixed)</div>
+                <div className="helper">sandbox (default)</div>
               </div>
               <div className="field">
                 <label htmlFor="deploy-version">Version</label>
@@ -381,7 +381,7 @@ export default function DeployPage({
               </div>
               <div className="list-item">
                 <div>Environment</div>
-                <div>sandbox</div>
+                <div>sandbox (default)</div>
               </div>
             </div>
             <div className="helper space-12">Guardrails</div>

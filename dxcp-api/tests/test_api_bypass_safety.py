@@ -111,6 +111,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             },
         }
     )
+    main.storage.insert_environment(
+        {
+            "id": "group-a:sandbox",
+            "name": "sandbox",
+            "type": "non_prod",
+            "delivery_group_id": "group-a",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
@@ -167,6 +181,20 @@ async def test_incompatible_service_recipe_rejected(tmp_path: Path, monkeypatch)
                 },
             }
         )
+        main.storage.insert_environment(
+            {
+                "id": "group-b:sandbox",
+                "name": "sandbox",
+                "type": "non_prod",
+                "delivery_group_id": "group-b",
+                "is_enabled": True,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments/validate",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -190,7 +218,7 @@ async def test_quota_exceeded_rejected(tmp_path: Path, monkeypatch):
         main.rate_limiter.check_mutate(
             "user-1",
             "deploy",
-            quota_scope="group-a",
+            quota_scope="group-a:sandbox",
             quota_limit=1,
         )
         response = await client.post(

@@ -135,9 +135,9 @@ async def test_rollback_invalid_environment(tmp_path: Path, monkeypatch):
             headers={"Idempotency-Key": "rollback-1", **auth_header(["dxcp-platform-admins"])},
             json={},
         )
-    assert response.status_code == 400
+    assert response.status_code == 403
     body = response.json()
-    assert body["code"] == "INVALID_ENVIRONMENT"
+    assert body["code"] == "ENVIRONMENT_NOT_ALLOWED"
 
 
 async def test_rollback_active_lock(tmp_path: Path, monkeypatch):

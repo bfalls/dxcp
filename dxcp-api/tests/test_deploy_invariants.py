@@ -17,13 +17,13 @@ def _write_service_registry(path: Path) -> None:
     data = [
         {
             "service_name": "payments",
-            "allowed_environments": ["sandbox"],
+            "allowed_environments": ["sandbox", "staging"],
             "allowed_recipes": ["standard"],
             "allowed_artifact_sources": ["s3://dxcp-test-bucket/"],
         },
         {
             "service_name": "billing",
-            "allowed_environments": ["sandbox"],
+            "allowed_environments": ["sandbox", "staging"],
             "allowed_recipes": ["beta"],
             "allowed_artifact_sources": ["s3://dxcp-test-bucket/"],
         },
@@ -98,12 +98,26 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             "owner": None,
             "services": ["payments", "billing"],
             "allowed_recipes": ["standard"],
-            "allowed_environments": ["sandbox"],
+            "allowed_environments": ["sandbox", "staging"],
             "guardrails": {
                 "max_concurrent_deployments": 1,
                 "daily_deploy_quota": 1,
                 "daily_rollback_quota": 5,
             },
+        }
+    )
+    main.storage.insert_environment(
+        {
+            "id": "group-1:sandbox",
+            "name": "sandbox",
+            "type": "non_prod",
+            "delivery_group_id": "group-1",
+            "is_enabled": True,
+            "guardrails": None,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
         }
     )
 
@@ -241,3 +255,43 @@ async def test_deploy_rejects_when_concurrency_exceeded(tmp_path: Path, monkeypa
     body = response.json()
     assert body["code"] == "CONCURRENCY_LIMIT_REACHED"
     _assert_user_safe_error(body)
+
+
+async def test_deploy_requires_environment(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        payload = _deploy_payload()
+        payload.pop("environment", None)
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-missing-env", **auth_header(["dxcp-platform-admins"])},
+            json=payload,
+        )
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_REQUEST"
+
+
+async def test_deploy_rejects_disabled_environment(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        main.storage.update_environment(
+            {
+                "id": "group-1:staging",
+                "name": "staging",
+                "type": "non_prod",
+                "delivery_group_id": "group-1",
+                "is_enabled": False,
+                "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
+        payload = _deploy_payload()
+        payload["environment"] = "staging"
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-disabled-env", **auth_header(["dxcp-platform-admins"])},
+            json=payload,
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ENVIRONMENT_DISABLED"

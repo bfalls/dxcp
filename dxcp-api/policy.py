@@ -34,12 +34,26 @@ class Guardrails:
             raise PolicyError(403, "SERVICE_NOT_ALLOWLISTED", "Service is not allowlisted")
         return entry
 
-    def validate_environment(self, env: str, service_entry: dict) -> None:
-        if env != "sandbox":
-            raise PolicyError(400, "INVALID_ENVIRONMENT", "Only sandbox environment is supported")
+    def validate_environment(self, env: str, service_entry: dict, delivery_group: Optional[dict] = None) -> dict:
+        if not env or not isinstance(env, str):
+            raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment is required")
         allowed = service_entry.get("allowed_environments", [])
         if env not in allowed:
             raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment not allowed for service")
+        if delivery_group:
+            group_allowed = delivery_group.get("allowed_environments")
+            if group_allowed is not None and env not in group_allowed:
+                raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment not allowed for delivery group")
+            env_entry = self.storage.get_environment_for_group(env, delivery_group.get("id"))
+            if not env_entry:
+                raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment is not configured")
+            if not env_entry.get("is_enabled", True):
+                raise PolicyError(400, "ENVIRONMENT_DISABLED", "Environment is disabled")
+            return env_entry
+        env_entry = self.storage.get_environment_for_group(env, "default")
+        if env_entry and not env_entry.get("is_enabled", True):
+            raise PolicyError(400, "ENVIRONMENT_DISABLED", "Environment is disabled")
+        return env_entry or {}
 
     def validate_version(self, version: str) -> None:
         if not VERSION_PATTERN.match(version):
@@ -77,10 +91,15 @@ class Guardrails:
         if self.storage.has_active_deployment():
             raise PolicyError(409, "CONCURRENCY_LIMIT_REACHED", "Another deployment is active")
 
-    def enforce_delivery_group_lock(self, group_id: str, max_concurrent: int) -> None:
+    def enforce_delivery_group_lock(
+        self,
+        group_id: str,
+        max_concurrent: int,
+        environment: Optional[str] = None,
+    ) -> None:
         if max_concurrent < 1:
             max_concurrent = 1
-        active = self.storage.count_active_deployments_for_group(group_id)
+        active = self.storage.count_active_deployments_for_group(group_id, environment)
         if active >= max_concurrent:
             raise PolicyError(
                 409,

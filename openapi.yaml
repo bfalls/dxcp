@@ -7,7 +7,7 @@ info:
 
     Policy and guardrails (enforced):
     - Allowlisted service only.
-    - Single environment only: "sandbox".
+    - Environment must be configured and enabled for the delivery group.
     - One active deployment at a time per delivery group.
     - Idempotency-Key required for mutating operations.
     - Rate limits (default): 60 rpm read, 10 rpm mutate.
@@ -57,6 +57,11 @@ paths:
       operationId: listDeployments
       parameters:
         - name: service
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: environment
           in: query
           required: false
           schema:
@@ -168,6 +173,22 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /environments:
+    get:
+      summary: List environments
+      operationId: listEnvironments
+      responses:
+        '200':
+          description: List of environments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Environment'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /services/{service}/delivery-status:
     get:
       summary: Latest deployment status and current running version
@@ -175,6 +196,11 @@ paths:
       parameters:
         - name: service
           in: path
+          required: true
+          schema:
+            type: string
+        - name: environment
+          in: query
           required: true
           schema:
             type: string
@@ -197,6 +223,11 @@ paths:
       parameters:
         - name: service
           in: path
+          required: true
+          schema:
+            type: string
+        - name: environment
+          in: query
           required: true
           schema:
             type: string
@@ -327,7 +358,7 @@ components:
           description: Must be allowlisted.
         environment:
           type: string
-          enum: [sandbox]
+          description: Environment name.
         version:
           type: string
           pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
@@ -362,7 +393,6 @@ components:
           type: string
         environment:
           type: string
-          enum: [sandbox]
         version:
           type: string
         recipeId:
@@ -425,7 +455,6 @@ components:
           type: string
         environment:
           type: string
-          enum: [sandbox]
         version:
           type: string
         recipeId:
@@ -466,7 +495,6 @@ components:
           type: string
         environment:
           type: string
-          enum: [sandbox]
         recipeId:
           type: string
           nullable: true
@@ -483,7 +511,6 @@ components:
           type: string
         environment:
           type: string
-          enum: [sandbox]
         recipeId:
           type: string
           nullable: true
@@ -523,6 +550,39 @@ components:
     EngineType:
       type: string
       enum: [SPINNAKER]
+    EnvironmentType:
+      type: string
+      enum: [non_prod, prod]
+    Guardrails:
+      type: object
+      properties:
+        max_concurrent_deployments:
+          type: integer
+        daily_deploy_quota:
+          type: integer
+        daily_rollback_quota:
+          type: integer
+    Environment:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - delivery_group_id
+        - is_enabled
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/EnvironmentType'
+        delivery_group_id:
+          type: string
+        is_enabled:
+          type: boolean
+        guardrails:
+          $ref: '#/components/schemas/Guardrails'
     CurrentRunningState:
       type: object
       required:
@@ -538,7 +598,6 @@ components:
           type: string
         environment:
           type: string
-          enum: [sandbox]
         scope:
           type: string
           enum: [service]
@@ -598,11 +657,14 @@ components:
       type: object
       required:
         - service
+        - environment
         - hasDeployments
         - latest
         - currentRunning
       properties:
         service:
+          type: string
+        environment:
           type: string
         hasDeployments:
           type: boolean

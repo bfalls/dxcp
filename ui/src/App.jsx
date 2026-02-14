@@ -694,6 +694,7 @@ export default function App() {
   )
   const serviceDetailLatest = serviceDetailStatus?.latest || null
   const serviceDetailRunning = serviceDetailStatus?.currentRunning || null
+  const defaultEnvironment = 'sandbox'
   // UI-only role display; API permissions are authoritative.
   const derivedRole = Array.isArray(derivedRoles)
     ? derivedRoles.includes('dxcp-platform-admins')
@@ -746,12 +747,12 @@ export default function App() {
   const trimmedChangeSummary = useMemo(() => changeSummary.trim(), [changeSummary])
   const selectedRecipeNarrative = useMemo(() => strategyNarrative(selectedRecipe), [selectedRecipe])
   const preflightKey = useMemo(
-    () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version }) : ''),
-    [service, recipeId, version]
+    () => (service && recipeId && version ? JSON.stringify({ service, recipeId, version, environment: defaultEnvironment }) : ''),
+    [service, recipeId, version, defaultEnvironment]
   )
   const policySummaryKey = useMemo(
-    () => (service ? JSON.stringify({ service, recipeId: recipeId || '', environment: 'sandbox' }) : ''),
-    [service, recipeId]
+    () => (service ? JSON.stringify({ service, recipeId: recipeId || '', environment: defaultEnvironment }) : ''),
+    [service, recipeId, defaultEnvironment]
   )
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const lastAutoPreflightKeyRef = useRef('')
@@ -1058,7 +1059,7 @@ export default function App() {
     setErrorHeadline('')
     setDeploymentsLoading(true)
     try {
-      const data = await api.get('/deployments', options)
+      const data = await api.get(`/deployments?environment=${encodeURIComponent(defaultEnvironment)}`, options)
       setDeployments(Array.isArray(data) ? data : [])
       const now = Date.now()
       cacheStore.deployments.ts = now
@@ -1070,7 +1071,7 @@ export default function App() {
     } finally {
       setDeploymentsLoading(false)
     }
-  }, [api])
+  }, [api, defaultEnvironment])
 
   const loadAllowedActions = useCallback(async (serviceName) => {
     if (!serviceName) return
@@ -1197,7 +1198,11 @@ export default function App() {
       const groups =
         deliveryGroups.length > 0 ? deliveryGroups : (await loadDeliveryGroups(options)) || []
       const statusResults = await Promise.allSettled(
-        list.map((svc) => api.get(`/services/${encodeURIComponent(svc.service_name)}/delivery-status`))
+        list.map((svc) =>
+          api.get(
+            `/services/${encodeURIComponent(svc.service_name)}/delivery-status?environment=${encodeURIComponent(defaultEnvironment)}`
+          )
+        )
       )
       const rows = list.map((svc, idx) => {
         const status = statusResults[idx].status === 'fulfilled' ? statusResults[idx].value : null
@@ -1226,7 +1231,7 @@ export default function App() {
     } finally {
       setServicesViewLoading(false)
     }
-  }, [api, deliveryGroups, loadDeliveryGroups])
+  }, [api, deliveryGroups, loadDeliveryGroups, defaultEnvironment])
 
   const loadServiceDetail = useCallback(async (serviceName) => {
     if (!serviceName) return
@@ -1235,8 +1240,12 @@ export default function App() {
     setErrorHeadline('')
     try {
       const [status, deployments] = await Promise.all([
-        api.get(`/services/${encodeURIComponent(serviceName)}/delivery-status`),
-        api.get(`/deployments?service=${encodeURIComponent(serviceName)}`)
+        api.get(
+          `/services/${encodeURIComponent(serviceName)}/delivery-status?environment=${encodeURIComponent(defaultEnvironment)}`
+        ),
+        api.get(
+          `/deployments?service=${encodeURIComponent(serviceName)}&environment=${encodeURIComponent(defaultEnvironment)}`
+        )
       ])
       const history = Array.isArray(deployments) ? deployments : []
       const latest = status?.latest || history[0] || null
@@ -1259,7 +1268,7 @@ export default function App() {
     } finally {
       setServiceDetailLoading(false)
     }
-  }, [api])
+  }, [api, defaultEnvironment])
 
   const loadPublicSettings = useCallback(async () => {
     try {
@@ -1296,7 +1305,7 @@ export default function App() {
     setPolicyDeploymentsError('')
     setPolicyDeploymentsLoading(true)
     try {
-      const data = await api.get('/deployments', options)
+      const data = await api.get(`/deployments?environment=${encodeURIComponent(defaultEnvironment)}`, options)
       setPolicyDeployments(Array.isArray(data) ? data : [])
       cacheStore.policy.ts = Date.now()
       return true
@@ -1308,14 +1317,14 @@ export default function App() {
       setPolicyDeploymentsLoading(false)
     }
     return false
-  }, [api])
+  }, [api, defaultEnvironment])
 
   const loadPolicySummary = useCallback(async () => {
     if (!service) return false
     setPolicySummaryStatus('checking')
     setPolicySummaryError('')
     try {
-      const payload = { service, environment: 'sandbox' }
+      const payload = { service, environment: defaultEnvironment }
       if (recipeId) {
         payload.recipeId = recipeId
       }
@@ -1836,7 +1845,7 @@ export default function App() {
     const key = `deploy-${Date.now()}`
     const payload = {
       service,
-      environment: 'sandbox',
+      environment: defaultEnvironment,
       version,
       changeSummary,
       recipeId
@@ -1956,7 +1965,7 @@ export default function App() {
       try {
         const payload = {
           service,
-          environment: 'sandbox',
+          environment: defaultEnvironment,
           version,
           changeSummary: trimmedChangeSummary,
           recipeId
@@ -3203,7 +3212,7 @@ export default function App() {
       )}
 
       <footer className="footer">
-        DXCP UI. Guardrails enforced by the API: allowlist, sandbox only, per-group lock, rate limits, idempotency.
+        DXCP UI. Guardrails enforced by the API: allowlist, environment policy, per-group lock, rate limits, idempotency.
       </footer>
     </AppShell>
   )
