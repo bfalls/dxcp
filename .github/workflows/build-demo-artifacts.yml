@@ -1,0 +1,173 @@
+name: Build Demo Artifacts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - demo-service*/**
+      - scripts/publish_build.sh
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Fetch git tags
+        shell: bash
+        run: git fetch --tags --force
+
+      - name: Determine changed services
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          before_sha="${{ github.event.before }}"
+          if [[ -z "$before_sha" || "$before_sha" == "0000000000000000000000000000000000000000" ]]; then
+            before_sha="$(git rev-list --max-parents=0 HEAD | tail -n1)"
+          fi
+          changed_files="$(git diff --name-only "$before_sha" "${GITHUB_SHA}" || true)"
+          echo "$changed_files"
+
+          services=()
+          while IFS= read -r candidate; do
+            [[ -z "$candidate" ]] && continue
+            if [[ -d "$candidate" && -f "$candidate/app.py" && -f "$candidate/lambda_handler.py" ]]; then
+              services+=("$candidate")
+            fi
+          done < <(
+            printf "%s\n" "$changed_files" \
+              | awk -F/ '/^demo-service[^/]*\// {print $1}' \
+              | sort -u
+          )
+
+          if [[ "${#services[@]}" -eq 0 ]]; then
+            echo "No demo service changes detected; skipping publish."
+            echo "services=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "services=${services[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish changed demo service artifacts
+        if: steps.changed.outputs.services != ''
+        env:
+          DXCP_ARTIFACT_BUCKET: ${{ secrets.DXCP_ARTIFACT_BUCKET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_semver_from_tag() {
+            local service="$1"
+            local best=""
+            while IFS= read -r tag; do
+              [[ -z "$tag" ]] && continue
+              if [[ "$tag" =~ ^${service}/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+                local semver="${BASH_REMATCH[1]}"
+                if [[ -z "$best" ]] || [[ "$(printf "%s\n%s\n" "$best" "$semver" | sort -V | tail -n1)" == "$semver" ]]; then
+                  best="$semver"
+                fi
+              fi
+            done < <(git tag -l "${service}/v*")
+            if [[ -n "$best" ]]; then
+              echo "$best"
+            fi
+          }
+
+          latest_semver_from_s3() {
+            local service="$1"
+            local best_major=""
+            local best_minor=""
+            local best_patch=""
+            local keys
+            keys="$(aws s3api list-objects-v2 \
+              --bucket "$DXCP_ARTIFACT_BUCKET" \
+              --prefix "${service}/${service}-" \
+              --query 'Contents[].Key' \
+              --output text 2>/dev/null || true)"
+            for key in $keys; do
+              local file_name="${key##*/}"
+              if [[ "$file_name" =~ ^${service}-([0-9]+)\.([0-9]+)\.([0-9]+)([-+][A-Za-z0-9._-]+)?\.zip$ ]]; then
+                local k_major="${BASH_REMATCH[1]}"
+                local k_minor="${BASH_REMATCH[2]}"
+                local k_patch="${BASH_REMATCH[3]}"
+                if [[ -z "$best_major" ]] \
+                  || (( k_major > best_major )) \
+                  || (( k_major == best_major && k_minor > best_minor )) \
+                  || (( k_major == best_major && k_minor == best_minor && k_patch > best_patch )); then
+                  best_major="$k_major"
+                  best_minor="$k_minor"
+                  best_patch="$k_patch"
+                fi
+              fi
+            done
+            if [[ -n "$best_major" && -n "$best_minor" && -n "$best_patch" ]]; then
+              echo "${best_major}.${best_minor}.${best_patch}"
+            fi
+          }
+
+          bump_patch() {
+            local current="$1"
+            if [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              local major="${BASH_REMATCH[1]}"
+              local minor="${BASH_REMATCH[2]}"
+              local patch="${BASH_REMATCH[3]}"
+              echo "${major}.${minor}.$((patch + 1))"
+            fi
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          read -r -a services <<< "${{ steps.changed.outputs.services }}"
+          for service in "${services[@]}"; do
+            current_version="$(latest_semver_from_tag "$service")"
+            version_source="tag"
+            if [[ -z "$current_version" ]]; then
+              current_version="$(latest_semver_from_s3 "$service")"
+              version_source="s3-bootstrap"
+            fi
+            if [[ -z "$current_version" ]]; then
+              echo "Unable to determine current version for ${service}. Create initial tag ${service}/vX.Y.Z or seed one artifact in S3." >&2
+              exit 1
+            fi
+
+            version="$(bump_patch "$current_version")"
+            if [[ -z "$version" ]]; then
+              echo "Failed to bump version for ${service} from current version ${current_version}." >&2
+              exit 1
+            fi
+            tag_name="${service}/v${version}"
+
+            if git rev-parse -q --verify "refs/tags/${tag_name}" >/dev/null; then
+              echo "Tag ${tag_name} already exists; refusing to overwrite." >&2
+              exit 1
+            fi
+
+            echo "Publishing service=${service} version=${version} (source=${version_source})"
+            DXCP_ARTIFACT_BUCKET="$DXCP_ARTIFACT_BUCKET" bash scripts/publish_build.sh "$service" "$version"
+
+            artifact_uri="s3://${DXCP_ARTIFACT_BUCKET}/${service}/${service}-${version}.zip"
+            git tag "$tag_name" "${GITHUB_SHA}"
+            git push origin "$tag_name"
+            echo "Published service=${service} version=${version} artifact=${artifact_uri}"
+            {
+              echo "- service: ${service}"
+              echo "  version: ${version}"
+              echo "  tag: ${tag_name}"
+              echo "  artifact: ${artifact_uri}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done

@@ -70,6 +70,7 @@ This repository contains:
   - docs/MIGRATIONS.md
 - CI
   - GitHub Actions runs lint and tests on every push and PR.
+  - Demo artifact publish workflow: `.github/workflows/build-demo-artifacts.yml`
 - Tests
   - dxcp-api/README.md (test harness + invariant suite)
 
@@ -131,6 +132,18 @@ These constraints are intentional. They keep DXCP focused on governed delivery, 
 
 See docs/ENVIRONMENTS.md for local vs AWS configuration, required variables, and SSM guidance.
 Use scripts/bootstrap_config.sh for first-run SSM population.
+
+## Demo artifact publish workflow
+
+On pushes to `main`, GitHub Actions publishes demo artifacts when changes touch
+`demo-service/**`, `demo-service-2/**`, or `scripts/publish_build.sh`.
+The workflow requires repo secrets: `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `DXCP_ARTIFACT_BUCKET`.
+Artifacts are uploaded as:
+- `s3://$DXCP_ARTIFACT_BUCKET/demo-service/demo-service-<version>.zip`
+- `s3://$DXCP_ARTIFACT_BUCKET/demo-service-2/demo-service-2-<version>.zip`
+Version is tag-authoritative per service (`<service>/vX.Y.Z`).
+CI bumps patch from the latest service tag, publishes that version, then creates/pushes the new tag.
 
 ---
 

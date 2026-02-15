@@ -7,14 +7,15 @@ API_TOKEN=${DXCP_API_TOKEN:-demo-token}
 if [[ "${1-}" == "-h" || "${1-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
-  publish_build.sh <service-name> [version] <api-base>
+  publish_build.sh <service-name> [version] [api-base]
 
 Examples:
   ./scripts/publish_build.sh demo-service 0.1.6
   ./scripts/publish_build.sh demo-service-2 0.2.0 "https://<api-id>.execute-api.<region>.amazonaws.com/v1"
 
 Notes:
-  - API base is required and should include /v1 (example: "https://.../v1")
+  - API base is optional. If omitted, build registration is skipped.
+  - API base should include /v1 (example: "https://.../v1")
   - If version is omitted, a timestamped version is generated.
 EOF
   exit 0
@@ -30,7 +31,7 @@ if [[ -z "${SERVICE}" ]]; then
     read -r -p "Service name: " SERVICE
   fi
   if [[ -z "${SERVICE}" ]]; then
-    echo "Usage: $0 <service-name> [version] <api-base>" >&2
+    echo "Usage: $0 <service-name> [version] [api-base]" >&2
     exit 1
   fi
 fi
@@ -43,9 +44,8 @@ fi
 
 if [[ -n "${3-}" ]]; then
   API_BASE="$3"
-else
-  echo "Usage: $0 <service-name> [version] <api-base>" >&2
-  exit 1
+elif [[ -n "${DXCP_API_BASE:-}" ]]; then
+  API_BASE="$DXCP_API_BASE"
 fi
 
 WORKDIR=$(cd "$(dirname "$0")/.." && pwd)
@@ -105,7 +105,7 @@ PY
 SIZE_BYTES=$(wc -c < "$ARTIFACT" | tr -d ' ')
 SHA256=$(shasum -a 256 "$ARTIFACT" | awk '{print $1}')
 
-ARTIFACT_BUCKET="${DXCP_RUNTIME_ARTIFACT_BUCKET:-}"
+ARTIFACT_BUCKET="${DXCP_ARTIFACT_BUCKET:-${DXCP_RUNTIME_ARTIFACT_BUCKET:-}}"
 if [[ -z "$ARTIFACT_BUCKET" && -n "${DXCP_CONFIG_PREFIX:-}" ]] && command -v aws >/dev/null 2>&1; then
   ARTIFACT_BUCKET=$(aws ssm get-parameter --name "${DXCP_CONFIG_PREFIX}/runtime/artifact_bucket" --query Parameter.Value --output text 2>/dev/null || true)
 fi
@@ -124,7 +124,8 @@ fi
 UPLOAD_KEY="upload-${VERSION}${IDEMPOTENCY_SUFFIX}"
 REGISTER_KEY="register-${VERSION}${IDEMPOTENCY_SUFFIX}"
 
-UPLOAD_PAYLOAD=$(cat <<JSON
+if [[ -n "$API_BASE" ]]; then
+  UPLOAD_PAYLOAD=$(cat <<JSON
 {
   "service": "${SERVICE}",
   "version": "${VERSION}",
@@ -135,15 +136,15 @@ UPLOAD_PAYLOAD=$(cat <<JSON
 JSON
 )
 
-UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/builds/upload-capability" \
-  -H "Authorization: Bearer ${API_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: ${UPLOAD_KEY}" \
-  -d "${UPLOAD_PAYLOAD}")
+  UPLOAD_RESPONSE=$(curl -s -X POST "${API_BASE}/builds/upload-capability" \
+    -H "Authorization: Bearer ${API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: ${UPLOAD_KEY}" \
+    -d "${UPLOAD_PAYLOAD}")
 
-echo "Upload capability: ${UPLOAD_RESPONSE}"
+  echo "Upload capability: ${UPLOAD_RESPONSE}"
 
-REGISTER_PAYLOAD=$(cat <<JSON
+  REGISTER_PAYLOAD=$(cat <<JSON
 {
   "service": "${SERVICE}",
   "version": "${VERSION}",
@@ -155,20 +156,23 @@ REGISTER_PAYLOAD=$(cat <<JSON
 JSON
 )
 
-REGISTER_RESPONSE=$(curl -s -X POST "${API_BASE}/builds" \
-  -H "Authorization: Bearer ${API_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: ${REGISTER_KEY}" \
-  -d "${REGISTER_PAYLOAD}")
+  REGISTER_RESPONSE=$(curl -s -X POST "${API_BASE}/builds" \
+    -H "Authorization: Bearer ${API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: ${REGISTER_KEY}" \
+    -d "${REGISTER_PAYLOAD}")
 
-echo "Build registered: ${REGISTER_RESPONSE}"
+  echo "Build registered: ${REGISTER_RESPONSE}"
+else
+  echo "Skipping build registration; DXCP API base not provided."
+fi
 
 if command -v aws >/dev/null 2>&1; then
   if [[ -n "$ARTIFACT_BUCKET" ]]; then
     aws s3 cp "$ARTIFACT_AWS" "s3://${ARTIFACT_BUCKET}/${ARTIFACT_S3_KEY}" --content-type "${CONTENT_TYPE}"
     echo "S3 artifact: s3://${ARTIFACT_BUCKET}/${ARTIFACT_S3_KEY}"
   else
-    echo "Skipping S3 upload; set DXCP_RUNTIME_ARTIFACT_BUCKET or DXCP_CONFIG_PREFIX to upload."
+    echo "Skipping S3 upload; set DXCP_ARTIFACT_BUCKET, DXCP_RUNTIME_ARTIFACT_BUCKET, or DXCP_CONFIG_PREFIX."
   fi
 else
   echo "Skipping S3 upload; aws CLI not found."
