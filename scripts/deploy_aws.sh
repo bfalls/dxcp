@@ -382,13 +382,15 @@ aws s3 sync "$UI_DIST_DIR" "s3://$UI_BUCKET" --delete
 aws cloudfront create-invalidation --distribution-id "$UI_DIST_ID" --paths "/*"
 
 SEED_SCRIPT="$ROOT_DIR/scripts/seed_registry.py"
+MIGRATION_SCRIPT="$ROOT_DIR/scripts/run_migrations.py"
 PYTHONPATH_DIR="$API_BUILD_DIR"
 if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
   SEED_SCRIPT="$ROOT_DIR_WIN\\scripts\\seed_registry.py"
+  MIGRATION_SCRIPT="$ROOT_DIR_WIN\\scripts\\run_migrations.py"
   PYTHONPATH_DIR="$API_BUILD_DIR_WIN"
 fi
 PYTHONPATH="$PYTHONPATH_DIR" python "$SEED_SCRIPT" --table "$DDB_TABLE"
-python "$ROOT_DIR/scripts/run_migrations.py" --table "$DDB_TABLE"
+python "$MIGRATION_SCRIPT" --table "$DDB_TABLE"
 
 cat <<EOF
 
