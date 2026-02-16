@@ -8,20 +8,45 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      non_demo: ${{ steps.filter.outputs.non_demo }}
+      non_demo: ${{ steps.detect.outputs.non_demo }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Detect changed paths
-        id: filter
-        uses: dorny/paths-filter@v3
         with:
-          filters: |
-            non_demo:
-              - '**'
-              - '!demo-service/**'
-              - '!demo-service-2/**'
+          fetch-depth: 0
+
+      - name: Detect non-demo changes
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+          fi
+
+          if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+            base_sha="$(git rev-list --max-parents=0 "$head_sha" | tail -n1)"
+          fi
+
+          changed_files="$(git diff --name-only "$base_sha" "$head_sha" || true)"
+          echo "Changed files:"
+          echo "$changed_files"
+
+          non_demo=false
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            if [[ "$file" != demo-service/* && "$file" != demo-service-2/* ]]; then
+              non_demo=true
+              break
+            fi
+          done <<< "$changed_files"
+
+          echo "non_demo=$non_demo" >> "$GITHUB_OUTPUT"
 
   api:
     needs: changes
