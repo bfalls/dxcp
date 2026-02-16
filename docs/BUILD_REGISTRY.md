@@ -89,6 +89,7 @@ Consequence:
 Troubleshooting:
 - `VERSION_NOT_FOUND`: the requested `service/version` is not registered in DXCP build registry. Run CI registration for that exact version, then retry.
 - `ARTIFACT_NOT_FOUND`: the `service/version` is registered, but the artifact object is no longer retrievable from the artifact store. Rebuild/publish and register again via CI, then deploy the new version.
+- Validation may preflight artifact availability when possible; if preflight cannot run (for example, missing credentials or timeout), validation continues with existing checks.
 - API failures include `request_id`; provide that id to platform support for trace correlation.
 
 ## Minimal CI Integration (Conceptual)

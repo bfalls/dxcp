@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 from auth_utils import auth_header, configure_auth_env, mock_jwks
+from botocore.exceptions import ClientError, NoCredentialsError
 
 
 from test_helpers import seed_defaults
@@ -153,6 +154,37 @@ def _assert_error_schema(payload: dict) -> None:
         assert isinstance(payload.get("operator_hint"), str)
 
 
+class _FakeS3Client:
+    def __init__(self, behavior: str):
+        self.behavior = behavior
+        self.calls = []
+
+    def head_object(self, Bucket: str, Key: str):
+        self.calls.append((Bucket, Key))
+        if self.behavior == "found":
+            return {"ResponseMetadata": {"HTTPStatusCode": 200}}
+        if self.behavior == "not_found":
+            raise ClientError(
+                {
+                    "Error": {"Code": "NoSuchKey", "Message": "missing"},
+                    "ResponseMetadata": {"HTTPStatusCode": 404},
+                },
+                "HeadObject",
+            )
+        if self.behavior == "no_credentials":
+            raise NoCredentialsError()
+        raise RuntimeError("unexpected behavior")
+
+
+class _FakeBoto3:
+    def __init__(self, client):
+        self._client = client
+
+    def client(self, service_name: str, config=None):
+        assert service_name == "s3"
+        return self._client
+
+
 async def test_validate_returns_contract_fields(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
@@ -176,6 +208,52 @@ async def test_validate_returns_contract_fields(tmp_path: Path, monkeypatch):
     assert policy["daily_deploy_quota"] == 5
     assert policy["deployments_used"] == 0
     assert policy["deployments_remaining"] == 5
+
+
+async def test_validate_preflight_artifact_found_passes(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        fake_client = _FakeS3Client("found")
+        monkeypatch.setattr(main, "boto3", _FakeBoto3(fake_client))
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(),
+        )
+    assert response.status_code == 200
+    assert fake_client.calls == [("dxcp-test-bucket", "payments-1.2.3.zip")]
+
+
+async def test_validate_preflight_artifact_missing_returns_artifact_not_found(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        fake_client = _FakeS3Client("not_found")
+        monkeypatch.setattr(main, "boto3", _FakeBoto3(fake_client))
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(),
+        )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "ARTIFACT_NOT_FOUND"
+    assert body["failure_cause"] == "POLICY_CHANGE"
+    assert (
+        body["message"]
+        == "Artifact is no longer available in the artifact store. Rebuild and publish again, then deploy the new version."
+    )
+    _assert_error_schema(body)
+
+
+async def test_validate_preflight_no_credentials_skips_check(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        fake_client = _FakeS3Client("no_credentials")
+        monkeypatch.setattr(main, "boto3", _FakeBoto3(fake_client))
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(),
+        )
+    assert response.status_code == 200
+    assert fake_client.calls == [("dxcp-test-bucket", "payments-1.2.3.zip")]
 
 
 async def test_validate_missing_recipe_id_returns_error_schema(tmp_path: Path, monkeypatch):

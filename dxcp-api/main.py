@@ -12,6 +12,28 @@ from fastapi import FastAPI, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException as FastAPIHTTPException, RequestValidationError
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+    from botocore.exceptions import (
+        BotoCoreError,
+        ClientError,
+        ConnectTimeoutError,
+        EndpointConnectionError,
+        NoCredentialsError,
+        PartialCredentialsError,
+        ReadTimeoutError,
+    )
+except Exception:  # pragma: no cover - optional dependency behavior in local environments
+    boto3 = None
+    BotoConfig = None
+    BotoCoreError = Exception
+    ClientError = Exception
+    ConnectTimeoutError = Exception
+    EndpointConnectionError = Exception
+    NoCredentialsError = Exception
+    PartialCredentialsError = Exception
+    ReadTimeoutError = Exception
 
 from auth import get_actor
 from config import SETTINGS
@@ -907,6 +929,83 @@ def _include_operator_hint(actor: Actor) -> bool:
     return actor.role == Role.PLATFORM_ADMIN or SETTINGS.demo_mode
 
 
+def _artifact_preflight_timeout_seconds() -> int:
+    raw_value = os.getenv("DXCP_ARTIFACT_PREFLIGHT_TIMEOUT_SECONDS", "2")
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return 2
+    return max(1, min(parsed, 5))
+
+
+def _check_s3_artifact_availability(bucket: str, key: str) -> str:
+    if boto3 is None or BotoConfig is None:
+        return "skip"
+    timeout_seconds = _artifact_preflight_timeout_seconds()
+    try:
+        client = boto3.client(
+            "s3",
+            config=BotoConfig(
+                connect_timeout=timeout_seconds,
+                read_timeout=timeout_seconds,
+                retries={"max_attempts": 1},
+            ),
+        )
+        client.head_object(Bucket=bucket, Key=key)
+        return "found"
+    except (NoCredentialsError, PartialCredentialsError, ConnectTimeoutError, ReadTimeoutError, EndpointConnectionError):
+        return "skip"
+    except ClientError as exc:
+        response = getattr(exc, "response", {}) or {}
+        error_code = str(response.get("Error", {}).get("Code") or "").strip()
+        http_status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if http_status == 404 or error_code in {"404", "NoSuchKey", "NotFound", "NoSuchVersion"}:
+            return "not_found"
+        if http_status == 403 or error_code in {"403", "AccessDenied"}:
+            return "forbidden"
+        return "skip"
+    except BotoCoreError:
+        return "skip"
+    except Exception:
+        return "skip"
+
+
+def _preflight_artifact_availability(build: Optional[dict], actor: Actor) -> Optional[JSONResponse]:
+    if not isinstance(build, dict):
+        return None
+    artifact_ref = build.get("artifactRef")
+    if not isinstance(artifact_ref, str) or not artifact_ref.strip():
+        return None
+    try:
+        bucket, key = parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
+    except ValueError:
+        return None
+    check_result = _check_s3_artifact_availability(bucket, key)
+    if check_result == "found" or check_result == "skip":
+        return None
+    if check_result == "not_found":
+        operator_hint = None
+        if _include_operator_hint(actor):
+            operator_hint = "If using demo artifact retention, older artifacts may expire."
+        return error_response(
+            409,
+            "ARTIFACT_NOT_FOUND",
+            "Artifact is no longer available in the artifact store. Rebuild and publish again, then deploy the new version.",
+            operator_hint=operator_hint,
+        )
+    if check_result == "forbidden":
+        operator_hint = None
+        if _include_operator_hint(actor):
+            operator_hint = "Artifact preflight could not confirm access. Verify artifact store permissions."
+        return error_response(
+            409,
+            "ARTIFACT_NOT_FOUND",
+            "Artifact is not available",
+            operator_hint=operator_hint,
+        )
+    return None
+
+
 def _classify_engine_error(message: str) -> tuple[str, int]:
     lowered = (message or "").lower()
     artifact_context = (
@@ -1676,6 +1775,9 @@ def validate_deployment(
             "VERSION_NOT_FOUND",
             "Version is not registered in the build registry for this service",
         )
+    preflight_artifact_error = _preflight_artifact_availability(build, actor)
+    if preflight_artifact_error:
+        return preflight_artifact_error
 
     policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
