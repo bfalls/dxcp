@@ -5,7 +5,27 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      non_demo: ${{ steps.filter.outputs.non_demo }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            non_demo:
+              - '**'
+              - '!demo-service/**'
+              - '!demo-service-2/**'
+
   api:
+    needs: changes
+    if: needs.changes.outputs.non_demo == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,6 +47,8 @@ jobs:
           npm test
 
   ui:
+    needs: changes
+    if: needs.changes.outputs.non_demo == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

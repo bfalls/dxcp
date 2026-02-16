@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - demo-service*/**
+      - demo-service/**
+      - demo-service-2/**
       - scripts/publish_build.sh
 
 permissions:
@@ -51,7 +52,7 @@ jobs:
             fi
           done < <(
             printf "%s\n" "$changed_files" \
-              | awk -F/ '/^demo-service[^/]*\// {print $1}' \
+              | awk -F/ '/^(demo-service|demo-service-2)\// {print $1}' \
               | sort -u
           )
 
