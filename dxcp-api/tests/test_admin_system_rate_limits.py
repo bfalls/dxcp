@@ -192,3 +192,21 @@ async def test_put_updates_live_read_limit_enforcement(tmp_path: Path, monkeypat
     assert first_under_new_limit.status_code == 200
     assert second_under_new_limit.status_code == 429
     assert second_under_new_limit.json()["code"] == "RATE_LIMITED"
+
+
+async def test_put_recovers_from_invalid_existing_ssm_values(tmp_path: Path, monkeypatch):
+    store = {
+        "/dxcp/config/read_rpm": "60",
+        "/dxcp/config/mutate_rpm": "0",
+    }
+    async with _client(tmp_path, monkeypatch, store=store) as (client, _):
+        response = await client.put(
+            "/v1/admin/system/rate-limits",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={"read_rpm": 100, "mutate_rpm": 20},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"read_rpm": 100, "mutate_rpm": 20, "source": "ssm"}
+    assert store["/dxcp/config/read_rpm"] == "100"
+    assert store["/dxcp/config/mutate_rpm"] == "20"

@@ -531,6 +531,25 @@ function parseGuardrailValue(value) {
   return Math.floor(parsed)
 }
 
+function parseSystemRateLimitValue(value, label) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return { error: `${label} is required.` }
+  if (!/^\d+$/.test(raw)) return { error: `${label} must be an integer.` }
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5000) {
+    return { error: `${label} must be between 1 and 5000.` }
+  }
+  return { value: parsed }
+}
+
+function formatApiError(result, fallbackMessage) {
+  if (result && result.code) {
+    const requestSuffix = result.request_id ? ` (request_id: ${result.request_id})` : ''
+    return `${result.code}: ${result.message}${requestSuffix}`
+  }
+  return fallbackMessage
+}
+
 function summarizeGuardrails(guardrails) {
   if (!guardrails) return 'No guardrails'
   const parts = []
@@ -691,6 +710,12 @@ export default function App() {
   const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
   const [adminRecipeValidation, setAdminRecipeValidation] = useState(null)
   const [adminRecipeConfirmWarning, setAdminRecipeConfirmWarning] = useState(false)
+  const [systemRateLimitDraft, setSystemRateLimitDraft] = useState({ read_rpm: '', mutate_rpm: '' })
+  const [systemRateLimitBaseline, setSystemRateLimitBaseline] = useState({ read_rpm: '', mutate_rpm: '' })
+  const [systemRateLimitLoading, setSystemRateLimitLoading] = useState(false)
+  const [systemRateLimitSaving, setSystemRateLimitSaving] = useState(false)
+  const [systemRateLimitError, setSystemRateLimitError] = useState('')
+  const [systemRateLimitNote, setSystemRateLimitNote] = useState('')
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
@@ -1430,6 +1455,85 @@ export default function App() {
       setAdminSettings(null)
     }
   }, [api])
+
+  const loadSystemRateLimits = useCallback(
+    async (options = {}) => {
+      if (!isPlatformAdmin) return
+      setSystemRateLimitError('')
+      setSystemRateLimitNote('')
+      setSystemRateLimitLoading(true)
+      try {
+        const force = Boolean(options?.force)
+        const data = await api.get('/admin/system/rate-limits', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
+        if (data && data.code) {
+          setSystemRateLimitError(formatApiError(data, 'Failed to load system rate limits.'))
+          return
+        }
+        setSystemRateLimitDraft({
+          read_rpm: String(data?.read_rpm ?? ''),
+          mutate_rpm: String(data?.mutate_rpm ?? '')
+        })
+        setSystemRateLimitBaseline({
+          read_rpm: String(data?.read_rpm ?? ''),
+          mutate_rpm: String(data?.mutate_rpm ?? '')
+        })
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setSystemRateLimitError('Failed to load system rate limits.')
+      } finally {
+        setSystemRateLimitLoading(false)
+      }
+    },
+    [api, isPlatformAdmin]
+  )
+
+  function handleSystemRateLimitDraftChange(field, value) {
+    setSystemRateLimitDraft((prev) => ({ ...prev, [field]: value }))
+    setSystemRateLimitError('')
+    setSystemRateLimitNote('')
+  }
+
+  const saveSystemRateLimits = useCallback(async () => {
+    if (!isPlatformAdmin) {
+      setSystemRateLimitError('Only Platform Admins can modify this.')
+      return
+    }
+    setSystemRateLimitError('')
+    setSystemRateLimitNote('')
+    const readParsed = parseSystemRateLimitValue(systemRateLimitDraft.read_rpm, 'Read RPM')
+    if (readParsed.error) {
+      setSystemRateLimitError(readParsed.error)
+      return
+    }
+    const mutateParsed = parseSystemRateLimitValue(systemRateLimitDraft.mutate_rpm, 'Mutate RPM')
+    if (mutateParsed.error) {
+      setSystemRateLimitError(mutateParsed.error)
+      return
+    }
+    setSystemRateLimitSaving(true)
+    try {
+      const payload = { read_rpm: readParsed.value, mutate_rpm: mutateParsed.value }
+      const result = await api.put('/admin/system/rate-limits', payload)
+      if (result && result.code) {
+        setSystemRateLimitError(formatApiError(result, 'Failed to save system rate limits.'))
+        return
+      }
+      setSystemRateLimitDraft({
+        read_rpm: String(result?.read_rpm ?? payload.read_rpm),
+        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm)
+      })
+      setSystemRateLimitBaseline({
+        read_rpm: String(result?.read_rpm ?? payload.read_rpm),
+        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm)
+      })
+      setSystemRateLimitNote('System rate limits saved.')
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setSystemRateLimitError('Failed to save system rate limits.')
+    } finally {
+      setSystemRateLimitSaving(false)
+    }
+  }, [api, isPlatformAdmin, systemRateLimitDraft.read_rpm, systemRateLimitDraft.mutate_rpm])
 
   const loadPolicyDeployments = useCallback(async (options = {}) => {
     setPolicyDeploymentsError('')
@@ -2263,6 +2367,13 @@ export default function App() {
   }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadAuditEvents])
 
   useEffect(() => {
+    if (!authReady || !isAuthenticated || !isPlatformAdmin) return
+    if (view === 'admin' && adminTab === 'system-settings') {
+      loadSystemRateLimits()
+    }
+  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits])
+
+  useEffect(() => {
     if (!authReady || !isAuthenticated) return
     loadPublicSettings()
     if (isPlatformAdmin) {
@@ -2274,7 +2385,7 @@ export default function App() {
 
   useEffect(() => {
     if (isPlatformAdmin) return
-    if (adminTab === 'audit') {
+    if (adminTab === 'audit' || adminTab === 'system-settings') {
       setAdminTab('delivery-groups')
     }
     setAdminGroupMode('view')
@@ -3431,7 +3542,18 @@ export default function App() {
     loadAuditEvents,
     auditLoading,
     auditError,
-    auditEvents
+    auditEvents,
+    systemRateLimitDraft,
+    handleSystemRateLimitDraftChange,
+    saveSystemRateLimits,
+    loadSystemRateLimits,
+    systemRateLimitLoading,
+    systemRateLimitSaving,
+    systemRateLimitDirty:
+      String(systemRateLimitDraft.read_rpm).trim() !== String(systemRateLimitBaseline.read_rpm).trim() ||
+      String(systemRateLimitDraft.mutate_rpm).trim() !== String(systemRateLimitBaseline.mutate_rpm).trim(),
+    systemRateLimitError,
+    systemRateLimitNote
   }
 
   const infoItems = []

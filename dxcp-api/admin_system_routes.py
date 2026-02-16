@@ -92,6 +92,25 @@ def _read_rate_limits_from_ssm() -> dict:
     return {"read_rpm": read_rpm, "mutate_rpm": mutate_rpm, "source": "ssm"}
 
 
+def _read_rate_limits_from_ssm_for_audit() -> dict:
+    """Best-effort read for audit logging; tolerates invalid existing values."""
+    prefix = _ssm_prefix()
+    read_raw = _ssm_get_parameter(f"{prefix}/read_rpm")
+    mutate_raw = _ssm_get_parameter(f"{prefix}/mutate_rpm")
+
+    def _coerce_int(value: str):
+        try:
+            return int(str(value).strip())
+        except Exception:
+            return value
+
+    return {
+        "read_rpm": _coerce_int(read_raw),
+        "mutate_rpm": _coerce_int(mutate_raw),
+        "source": "ssm",
+    }
+
+
 def _write_rate_limits_to_ssm(read_rpm: int, mutate_rpm: int) -> None:
     prefix = _ssm_prefix()
     _ssm_put_parameter(f"{prefix}/read_rpm", str(read_rpm))
@@ -149,7 +168,7 @@ def register_admin_system_routes(
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
         try:
-            old_values = _read_rate_limits_from_ssm()
+            old_values = _read_rate_limits_from_ssm_for_audit()
             _write_rate_limits_to_ssm(validated["read_rpm"], validated["mutate_rpm"])
             SETTINGS.read_rpm = validated["read_rpm"]
             SETTINGS.mutate_rpm = validated["mutate_rpm"]

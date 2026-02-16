@@ -68,7 +68,16 @@ export default function AdminPage({
   loadAuditEvents,
   auditLoading,
   auditError,
-  auditEvents
+  auditEvents,
+  systemRateLimitDraft,
+  handleSystemRateLimitDraftChange,
+  saveSystemRateLimits,
+  loadSystemRateLimits,
+  systemRateLimitLoading,
+  systemRateLimitSaving,
+  systemRateLimitDirty,
+  systemRateLimitError,
+  systemRateLimitNote
 }) {
   const headerAction =
     adminTab === 'delivery-groups'
@@ -89,6 +98,12 @@ export default function AdminPage({
                 {auditLoading ? 'Loading...' : 'Refresh'}
               </button>
             )
+          : adminTab === 'system-settings' && isPlatformAdmin
+            ? (
+                <button className="button secondary" onClick={() => loadSystemRateLimits({ force: true })} disabled={systemRateLimitLoading || systemRateLimitSaving}>
+                  {systemRateLimitLoading ? 'Loading...' : 'Refresh'}
+                </button>
+              )
           : null
 
   return (
@@ -115,6 +130,14 @@ export default function AdminPage({
               onClick={() => setAdminTab('audit')}
             >
               Audit
+            </button>
+          )}
+          {isPlatformAdmin && (
+            <button
+              className={adminTab === 'system-settings' ? 'active' : ''}
+              onClick={() => setAdminTab('system-settings')}
+            >
+              System Settings
             </button>
           )}
         </div>
@@ -827,6 +850,55 @@ export default function AdminPage({
               ))}
             </div>
           )}
+        </SectionCard>
+      )}
+      {adminTab === 'system-settings' && isPlatformAdmin && (
+        <SectionCard>
+          <h2>Rate limits</h2>
+          <div className="helper">Changing rate limits affects platform safety and cost controls.</div>
+          <div className="row space-12">
+            <div className="field">
+              <label htmlFor="system-read-rpm">Read RPM</label>
+              <input
+                id="system-read-rpm"
+                type="number"
+                min="1"
+                max="5000"
+                step="1"
+                value={systemRateLimitDraft.read_rpm}
+                onChange={(e) => handleSystemRateLimitDraftChange('read_rpm', e.target.value)}
+                onInput={(e) => handleSystemRateLimitDraftChange('read_rpm', e.target.value)}
+                disabled={systemRateLimitLoading || systemRateLimitSaving}
+              />
+              <div className="helper">Integer between 1 and 5000.</div>
+            </div>
+            <div className="field">
+              <label htmlFor="system-mutate-rpm">Mutate RPM</label>
+              <input
+                id="system-mutate-rpm"
+                type="number"
+                min="1"
+                max="5000"
+                step="1"
+                value={systemRateLimitDraft.mutate_rpm}
+                onChange={(e) => handleSystemRateLimitDraftChange('mutate_rpm', e.target.value)}
+                onInput={(e) => handleSystemRateLimitDraftChange('mutate_rpm', e.target.value)}
+                disabled={systemRateLimitLoading || systemRateLimitSaving}
+              />
+              <div className="helper">Integer between 1 and 5000.</div>
+            </div>
+          </div>
+          {systemRateLimitError && <div className="helper space-8">{systemRateLimitError}</div>}
+          {systemRateLimitNote && <div className="helper space-8">{systemRateLimitNote}</div>}
+          <div className="space-12">
+            <button
+              className="button"
+              onClick={saveSystemRateLimits}
+              disabled={systemRateLimitSaving || systemRateLimitLoading || !systemRateLimitDirty}
+            >
+              {systemRateLimitSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </SectionCard>
       )}
     </div>

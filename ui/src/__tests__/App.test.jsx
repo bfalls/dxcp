@@ -201,6 +201,13 @@ const buildFetchMock = ({
         }
       )
     }
+    if (pathname === '/v1/admin/system/rate-limits' && (!options.method || options.method === 'GET')) {
+      return ok({ read_rpm: 60, mutate_rpm: 10, source: 'ssm' })
+    }
+    if (pathname === '/v1/admin/system/rate-limits' && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      return ok({ read_rpm: body.read_rpm ?? 60, mutate_rpm: body.mutate_rpm ?? 10, source: 'ssm' })
+    }
     if (pathname === '/v1/insights/failures') {
       const service = parsed.searchParams.get('service') || ''
       const groupId = parsed.searchParams.get('groupId') || ''

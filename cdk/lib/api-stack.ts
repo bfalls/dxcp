@@ -44,7 +44,7 @@ export class ApiStack extends Stack {
     props.table.grantReadWriteData(handler);
     handler.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ["ssm:GetParameter", "ssm:GetParameters"],
+        actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"],
         resources: [`arn:aws:ssm:${Stack.of(this).region}:${Stack.of(this).account}:parameter${props.configPrefix}/*`],
       })
     );
