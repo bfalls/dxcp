@@ -75,6 +75,21 @@ Resolution:
 
 This guardrail is intentional. It prevents deployment paths that bypass DXCP governance.
 
+## Demo Artifact Retention and Missing Artifacts
+
+In demo mode, artifact objects in S3 may expire (for example, 14 days) to control storage cost.
+Retention is configured in infrastructure (CDK-defined S3 lifecycle rules), not in DXCP runtime behavior.
+DXCP can still have a valid build registry entry after the artifact object has been deleted by retention policy.
+
+Consequence:
+- Deploy or rollback can fail when the registry has `service/version` but S3 no longer has the object.
+- This is expected when retention windows are shorter than rollback/audit horizons.
+- For enterprise usage, increase S3 retention windows (or disable expiration) to match operational requirements.
+
+Troubleshooting:
+- `Artifact no longer available`: rebuild the artifact and re-register the same `service/version` via CI, then retry.
+- API failures include `request_id`; provide that id to platform support for trace correlation.
+
 ## Minimal CI Integration (Conceptual)
 
 ```text

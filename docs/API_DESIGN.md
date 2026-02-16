@@ -449,6 +449,13 @@ Notes:
 - 503 MUTATIONS_DISABLED
 - 400 RECIPE_INCOMPATIBLE
 
+Troubleshooting `VERSION_NOT_FOUND`:
+- Treat as action required, not transient platform failure.
+- Confirm CI ran for the exact service/version and registered the build before retrying deploy.
+- If a direct Spinnaker deploy happened first, drift can occur; register via CI and redeploy through DXCP.
+- Use `request_id` from the API response when opening a support ticket.
+- Governance reference: `docs/BUILD_REGISTRY.md`.
+
 Engine error codes:
 - ENGINE_CALL_FAILED
 - ENGINE_UNAVAILABLE

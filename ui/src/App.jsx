@@ -566,6 +566,11 @@ function formatApiError(result, fallbackMessage) {
   return fallbackMessage
 }
 
+function versionNotFoundActionMessage(result) {
+  const requestPart = result?.request_id ? ` Request ID: ${result.request_id}.` : ''
+  return `Action required: build not registered by CI. Confirm CI build ran and registered this version. If you deployed directly via Spinnaker, that can cause drift; redeploy via DXCP after CI registers.${requestPart}`
+}
+
 function summarizeGuardrails(guardrails) {
   if (!guardrails) return 'No guardrails'
   const parts = []
@@ -899,6 +904,7 @@ export default function App() {
   const lastChangeSummaryFilledRef = useRef(false)
   const lastPolicySummaryKeyRef = useRef('')
   const lastPreflightKeyRef = useRef('')
+  const lastDeployBootstrapKeyRef = useRef('')
   const selectedRecipeDeprecated = selectedRecipe?.status === 'deprecated'
   const canRunPreflight = Boolean(
     (deployEntryReady || debugDeployGatesEnabled) &&
@@ -2185,11 +2191,15 @@ export default function App() {
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
+      if (result.code === 'VERSION_NOT_FOUND') {
+        setDeployInlineHeadline('Action required: build not registered by CI')
+        setDeployInlineMessage(`VERSION_NOT_FOUND: ${versionNotFoundActionMessage(result)}`)
+        return
+      }
       const headline = failureCauseHeadline(result.failure_cause)
       const inlineMessages = {
         CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
         QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
-        VERSION_NOT_FOUND: 'Version must be registered for this service.',
         INVALID_VERSION: 'Version format is invalid.',
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
         RATE_LIMITED: 'Rate limit exceeded. Try again shortly or contact a platform admin.',
@@ -2381,10 +2391,17 @@ export default function App() {
         }
         const result = await api.post('/deployments/validate', payload)
         if (result && result.code) {
+          if (result.code === 'VERSION_NOT_FOUND') {
+            // Suppress repeated automatic preflight retries for the same unresolved version key.
+            lastAutoPreflightFailedKeyRef.current = preflightKey
+            setPreflightStatus('error')
+            setPreflightErrorHeadline('Action required: build not registered by CI')
+            setPreflightError(`VERSION_NOT_FOUND: ${versionNotFoundActionMessage(result)}`)
+            return false
+          }
           const messages = {
             CONCURRENCY_LIMIT_REACHED: 'Deployment lock active for this delivery group.',
             QUOTA_EXCEEDED: 'Daily deploy quota exceeded for this delivery group.',
-            VERSION_NOT_FOUND: 'Version must be registered for this service.',
             INVALID_VERSION: 'Version format is invalid.',
             RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
             RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
@@ -2656,16 +2673,6 @@ export default function App() {
     if (view === 'service' && serviceDetailName) {
       loadServiceDetail(serviceDetailName)
     }
-    if (view === 'deploy') {
-      setDeployEntryReady(false)
-      const policyPromise = refreshPolicyContext({ bypassCache: true })
-      const versionsPromise = service ? loadVersions(true, { bypassCache: true }) : Promise.resolve(true)
-      Promise.allSettled([policyPromise, versionsPromise]).then((results) => {
-        const policyOk = results[0].status === 'fulfilled' && results[0].value === true
-        const versionsOk = results[1].status === 'fulfilled' && results[1].value === true
-        setDeployEntryReady(policyOk && versionsOk)
-      })
-    }
   }, [
     selectedEnvironment,
     authReady,
@@ -2743,6 +2750,9 @@ export default function App() {
     if (!authReady || !isAuthenticated || view !== 'deploy') return
     if (!accessToken) return
     if (!service || !selectedEnvironment) return
+    const bootstrapKey = `${service}|${selectedEnvironment}|${view}`
+    if (lastDeployBootstrapKeyRef.current === bootstrapKey) return
+    lastDeployBootstrapKeyRef.current = bootstrapKey
     setDeployEntryReady(false)
     const policyPromise = refreshPolicyContext({ bypassCache: true })
     const versionsPromise = loadVersions(true, { bypassCache: true })
@@ -2752,6 +2762,12 @@ export default function App() {
       setDeployEntryReady(policyOk && versionsOk)
     })
   }, [authReady, isAuthenticated, accessToken, view, service, selectedEnvironment, refreshPolicyContext, loadVersions])
+
+  useEffect(() => {
+    if (view !== 'deploy') {
+      lastDeployBootstrapKeyRef.current = ''
+    }
+  }, [view])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -3231,7 +3247,7 @@ export default function App() {
       const versionsEntry = service ? getCacheEntry(cacheStore.versions, service) : null
       const versionsFresh = service && isCacheFresh(versionsEntry)
       const policyPromise = refreshPolicyContext()
-      const versionsPromise = service ? loadVersions(Boolean(versionsFresh)) : Promise.resolve(true)
+      const versionsPromise = service ? loadVersions(!Boolean(versionsFresh)) : Promise.resolve(true)
       const actionsPromise = service ? loadAllowedActions(service) : Promise.resolve(true)
       Promise.allSettled([policyPromise, versionsPromise, actionsPromise]).then((results) => {
         if (lastRouteKeyRef.current !== routeKey) return
