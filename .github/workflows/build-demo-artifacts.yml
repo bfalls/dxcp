@@ -65,7 +65,7 @@ jobs:
       - name: Build and publish changed demo service artifacts
         if: steps.changed.outputs.services != ''
         env:
-          DXCP_ARTIFACT_BUCKET: ${{ secrets.DXCP_ARTIFACT_BUCKET }}
+          DXCP_ARTIFACT_BUCKET: ${{ vars.DXCP_ARTIFACT_BUCKET }}
         shell: bash
         run: |
           set -euo pipefail
