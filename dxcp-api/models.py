@@ -234,16 +234,32 @@ class BuildRegistration(BaseModel):
     service: str
     version: str
     artifactRef: str
+    git_sha: str
+    git_branch: str
+    ci_provider: str
+    ci_run_id: str
+    built_at: str
     sha256: str
     sizeBytes: int
     contentType: str
+    checksum_sha256: Optional[str] = None
+    repo: Optional[str] = None
+    actor: Optional[str] = None
     registeredAt: Optional[str] = None
 
 
 class BuildRegisterExistingRequest(BaseModel):
     service: str
     version: str
-    artifactRef: Optional[str] = None
+    artifactRef: str
+    git_sha: str
+    git_branch: str
+    ci_provider: str
+    ci_run_id: str
+    built_at: str
+    checksum_sha256: Optional[str] = None
+    repo: Optional[str] = None
+    actor: Optional[str] = None
     s3Bucket: Optional[str] = None
     s3Key: Optional[str] = None
 

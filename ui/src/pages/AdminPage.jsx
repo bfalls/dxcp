@@ -77,7 +77,16 @@ export default function AdminPage({
   systemRateLimitSaving,
   systemRateLimitDirty,
   systemRateLimitError,
-  systemRateLimitNote
+  systemRateLimitNote,
+  systemCiPublishersDraft,
+  handleSystemCiPublishersDraftChange,
+  saveSystemCiPublishers,
+  loadSystemCiPublishers,
+  systemCiPublishersLoading,
+  systemCiPublishersSaving,
+  systemCiPublishersDirty,
+  systemCiPublishersError,
+  systemCiPublishersNote
 }) {
   const headerAction =
     adminTab === 'delivery-groups'
@@ -100,8 +109,15 @@ export default function AdminPage({
             )
           : adminTab === 'system-settings' && isPlatformAdmin
             ? (
-                <button className="button secondary" onClick={() => loadSystemRateLimits({ force: true })} disabled={systemRateLimitLoading || systemRateLimitSaving}>
-                  {systemRateLimitLoading ? 'Loading...' : 'Refresh'}
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    loadSystemRateLimits({ force: true })
+                    loadSystemCiPublishers({ force: true })
+                  }}
+                  disabled={systemRateLimitLoading || systemRateLimitSaving || systemCiPublishersLoading || systemCiPublishersSaving}
+                >
+                  {systemRateLimitLoading || systemCiPublishersLoading ? 'Loading...' : 'Refresh'}
                 </button>
               )
           : null
@@ -897,6 +913,31 @@ export default function AdminPage({
               disabled={systemRateLimitSaving || systemRateLimitLoading || !systemRateLimitDirty}
             >
               {systemRateLimitSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          <h2 className="space-12">CI publisher allowlist</h2>
+          <div className="helper">Comma-separated subject identifiers allowed to publish/register builds.</div>
+          <div className="field space-12">
+            <label htmlFor="system-ci-publishers">Allowed CI publishers</label>
+            <textarea
+              id="system-ci-publishers"
+              rows={3}
+              value={systemCiPublishersDraft}
+              onChange={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
+              onInput={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
+              disabled={systemCiPublishersLoading || systemCiPublishersSaving}
+            />
+            <div className="helper">Example: ci-bot-1, ci-bot-2</div>
+          </div>
+          {systemCiPublishersError && <div className="helper space-8">{systemCiPublishersError}</div>}
+          {systemCiPublishersNote && <div className="helper space-8">{systemCiPublishersNote}</div>}
+          <div className="space-12">
+            <button
+              className="button"
+              onClick={saveSystemCiPublishers}
+              disabled={systemCiPublishersSaving || systemCiPublishersLoading || !systemCiPublishersDirty}
+            >
+              {systemCiPublishersSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
         </SectionCard>

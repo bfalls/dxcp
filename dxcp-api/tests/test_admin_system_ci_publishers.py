@@ -114,6 +114,18 @@ async def test_get_system_ci_publishers_admin_only(tmp_path: Path, monkeypatch):
     assert observer.status_code == 403
 
 
+async def test_get_system_ci_publishers_falls_back_to_runtime_when_ssm_missing(tmp_path: Path, monkeypatch):
+    store = {}
+    async with _client(tmp_path, monkeypatch, store) as (client, main):
+        main.SETTINGS.ci_publishers = ["runtime-ci-1", "runtime-ci-2"]
+        response = await client.get(
+            "/v1/admin/system/ci-publishers",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 200
+    assert response.json() == {"ci_publishers": ["runtime-ci-1", "runtime-ci-2"], "source": "runtime"}
+
+
 @pytest.mark.parametrize(
     "payload",
     [

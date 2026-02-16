@@ -8,6 +8,7 @@ export interface DataStackProps extends StackProps {
   killSwitch: string;
   demoMode: string;
   apiToken: string;
+  ciPublishers: string;
   readRpm: string;
   mutateRpm: string;
   dailyQuotaDeploy: string;
@@ -45,6 +46,7 @@ export class DataStack extends Stack {
     if (props.apiToken.trim().length > 0) {
       param("api_token", props.apiToken);
     }
+    param("ci_publishers", props.ciPublishers);
     param("read_rpm", props.readRpm);
     param("mutate_rpm", props.mutateRpm);
     param("daily_quota_deploy", props.dailyQuotaDeploy);

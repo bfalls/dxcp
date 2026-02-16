@@ -542,6 +542,22 @@ function parseSystemRateLimitValue(value, label) {
   return { value: parsed }
 }
 
+function parseCiPublishersValue(value) {
+  const raw = String(value ?? '')
+  const parsed = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const unique = []
+  parsed.forEach((item) => {
+    if (!unique.includes(item)) unique.push(item)
+  })
+  if (unique.length === 0) {
+    return { error: 'At least one CI publisher is required.' }
+  }
+  return { value: unique }
+}
+
 function formatApiError(result, fallbackMessage) {
   if (result && result.code) {
     const requestSuffix = result.request_id ? ` (request_id: ${result.request_id})` : ''
@@ -716,6 +732,12 @@ export default function App() {
   const [systemRateLimitSaving, setSystemRateLimitSaving] = useState(false)
   const [systemRateLimitError, setSystemRateLimitError] = useState('')
   const [systemRateLimitNote, setSystemRateLimitNote] = useState('')
+  const [systemCiPublishersDraft, setSystemCiPublishersDraft] = useState('')
+  const [systemCiPublishersBaseline, setSystemCiPublishersBaseline] = useState('')
+  const [systemCiPublishersLoading, setSystemCiPublishersLoading] = useState(false)
+  const [systemCiPublishersSaving, setSystemCiPublishersSaving] = useState(false)
+  const [systemCiPublishersError, setSystemCiPublishersError] = useState('')
+  const [systemCiPublishersNote, setSystemCiPublishersNote] = useState('')
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
@@ -1535,6 +1557,70 @@ export default function App() {
       setSystemRateLimitSaving(false)
     }
   }, [api, isPlatformAdmin, systemRateLimitDraft.read_rpm, systemRateLimitDraft.mutate_rpm])
+
+  const loadSystemCiPublishers = useCallback(
+    async (options = {}) => {
+      if (!isPlatformAdmin) return
+      setSystemCiPublishersError('')
+      setSystemCiPublishersNote('')
+      setSystemCiPublishersLoading(true)
+      try {
+        const force = Boolean(options?.force)
+        const data = await api.get('/admin/system/ci-publishers', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
+        if (data && data.code) {
+          setSystemCiPublishersError(formatApiError(data, 'Failed to load CI publisher allowlist.'))
+          return
+        }
+        const next = Array.isArray(data?.ci_publishers) ? data.ci_publishers.join(', ') : ''
+        setSystemCiPublishersDraft(next)
+        setSystemCiPublishersBaseline(next)
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setSystemCiPublishersError('Failed to load CI publisher allowlist.')
+      } finally {
+        setSystemCiPublishersLoading(false)
+      }
+    },
+    [api, isPlatformAdmin]
+  )
+
+  function handleSystemCiPublishersDraftChange(value) {
+    setSystemCiPublishersDraft(value)
+    setSystemCiPublishersError('')
+    setSystemCiPublishersNote('')
+  }
+
+  const saveSystemCiPublishers = useCallback(async () => {
+    if (!isPlatformAdmin) {
+      setSystemCiPublishersError('Only Platform Admins can modify this.')
+      return
+    }
+    setSystemCiPublishersError('')
+    setSystemCiPublishersNote('')
+    const parsed = parseCiPublishersValue(systemCiPublishersDraft)
+    if (parsed.error) {
+      setSystemCiPublishersError(parsed.error)
+      return
+    }
+    setSystemCiPublishersSaving(true)
+    try {
+      const payload = { ci_publishers: parsed.value }
+      const result = await api.put('/admin/system/ci-publishers', payload)
+      if (result && result.code) {
+        setSystemCiPublishersError(formatApiError(result, 'Failed to save CI publisher allowlist.'))
+        return
+      }
+      const next = Array.isArray(result?.ci_publishers) ? result.ci_publishers.join(', ') : payload.ci_publishers.join(', ')
+      setSystemCiPublishersDraft(next)
+      setSystemCiPublishersBaseline(next)
+      setSystemCiPublishersNote('CI publisher allowlist saved.')
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setSystemCiPublishersError('Failed to save CI publisher allowlist.')
+    } finally {
+      setSystemCiPublishersSaving(false)
+    }
+  }, [api, isPlatformAdmin, systemCiPublishersDraft])
 
   const loadPolicyDeployments = useCallback(async (options = {}) => {
     setPolicyDeploymentsError('')
@@ -2373,8 +2459,9 @@ export default function App() {
     if (!authReady || !isAuthenticated || !isPlatformAdmin) return
     if (view === 'admin' && adminTab === 'system-settings') {
       loadSystemRateLimits()
+      loadSystemCiPublishers()
     }
-  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits])
+  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits, loadSystemCiPublishers])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
@@ -3564,7 +3651,16 @@ export default function App() {
       String(systemRateLimitDraft.read_rpm).trim() !== String(systemRateLimitBaseline.read_rpm).trim() ||
       String(systemRateLimitDraft.mutate_rpm).trim() !== String(systemRateLimitBaseline.mutate_rpm).trim(),
     systemRateLimitError,
-    systemRateLimitNote
+    systemRateLimitNote,
+    systemCiPublishersDraft,
+    handleSystemCiPublishersDraftChange,
+    saveSystemCiPublishers,
+    loadSystemCiPublishers,
+    systemCiPublishersLoading,
+    systemCiPublishersSaving,
+    systemCiPublishersDirty: String(systemCiPublishersDraft).trim() !== String(systemCiPublishersBaseline).trim(),
+    systemCiPublishersError,
+    systemCiPublishersNote
   }
 
   const infoItems = []

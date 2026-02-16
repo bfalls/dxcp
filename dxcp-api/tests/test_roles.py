@@ -131,14 +131,32 @@ def _insert_deployment(storage, deployment_id: str, version: str, created_at: st
     storage.insert_deployment(record, [])
 
 
-def _build_payload() -> dict:
+def _build_payload(version: str = "1.0.0") -> dict:
+    return {
+        "service": "demo-service",
+        "version": version,
+        "artifactRef": f"s3://dxcp-test-bucket/demo-service-{version}.zip",
+        "git_sha": "f" * 40,
+        "git_branch": "main",
+        "ci_provider": "github_actions",
+        "ci_run_id": "run-1",
+        "built_at": "2026-02-16T00:00:00Z",
+        "sha256": "a" * 64,
+        "sizeBytes": 1024,
+        "contentType": "application/zip",
+    }
+
+
+def _build_register_existing_payload() -> dict:
     return {
         "service": "demo-service",
         "version": "1.0.0",
         "artifactRef": "s3://dxcp-test-bucket/demo-service-1.0.0.zip",
-        "sha256": "a" * 64,
-        "sizeBytes": 1024,
-        "contentType": "application/zip",
+        "git_sha": "f" * 40,
+        "git_branch": "main",
+        "ci_provider": "github_actions",
+        "ci_run_id": "run-1",
+        "built_at": "2026-02-16T00:00:00Z",
     }
 
 
@@ -182,7 +200,7 @@ async def test_observer_denied_build_register_existing(tmp_path: Path, monkeypat
         response = await client.post(
             "/v1/builds/register",
             headers={"Idempotency-Key": "build-register-existing-1", **auth_header(["dxcp-observers"])},
-            json={"service": "demo-service", "version": "1.0.0"},
+            json=_build_register_existing_payload(),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "CI_ONLY"
@@ -232,7 +250,7 @@ async def test_platform_admin_denied_build_register_when_not_ci(tmp_path: Path, 
         existing_response = await client.post(
             "/v1/builds/register",
             headers={"Idempotency-Key": "build-register-existing-2", **auth_header(["dxcp-platform-admins"])},
-            json={"service": "demo-service", "version": "1.0.0"},
+            json=_build_register_existing_payload(),
         )
     assert cap_response.status_code == 403
     assert cap_response.json()["code"] == "CI_ONLY"
@@ -246,7 +264,7 @@ async def test_ci_publisher_can_register_build_without_admin_role(tmp_path: Path
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         cap_request = {
             "service": "demo-service",
-            "version": "1.0.0",
+            "version": "1.0.1",
             "expectedSizeBytes": 1024,
             "expectedSha256": "a" * 64,
             "contentType": "application/zip",
@@ -259,7 +277,7 @@ async def test_ci_publisher_can_register_build_without_admin_role(tmp_path: Path
         response = await client.post(
             "/v1/builds",
             headers={"Idempotency-Key": "build-ci-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
-            json=_build_payload(),
+            json=_build_payload("1.0.1"),
         )
     assert cap_response.status_code == 201
     assert response.status_code == 201

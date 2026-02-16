@@ -20,6 +20,7 @@ ui/dist/
 # CDK artifacts
 cdk/cdk.out/
 cdk/build/
+cdk/dist/
 cdk/cdk-outputs.json
 cdk/cdk.context.json
 .dxcp_aws_config

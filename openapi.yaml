@@ -321,6 +321,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
         '503':
@@ -349,6 +351,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
         '503':
@@ -908,7 +912,7 @@ components:
           enum: [application/zip, application/gzip]
     BuildRegistration:
       type: object
-      required: [service, version, artifactRef, sha256, sizeBytes, contentType]
+      required: [service, version, artifactRef, git_sha, git_branch, ci_provider, ci_run_id, built_at, sha256, sizeBytes, contentType]
       properties:
         service:
           type: string
@@ -920,6 +924,17 @@ components:
           format: uri
           pattern: '^[a-z][a-z0-9+.-]*://.+$'
           description: URI with scheme; v1 only allows s3://<bucket>/<key>.
+        git_sha:
+          type: string
+        git_branch:
+          type: string
+        ci_provider:
+          type: string
+        ci_run_id:
+          type: string
+        built_at:
+          type: string
+          format: date-time
         sha256:
           type: string
           pattern: '^[A-Fa-f0-9]{64}$'
@@ -930,12 +945,18 @@ components:
         contentType:
           type: string
           enum: [application/zip, application/gzip]
+        checksum_sha256:
+          type: string
+        repo:
+          type: string
+        actor:
+          type: string
         registeredAt:
           type: string
           format: date-time
     BuildRegisterExistingRequest:
       type: object
-      required: [service, version]
+      required: [service, version, artifactRef, git_sha, git_branch, ci_provider, ci_run_id, built_at]
       properties:
         service:
           type: string
@@ -945,9 +966,28 @@ components:
         artifactRef:
           type: string
           format: uri
-          nullable: true
           pattern: '^[a-z][a-z0-9+.-]*://.+$'
           description: URI with scheme; v1 only allows s3://<bucket>/<key>.
+        git_sha:
+          type: string
+        git_branch:
+          type: string
+        ci_provider:
+          type: string
+        ci_run_id:
+          type: string
+        built_at:
+          type: string
+          format: date-time
+        checksum_sha256:
+          type: string
+          nullable: true
+        repo:
+          type: string
+          nullable: true
+        actor:
+          type: string
+          nullable: true
         s3Bucket:
           type: string
           nullable: true
@@ -1066,6 +1106,12 @@ components:
             $ref: '#/components/schemas/Error'
     DeploymentLocked:
       description: Delivery group concurrency limit reached.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Registration conflict with an existing immutable resource.
       content:
         application/json:
           schema:

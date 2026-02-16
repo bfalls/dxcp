@@ -127,6 +127,14 @@ def _read_ci_publishers_from_ssm() -> dict:
     return {"ci_publishers": _parse_ci_publishers_csv(raw), "source": "ssm"}
 
 
+def _read_ci_publishers_with_fallback() -> dict:
+    try:
+        return _read_ci_publishers_from_ssm()
+    except Exception:
+        logger.warning("event=admin.system_ci_publishers.read_fallback source=runtime")
+        return {"ci_publishers": list(SETTINGS.ci_publishers), "source": "runtime"}
+
+
 def _write_ci_publishers_to_ssm(ci_publishers: list[str]) -> None:
     prefix = _ssm_prefix()
     _ssm_put_parameter(f"{prefix}/ci_publishers", ",".join(ci_publishers))
@@ -234,10 +242,7 @@ def register_admin_system_routes(
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view system CI publishers")
         if role_error:
             return role_error
-        try:
-            return _read_ci_publishers_from_ssm()
-        except Exception:
-            return error_response(500, "INTERNAL_ERROR", "Unable to read system CI publishers from SSM")
+        return _read_ci_publishers_with_fallback()
 
     @app.put("/v1/admin/system/ci-publishers")
     def update_system_ci_publishers(
@@ -254,7 +259,7 @@ def register_admin_system_routes(
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
         try:
-            old_values = _read_ci_publishers_from_ssm()
+            old_values = _read_ci_publishers_with_fallback()
             _write_ci_publishers_to_ssm(validated)
             SETTINGS.ci_publishers = list(validated)
             new_values = {"ci_publishers": list(validated), "source": "ssm"}

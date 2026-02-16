@@ -101,7 +101,13 @@ if os.getenv("DXCP_LAMBDA", "") == "1":
         handler = None
 
 
-def error_response(status_code: int, code: str, message: str, operator_hint: Optional[str] = None) -> JSONResponse:
+def error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    operator_hint: Optional[str] = None,
+    details: Optional[dict] = None,
+) -> JSONResponse:
     request_id = request_id_ctx.get() or str(uuid.uuid4())
     payload = {
         "code": code,
@@ -112,6 +118,8 @@ def error_response(status_code: int, code: str, message: str, operator_hint: Opt
     }
     if operator_hint:
         payload["operator_hint"] = operator_hint
+    if details is not None:
+        payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
 
 
@@ -142,11 +150,30 @@ async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_handler(request: Request, exc: RequestValidationError):
+    missing_fields: list[str] = []
+    invalid_fields: list[str] = []
     for error in exc.errors():
         loc = error.get("loc") or ()
         err_type = error.get("type")
         if loc == ("body", "recipeId") and err_type in {"missing", "value_error.missing"}:
             return error_response(400, "RECIPE_ID_REQUIRED", "recipeId is required")
+        if loc and loc[0] == "body" and len(loc) >= 2:
+            field_name = str(loc[1])
+            if err_type in {"missing", "value_error.missing"}:
+                missing_fields.append(field_name)
+            else:
+                invalid_fields.append(field_name)
+    if request.url.path in {"/v1/builds", "/v1/builds/register"}:
+        details = {
+            "missing_fields": sorted(set(missing_fields)),
+            "invalid_fields": sorted(set(invalid_fields)),
+        }
+        return error_response(
+            400,
+            "INVALID_BUILD_REGISTRATION",
+            "Build registration request is invalid",
+            details=details,
+        )
     return error_response(400, "INVALID_REQUEST", "Invalid request")
 
 
@@ -836,6 +863,8 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "ENVIRONMENT_REQUIRED",
         "INVALID_VERSION",
         "INVALID_ARTIFACT",
+        "INVALID_BUILD_REGISTRATION",
+        "BUILD_REGISTRATION_CONFLICT",
         "IDMP_KEY_REQUIRED",
         "VERSION_NOT_FOUND",
         "RECIPE_NOT_FOUND",
@@ -1210,6 +1239,32 @@ def _compute_sha256(client, bucket: str, key: str) -> tuple[str, int, float]:
     return hasher.hexdigest(), total, duration
 
 
+def _normalize_timestamp(value: str) -> str:
+    candidate = str(value).strip()
+    if candidate.endswith("Z"):
+        candidate = f"{candidate[:-1]}+00:00"
+    parsed = datetime.fromisoformat(candidate)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _build_registration_conflict(existing: dict, artifact_ref: str, git_sha: str) -> Optional[JSONResponse]:
+    existing_artifact_ref = existing.get("artifactRef")
+    existing_git_sha = existing.get("git_sha")
+    if existing_artifact_ref == artifact_ref and existing_git_sha == git_sha:
+        return None
+    return error_response(
+        409,
+        "BUILD_REGISTRATION_CONFLICT",
+        "Conflicting build registration for service/version",
+        details={
+            "service": existing.get("service"),
+            "version": existing.get("version"),
+            "existing_artifactRef": existing_artifact_ref,
+            "existing_git_sha": existing_git_sha,
+        },
+    )
+
+
 def _ui_refresh_settings() -> dict:
     default_value = SETTINGS.ui_default_refresh_seconds or 300
     min_value = SETTINGS.ui_min_refresh_seconds or 60
@@ -1229,19 +1284,26 @@ def _ui_refresh_settings() -> dict:
     }
 
 
-def _register_existing_build_internal(service_entry: dict, service: str, version: str, artifact_ref: Optional[str], s3_bucket: Optional[str], s3_key: Optional[str]) -> dict:
+def _register_existing_build_internal(
+    service_entry: dict,
+    service: str,
+    version: str,
+    artifact_ref: str,
+    s3_bucket: Optional[str],
+    s3_key: Optional[str],
+    git_sha: str,
+    git_branch: str,
+    ci_provider: str,
+    ci_run_id: str,
+    built_at: str,
+    checksum_sha256: Optional[str],
+    repo: Optional[str],
+    actor: Optional[str],
+) -> dict:
     if not SETTINGS.runtime_artifact_bucket:
         raise ValueError("Runtime artifact bucket is not configured")
 
-    if artifact_ref:
-        bucket, key = parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
-    else:
-        if not s3_key:
-            raise ValueError("s3Key is required when artifactRef is omitted")
-        bucket = s3_bucket or SETTINGS.runtime_artifact_bucket
-        key = s3_key
-        artifact_ref = f"s3://{bucket}/{key}"
-        parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
+    bucket, key = parse_s3_artifact_ref(artifact_ref, SETTINGS.artifact_ref_schemes)
 
     if bucket != SETTINGS.runtime_artifact_bucket:
         raise ValueError("Artifact source not allowlisted")
@@ -1294,9 +1356,17 @@ def _register_existing_build_internal(service_entry: dict, service: str, version
         "service": service,
         "version": version,
         "artifactRef": artifact_ref,
+        "git_sha": git_sha,
+        "git_branch": git_branch,
+        "ci_provider": ci_provider,
+        "ci_run_id": ci_run_id,
+        "built_at": built_at,
         "sha256": sha256,
         "sizeBytes": size_bytes,
         "contentType": content_type,
+        "checksum_sha256": checksum_sha256,
+        "repo": repo,
+        "actor": actor,
         "registeredAt": utc_now(),
     }
     record = storage.insert_build(record)
@@ -2563,8 +2633,25 @@ def register_build(
 
     service_entry = guardrails.validate_service(reg.service)
     guardrails.validate_version(reg.version)
+    try:
+        built_at = _normalize_timestamp(reg.built_at)
+    except ValueError:
+        return error_response(
+            400,
+            "INVALID_BUILD_REGISTRATION",
+            "built_at must be a valid ISO-8601 timestamp",
+            details={"invalid_fields": ["built_at"]},
+        )
     guardrails.validate_artifact(reg.sizeBytes, reg.sha256, reg.contentType)
     guardrails.validate_artifact_source(reg.artifactRef, service_entry)
+
+    existing = storage.find_latest_build(reg.service, reg.version)
+    if existing:
+        conflict = _build_registration_conflict(existing, reg.artifactRef, reg.git_sha)
+        if conflict:
+            return conflict
+        store_idempotency(request, idempotency_key, existing, 200)
+        return JSONResponse(status_code=200, content=existing)
 
     cap = storage.find_upload_capability(
         reg.service,
@@ -2581,6 +2668,7 @@ def register_build(
         return error_response(400, "INVALID_ARTIFACT", "Upload capability expired")
 
     record = reg.dict()
+    record["built_at"] = built_at
     record["registeredAt"] = utc_now()
     record = storage.insert_build(record)
     storage.delete_upload_capability(cap["id"])
@@ -2608,11 +2696,24 @@ def register_existing_build(
 
     service_entry = guardrails.validate_service(req.service)
     guardrails.validate_version(req.version)
+    try:
+        built_at = _normalize_timestamp(req.built_at)
+    except ValueError:
+        return error_response(
+            400,
+            "INVALID_BUILD_REGISTRATION",
+            "built_at must be a valid ISO-8601 timestamp",
+            details={"invalid_fields": ["built_at"]},
+        )
+    guardrails.validate_artifact_source(req.artifactRef, service_entry)
 
     existing = storage.find_latest_build(req.service, req.version)
     if existing:
+        conflict = _build_registration_conflict(existing, req.artifactRef, req.git_sha)
+        if conflict:
+            return conflict
         store_idempotency(request, idempotency_key, existing, 200)
-        return existing
+        return JSONResponse(status_code=200, content=existing)
 
     try:
         record = _register_existing_build_internal(
@@ -2622,6 +2723,14 @@ def register_existing_build(
             req.artifactRef,
             req.s3Bucket,
             req.s3Key,
+            req.git_sha,
+            req.git_branch,
+            req.ci_provider,
+            req.ci_run_id,
+            built_at,
+            req.checksum_sha256,
+            req.repo,
+            req.actor,
         )
     except ValueError as exc:
         return error_response(400, "INVALID_ARTIFACT", str(exc))

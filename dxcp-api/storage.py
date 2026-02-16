@@ -143,13 +143,29 @@ class Storage:
                 service TEXT NOT NULL,
                 version TEXT NOT NULL,
                 artifact_ref TEXT NOT NULL,
+                git_sha TEXT,
+                git_branch TEXT,
+                ci_provider TEXT,
+                ci_run_id TEXT,
+                built_at TEXT,
                 sha256 TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 content_type TEXT NOT NULL,
+                checksum_sha256 TEXT,
+                repo TEXT,
+                actor TEXT,
                 registered_at TEXT NOT NULL
             )
             """
         )
+        self._ensure_column(cur, "builds", "git_sha", "TEXT")
+        self._ensure_column(cur, "builds", "git_branch", "TEXT")
+        self._ensure_column(cur, "builds", "ci_provider", "TEXT")
+        self._ensure_column(cur, "builds", "ci_run_id", "TEXT")
+        self._ensure_column(cur, "builds", "built_at", "TEXT")
+        self._ensure_column(cur, "builds", "checksum_sha256", "TEXT")
+        self._ensure_column(cur, "builds", "repo", "TEXT")
+        self._ensure_column(cur, "builds", "actor", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS services (
@@ -1258,18 +1274,26 @@ class Storage:
         cur.execute(
             """
             INSERT INTO builds (
-                id, service, version, artifact_ref, sha256, size_bytes,
-                content_type, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                id, service, version, artifact_ref, git_sha, git_branch, ci_provider, ci_run_id, built_at,
+                sha256, size_bytes, content_type, checksum_sha256, repo, actor, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 build_id,
                 record["service"],
                 record["version"],
                 record["artifactRef"],
+                record.get("git_sha"),
+                record.get("git_branch"),
+                record.get("ci_provider"),
+                record.get("ci_run_id"),
+                record.get("built_at"),
                 record["sha256"],
                 record["sizeBytes"],
                 record["contentType"],
+                record.get("checksum_sha256"),
+                record.get("repo"),
+                record.get("actor"),
                 record["registeredAt"],
             ),
         )
@@ -1299,9 +1323,17 @@ class Storage:
             "service": row["service"],
             "version": row["version"],
             "artifactRef": row["artifact_ref"],
+            "git_sha": row["git_sha"],
+            "git_branch": row["git_branch"],
+            "ci_provider": row["ci_provider"],
+            "ci_run_id": row["ci_run_id"],
+            "built_at": row["built_at"],
             "sha256": row["sha256"],
             "sizeBytes": row["size_bytes"],
             "contentType": row["content_type"],
+            "checksum_sha256": row["checksum_sha256"],
+            "repo": row["repo"],
+            "actor": row["actor"],
             "registeredAt": row["registered_at"],
         }
 
@@ -1324,9 +1356,17 @@ class Storage:
                 "service": row["service"],
                 "version": row["version"],
                 "artifactRef": row["artifact_ref"],
+                "git_sha": row["git_sha"],
+                "git_branch": row["git_branch"],
+                "ci_provider": row["ci_provider"],
+                "ci_run_id": row["ci_run_id"],
+                "built_at": row["built_at"],
                 "sha256": row["sha256"],
                 "sizeBytes": row["size_bytes"],
                 "contentType": row["content_type"],
+                "checksum_sha256": row["checksum_sha256"],
+                "repo": row["repo"],
+                "actor": row["actor"],
                 "registeredAt": row["registered_at"],
             }
             for row in rows
@@ -2291,9 +2331,17 @@ class DynamoStorage:
             "service": record["service"],
             "version": record["version"],
             "artifactRef": record["artifactRef"],
+            "git_sha": record.get("git_sha"),
+            "git_branch": record.get("git_branch"),
+            "ci_provider": record.get("ci_provider"),
+            "ci_run_id": record.get("ci_run_id"),
+            "built_at": record.get("built_at"),
             "sha256": record["sha256"],
             "sizeBytes": self._dec(record["sizeBytes"]),
             "contentType": record["contentType"],
+            "checksum_sha256": record.get("checksum_sha256"),
+            "repo": record.get("repo"),
+            "actor": record.get("actor"),
             "registeredAt": record["registeredAt"],
         }
         self.table.put_item(Item=item)
@@ -2318,9 +2366,17 @@ class DynamoStorage:
             "service": item.get("service"),
             "version": item.get("version"),
             "artifactRef": item.get("artifactRef"),
+            "git_sha": item.get("git_sha"),
+            "git_branch": item.get("git_branch"),
+            "ci_provider": item.get("ci_provider"),
+            "ci_run_id": item.get("ci_run_id"),
+            "built_at": item.get("built_at"),
             "sha256": item.get("sha256"),
             "sizeBytes": int(item.get("sizeBytes", 0)),
             "contentType": item.get("contentType"),
+            "checksum_sha256": item.get("checksum_sha256"),
+            "repo": item.get("repo"),
+            "actor": item.get("actor"),
             "registeredAt": item.get("registeredAt"),
         }
 
@@ -2337,9 +2393,17 @@ class DynamoStorage:
                 "service": item.get("service"),
                 "version": item.get("version"),
                 "artifactRef": item.get("artifactRef"),
+                "git_sha": item.get("git_sha"),
+                "git_branch": item.get("git_branch"),
+                "ci_provider": item.get("ci_provider"),
+                "ci_run_id": item.get("ci_run_id"),
+                "built_at": item.get("built_at"),
                 "sha256": item.get("sha256"),
                 "sizeBytes": int(item.get("sizeBytes", 0)),
                 "contentType": item.get("contentType"),
+                "checksum_sha256": item.get("checksum_sha256"),
+                "repo": item.get("repo"),
+                "actor": item.get("actor"),
                 "registeredAt": item.get("registeredAt"),
             }
             for item in items

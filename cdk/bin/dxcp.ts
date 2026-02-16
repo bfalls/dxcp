@@ -14,6 +14,7 @@ const configPrefix = app.node.tryGetContext("configPrefix") || "/dxcp/config";
 const killSwitch = app.node.tryGetContext("killSwitch") || process.env.DXCP_KILL_SWITCH || "0";
 const demoMode = app.node.tryGetContext("demoMode") || process.env.DXCP_DEMO_MODE || "true";
 const apiToken = app.node.tryGetContext("apiToken") || process.env.DXCP_API_TOKEN || "";
+const ciPublishers = app.node.tryGetContext("ciPublishers") || process.env.DXCP_CI_PUBLISHERS || "ci-publisher-1";
 const readRpm = app.node.tryGetContext("readRpm") || process.env.DXCP_READ_RPM || "60";
 const mutateRpm = app.node.tryGetContext("mutateRpm") || process.env.DXCP_MUTATE_RPM || "10";
 const dailyQuotaDeploy = app.node.tryGetContext("dailyQuotaDeploy") || process.env.DXCP_DAILY_QUOTA_DEPLOY || "25";
@@ -31,6 +32,7 @@ const dataStack = new DataStack(app, "DxcpDataStack", {
   killSwitch,
   demoMode,
   apiToken,
+  ciPublishers,
   readRpm,
   mutateRpm,
   dailyQuotaDeploy,

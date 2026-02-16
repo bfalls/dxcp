@@ -32,6 +32,22 @@ def _write_service_registry(path: Path) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _build_payload(artifact_ref: str) -> dict:
+    return {
+        "service": "demo-service",
+        "version": "1.0.0",
+        "artifactRef": artifact_ref,
+        "git_sha": "f" * 40,
+        "git_branch": "main",
+        "ci_provider": "github_actions",
+        "ci_run_id": "run-1",
+        "built_at": "2026-02-16T00:00:00Z",
+        "sha256": "a" * 64,
+        "sizeBytes": 1024,
+        "contentType": "application/zip",
+    }
+
+
 def _load_main(tmp_path: Path):
     dxcp_api_dir = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(dxcp_api_dir))
@@ -83,14 +99,7 @@ async def test_s3_artifact_ref_accepted(tmp_path: Path, monkeypatch):
         response = await client.post(
             "/v1/builds",
             headers={"Idempotency-Key": "build-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
-            json={
-                "service": "demo-service",
-                "version": "1.0.0",
-                "artifactRef": "s3://dxcp-test-bucket/demo-service-1.0.0.zip",
-                "sha256": "a" * 64,
-                "sizeBytes": 1024,
-                "contentType": "application/zip",
-            },
+            json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     assert response.status_code == 201
     assert response.json()["artifactRef"].startswith("s3://")
@@ -101,14 +110,7 @@ async def test_non_s3_artifact_ref_rejected(tmp_path: Path, monkeypatch):
         response = await client.post(
             "/v1/builds",
             headers={"Idempotency-Key": "build-2", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
-            json={
-                "service": "demo-service",
-                "version": "1.0.0",
-                "artifactRef": "gcs://dxcp-test-bucket/demo-service-1.0.0.zip",
-                "sha256": "a" * 64,
-                "sizeBytes": 1024,
-                "contentType": "application/zip",
-            },
+            json=_build_payload("gcs://dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     body = response.json()
     assert response.status_code == 400
@@ -120,14 +122,7 @@ async def test_malformed_artifact_ref_rejected(tmp_path: Path, monkeypatch):
         response = await client.post(
             "/v1/builds",
             headers={"Idempotency-Key": "build-3", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
-            json={
-                "service": "demo-service",
-                "version": "1.0.0",
-                "artifactRef": "s3:/dxcp-test-bucket/demo-service-1.0.0.zip",
-                "sha256": "a" * 64,
-                "sizeBytes": 1024,
-                "contentType": "application/zip",
-            },
+            json=_build_payload("s3:/dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     body = response.json()
     assert response.status_code == 400

@@ -33,12 +33,25 @@ Why:
 - It preserves a clear custody chain from source revision to deployed artifact.
 
 Operationally, a registration must include provenance metadata sufficient to audit origin and integrity.
-At minimum, this includes:
+Required metadata:
 - service
 - version
 - artifactRef
-- artifact integrity data (for example, `sha256`, `sizeBytes`, `contentType`)
-- CI run provenance (for example, pipeline/run identity and source revision)
+- git_sha
+- git_branch
+- ci_provider
+- ci_run_id
+- built_at
+
+Also required for artifact integrity enforcement in DXCP v1:
+- sha256
+- sizeBytes
+- contentType
+
+Optional metadata:
+- checksum_sha256
+- repo
+- actor
 
 ## Deploy Eligibility Rule
 
