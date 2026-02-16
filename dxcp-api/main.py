@@ -183,6 +183,7 @@ def can_view(actor: Actor) -> bool:
 register_admin_system_routes(
     app,
     get_actor=get_actor,
+    request_id_provider=get_request_id,
     rate_limiter=rate_limiter,
     require_role=require_role,
     error_response=error_response,
