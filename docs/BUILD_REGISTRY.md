@@ -87,7 +87,8 @@ Consequence:
 - For enterprise usage, increase S3 retention windows (or disable expiration) to match operational requirements.
 
 Troubleshooting:
-- `Artifact no longer available`: rebuild the artifact and re-register the same `service/version` via CI, then retry.
+- `VERSION_NOT_FOUND`: the requested `service/version` is not registered in DXCP build registry. Run CI registration for that exact version, then retry.
+- `ARTIFACT_NOT_FOUND`: the `service/version` is registered, but the artifact object is no longer retrievable from the artifact store. Rebuild/publish and register again via CI, then deploy the new version.
 - API failures include `request_id`; provide that id to platform support for trace correlation.
 
 ## Minimal CI Integration (Conceptual)

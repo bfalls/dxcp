@@ -448,15 +448,19 @@ Notes:
 - 429 RATE_LIMITED (message: "Rate limit exceeded. Try again shortly or contact a platform admin.")
 - 503 MUTATIONS_DISABLED
 - 400 RECIPE_INCOMPATIBLE
+- 409 ARTIFACT_NOT_FOUND (message: "Artifact is no longer available in the artifact store. Rebuild and publish again, then deploy the new version.")
 
-Troubleshooting `VERSION_NOT_FOUND`:
-- Treat as action required, not transient platform failure.
-- Confirm CI ran for the exact service/version and registered the build before retrying deploy.
-- If a direct Spinnaker deploy happened first, drift can occur; register via CI and redeploy through DXCP.
+Troubleshooting deploy eligibility vs artifact availability:
+- `VERSION_NOT_FOUND`: DXCP has no build registry entry for that `service/version`.
+- Action: run CI registration for that exact `service/version`, then retry.
+- `ARTIFACT_NOT_FOUND`: build registry entry exists, but the artifact store cannot provide the object at execution time.
+- Action: rebuild/publish the artifact and register again via CI, then deploy the new version.
+- Treat both as action-required states, not transient platform failures.
 - Use `request_id` from the API response when opening a support ticket.
 - Governance reference: `docs/BUILD_REGISTRY.md`.
 
 Engine error codes:
+- ARTIFACT_NOT_FOUND
 - ENGINE_CALL_FAILED
 - ENGINE_UNAVAILABLE
 - ENGINE_UNAUTHORIZED

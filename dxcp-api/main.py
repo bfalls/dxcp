@@ -445,7 +445,11 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
         return None, recipe_capability_error
     build = storage.find_latest_build(intent.service, intent.version)
     if not build:
-        return None, error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
+        return None, error_response(
+            400,
+            "VERSION_NOT_FOUND",
+            "Version is not registered in the build registry for this service",
+        )
     if not _version_successful_in_environment(intent.service, intent.source_environment, intent.version):
         return None, error_response(
             400,
@@ -876,6 +880,7 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "PROMOTION_NO_SUCCESSFUL_SOURCE_VERSION",
     }
     policy_change_codes = {
+        "ARTIFACT_NOT_FOUND",
         "SERVICE_NOT_ALLOWLISTED",
         "SERVICE_NOT_IN_DELIVERY_GROUP",
         "ENVIRONMENT_NOT_ALLOWED",
@@ -904,6 +909,30 @@ def _include_operator_hint(actor: Actor) -> bool:
 
 def _classify_engine_error(message: str) -> tuple[str, int]:
     lowered = (message or "").lower()
+    artifact_context = (
+        "artifact" in lowered
+        or "object" in lowered
+        or "bucket" in lowered
+        or "key" in lowered
+        or "s3" in lowered
+    )
+    artifact_missing = (
+        "nosuchkey" in lowered
+        or "not found" in lowered
+        or "does not exist" in lowered
+        or "missing object" in lowered
+    )
+    artifact_denied = (
+        "access denied" in lowered
+        or "accessdenied" in lowered
+        or "forbidden" in lowered
+    )
+    if (
+        ("http 404" in lowered and (artifact_context or artifact_missing))
+        or ("http 403" in lowered and artifact_context and artifact_denied)
+        or (artifact_context and artifact_missing)
+    ):
+        return "ARTIFACT_NOT_FOUND", 409
     if "timeout" in lowered or "timed out" in lowered:
         return "ENGINE_TIMEOUT", 504
     if "http 401" in lowered or "http 403" in lowered:
@@ -917,8 +946,16 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
     raw_message = str(exc) if exc else ""
     redacted = redact_text(raw_message)
     code, status = _classify_engine_error(raw_message)
+    response_message = user_message
     operator_hint = None
-    if _include_operator_hint(actor) and redacted:
+    if code == "ARTIFACT_NOT_FOUND":
+        response_message = (
+            "Artifact is no longer available in the artifact store. "
+            "Rebuild and publish again, then deploy the new version."
+        )
+        if _include_operator_hint(actor):
+            operator_hint = "If using demo artifact retention, older artifacts may expire."
+    elif _include_operator_hint(actor) and redacted:
         operator_hint = redacted
     log_event(
         "engine_error",
@@ -932,7 +969,7 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
         "code": code,
         "error_code": code,
         "failure_cause": classify_failure_cause(code),
-        "message": user_message,
+        "message": response_message,
         "request_id": request_id,
     }
     if operator_hint:
@@ -1456,7 +1493,11 @@ def create_deployment(
     build = storage.find_latest_build(intent.service, intent.version)
     if not build:
         _record_deploy_denied(actor, intent, "VERSION_NOT_FOUND", group.get("id"))
-        return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
+        return error_response(
+            400,
+            "VERSION_NOT_FOUND",
+            "Version is not registered in the build registry for this service",
+        )
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
     if recipe_capability_error:
         return recipe_capability_error
@@ -1630,7 +1671,11 @@ def validate_deployment(
         return recipe_capability_error
     build = storage.find_latest_build(intent.service, intent.version)
     if not build:
-        return error_response(400, "VERSION_NOT_FOUND", "Version is not registered for this service")
+        return error_response(
+            400,
+            "VERSION_NOT_FOUND",
+            "Version is not registered in the build registry for this service",
+        )
 
     policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:

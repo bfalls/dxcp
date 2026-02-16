@@ -188,6 +188,53 @@ async def test_deploy_rejects_version_not_found(tmp_path: Path, monkeypatch):
     _assert_user_safe_error(body)
 
 
+async def test_deploy_maps_missing_artifact_to_artifact_not_found(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        def _raise_missing_artifact(payload: dict, idempotency_key: str) -> dict:
+            raise RuntimeError(
+                "Spinnaker HTTP 404: artifact fetch failed: NoSuchKey for s3://dxcp-test-bucket/payments-1.2.3.zip"
+            )
+
+        monkeypatch.setattr(main.spinnaker, "trigger_deploy", _raise_missing_artifact)
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-artifact-missing", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "ARTIFACT_NOT_FOUND"
+    assert body["error_code"] == "ARTIFACT_NOT_FOUND"
+    assert body["failure_cause"] == "POLICY_CHANGE"
+    assert body["message"] == (
+        "Artifact is no longer available in the artifact store. "
+        "Rebuild and publish again, then deploy the new version."
+    )
+    assert body.get("request_id")
+    assert body.get("operator_hint") == "If using demo artifact retention, older artifacts may expire."
+
+
+async def test_deploy_unknown_engine_error_uses_existing_fallback(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        def _raise_unknown(payload: dict, idempotency_key: str) -> dict:
+            raise RuntimeError("unexpected engine failure signature")
+
+        monkeypatch.setattr(main.spinnaker, "trigger_deploy", _raise_unknown)
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-engine-unknown", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "ENGINE_CALL_FAILED"
+    assert body["error_code"] == "ENGINE_CALL_FAILED"
+    assert body["message"] == "Unable to start deployment"
+    assert body.get("request_id")
+
+
 async def test_deploy_rejects_incompatible_recipe(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(

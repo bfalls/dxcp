@@ -3247,7 +3247,7 @@ export default function App() {
       const versionsEntry = service ? getCacheEntry(cacheStore.versions, service) : null
       const versionsFresh = service && isCacheFresh(versionsEntry)
       const policyPromise = refreshPolicyContext()
-      const versionsPromise = service ? loadVersions(!Boolean(versionsFresh)) : Promise.resolve(true)
+      const versionsPromise = service ? loadVersions(!versionsFresh) : Promise.resolve(true)
       const actionsPromise = service ? loadAllowedActions(service) : Promise.resolve(true)
       Promise.allSettled([policyPromise, versionsPromise, actionsPromise]).then((results) => {
         if (lastRouteKeyRef.current !== routeKey) return

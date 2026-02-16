@@ -1065,6 +1065,8 @@ components:
       properties:
         code:
           type: string
+          description: |
+            Stable DXCP error code (examples: VERSION_NOT_FOUND, ARTIFACT_NOT_FOUND, ENGINE_CALL_FAILED).
         error_code:
           type: string
         failure_cause:
