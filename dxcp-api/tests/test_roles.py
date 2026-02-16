@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header, auth_header_for_subject, configure_auth_env, mock_jwks
 
 
 from test_helpers import seed_defaults
@@ -55,6 +55,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
+    os.environ["DXCP_CI_PUBLISHERS"] = "ci-publisher-1"
     configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
@@ -173,7 +174,18 @@ async def test_observer_denied_build_register(tmp_path: Path, monkeypatch):
             json=_build_payload(),
         )
     assert response.status_code == 403
-    assert response.json()["code"] == "ROLE_FORBIDDEN"
+    assert response.json()["code"] == "CI_ONLY"
+
+
+async def test_observer_denied_build_register_existing(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-existing-1", **auth_header(["dxcp-observers"])},
+            json={"service": "demo-service", "version": "1.0.0"},
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "CI_ONLY"
 
 
 async def test_platform_admin_allowed_deploy(tmp_path: Path, monkeypatch):
@@ -198,7 +210,7 @@ async def test_platform_admin_allowed_rollback(tmp_path: Path, monkeypatch):
     assert response.status_code == 201
 
 
-async def test_platform_admin_allowed_build_register(tmp_path: Path, monkeypatch):
+async def test_platform_admin_denied_build_register_when_not_ci(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         cap_request = {
             "service": "demo-service",
@@ -215,6 +227,38 @@ async def test_platform_admin_allowed_build_register(tmp_path: Path, monkeypatch
         response = await client.post(
             "/v1/builds",
             headers={"Idempotency-Key": "build-2", **auth_header(["dxcp-platform-admins"])},
+            json=_build_payload(),
+        )
+        existing_response = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-existing-2", **auth_header(["dxcp-platform-admins"])},
+            json={"service": "demo-service", "version": "1.0.0"},
+        )
+    assert cap_response.status_code == 403
+    assert cap_response.json()["code"] == "CI_ONLY"
+    assert response.status_code == 403
+    assert response.json()["code"] == "CI_ONLY"
+    assert existing_response.status_code == 403
+    assert existing_response.json()["code"] == "CI_ONLY"
+
+
+async def test_ci_publisher_can_register_build_without_admin_role(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        cap_request = {
+            "service": "demo-service",
+            "version": "1.0.0",
+            "expectedSizeBytes": 1024,
+            "expectedSha256": "a" * 64,
+            "contentType": "application/zip",
+        }
+        cap_response = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ci-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            json=cap_request,
+        )
+        response = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-ci-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
             json=_build_payload(),
         )
     assert cap_response.status_code == 201

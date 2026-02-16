@@ -362,10 +362,26 @@ Fields:
   - Filters: event_type, delivery_group_id, start_time, end_time, limit
   - Authz: PLATFORM_ADMIN only
 
+### Admin System Settings (admin-only)
+
+- GET /v1/admin/system/rate-limits
+  - Read global read/mutate RPM policy from SSM-backed runtime config.
+- PUT /v1/admin/system/rate-limits
+  - Update global read/mutate RPM policy.
+
+- GET /v1/admin/system/ci-publishers
+  - Read CI publisher allowlist from SSM-backed runtime config.
+  - Response: { ci_publishers: [..], source: "ssm" }
+- PUT /v1/admin/system/ci-publishers
+  - Update CI publisher allowlist.
+  - Request: { ci_publishers: ["<caller-sub-or-client-id>", ...] }
+  - Response: { ci_publishers: [..], source: "ssm" }
+
 ### Build Publish Flow
 
 - POST /v1/builds/upload-capability
   - Obtain upload capability (token or signed URL)
+  - Authz: CI publisher identities only
   - Requires Idempotency-Key header
   - Request: service, version, expectedSizeBytes, expectedSha256, contentType
   - Response: BuildUploadCapability
@@ -376,15 +392,21 @@ Fields:
 
 - POST /v1/builds
   - Register a build/version so it appears in the UI
+  - Authz: CI publisher identities only
   - Requires Idempotency-Key header
   - Request: BuildRegistration (service, version, artifactRef, sha256, sizeBytes, contentType)
   - Response: BuildRegistration
 
 - POST /v1/builds/register
   - Register an existing S3 artifact without upload capability
+  - Authz: CI publisher identities only
   - Requires Idempotency-Key header
   - Request: BuildRegisterExisting (service, version, artifactRef OR s3Bucket+s3Key)
   - Response: BuildRegistration
+
+CI publisher allowlist configuration:
+- Env var: `DXCP_CI_PUBLISHERS` (comma-separated caller subject/client IDs)
+- SSM key: `/dxcp/config/ci_publishers` (comma-separated caller subject/client IDs)
 
 ---
 
@@ -417,6 +439,7 @@ Notes:
 - 403 SERVICE_NOT_ALLOWLISTED
 - 403 SERVICE_NOT_IN_DELIVERY_GROUP
 - 403 ROLE_FORBIDDEN
+- 403 CI_ONLY
 - 403 RECIPE_NOT_ALLOWED
 - 403 ENVIRONMENT_NOT_ALLOWED
 - 404 RECIPE_NOT_FOUND

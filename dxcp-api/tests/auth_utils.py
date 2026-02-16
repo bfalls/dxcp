@@ -57,6 +57,10 @@ def auth_header(roles: Iterable[str]) -> dict:
     return {"Authorization": f"Bearer {build_token(roles)}"}
 
 
+def auth_header_for_subject(roles: Iterable[str], subject: str) -> dict:
+    return {"Authorization": f"Bearer {build_token(roles, subject=subject)}"}
+
+
 def mock_jwks(monkeypatch) -> None:
     payload = jwks_payload()
 

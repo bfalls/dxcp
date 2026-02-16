@@ -125,6 +125,28 @@ Operator notes:
 - Changes typically propagate to enforcement within about 60 seconds.
 - High values increase abuse and cost risk and should be changed carefully.
 
+## System settings (CI publishers)
+
+Status: Current (read and write)
+
+Purpose:
+- Manage the runtime allowlist for CI identities authorized to publish/register builds.
+- Keep build certification authority in admin-governed platform settings.
+
+Fields:
+- ci_publishers (array of caller subject/client IDs)
+
+Storage and source of truth:
+- Value is persisted in SSM and read from `DXCP_SSM_PREFIX`.
+- Expected key:
+  - `/dxcp/config/ci_publishers`
+- Stored format in SSM is comma-separated IDs.
+
+Operator notes:
+- Updates apply to runtime authorization immediately in the API process.
+- `POST /v1/builds/upload-capability`, `POST /v1/builds`, and `POST /v1/builds/register`
+  require caller identity to be present in `ci_publishers`.
+
 ---
 
 ## Minimum API needed
@@ -155,5 +177,6 @@ Current:
 - Admin CRUD endpoints exist for Recipe create and update.
 - Admin UI supports System Settings for global read/mutate RPM.
 - Admin API supports GET and PUT for system rate limits.
+- Admin API supports GET and PUT for CI publisher allowlist.
 - Recipes and delivery groups are seeded in storage by the platform.
 - Admin UI exposes read-only audit events for PLATFORM_ADMIN.

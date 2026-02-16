@@ -168,6 +168,12 @@ def require_role(actor: Actor, allowed: set[Role], action: str):
     return error_response(403, "ROLE_FORBIDDEN", f"Role {actor.role.value} cannot {action}")
 
 
+def require_ci_publisher(actor: Actor, action: str):
+    if actor.actor_id in SETTINGS.ci_publishers:
+        return None
+    return error_response(403, "CI_ONLY", f"Only CI publisher identities can {action}")
+
+
 def can_deploy(actor: Actor) -> bool:
     return actor.role in {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
 
@@ -2500,9 +2506,9 @@ def create_upload_capability(
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
-    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
-    if role_error:
-        return role_error
+    ci_error = require_ci_publisher(actor, "request build upload capability")
+    if ci_error:
+        return ci_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "upload_capability")
@@ -2545,9 +2551,9 @@ def register_build(
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
-    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
-    if role_error:
-        return role_error
+    ci_error = require_ci_publisher(actor, "register builds")
+    if ci_error:
+        return ci_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "build_register")
@@ -2589,10 +2595,10 @@ def register_existing_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(request, authorization)
-    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "register builds")
-    if role_error:
-        return role_error
+    actor = get_actor(authorization)
+    ci_error = require_ci_publisher(actor, "register builds")
+    if ci_error:
+        return ci_error
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "build_register")

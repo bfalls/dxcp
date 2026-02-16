@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header_for_subject, configure_auth_env, mock_jwks
 
 
 from test_helpers import seed_defaults
@@ -37,6 +37,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
+    os.environ["DXCP_CI_PUBLISHERS"] = "ci-publisher-1"
     configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
@@ -81,7 +82,7 @@ async def test_s3_artifact_ref_accepted(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-1", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "build-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
             json={
                 "service": "demo-service",
                 "version": "1.0.0",
@@ -99,7 +100,7 @@ async def test_non_s3_artifact_ref_rejected(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-2", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "build-2", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
             json={
                 "service": "demo-service",
                 "version": "1.0.0",
@@ -118,7 +119,7 @@ async def test_malformed_artifact_ref_rejected(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-3", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "build-3", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
             json={
                 "service": "demo-service",
                 "version": "1.0.0",

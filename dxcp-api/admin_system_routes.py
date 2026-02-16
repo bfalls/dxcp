@@ -117,6 +117,21 @@ def _write_rate_limits_to_ssm(read_rpm: int, mutate_rpm: int) -> None:
     _ssm_put_parameter(f"{prefix}/mutate_rpm", str(mutate_rpm))
 
 
+def _parse_ci_publishers_csv(value: str) -> list[str]:
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _read_ci_publishers_from_ssm() -> dict:
+    prefix = _ssm_prefix()
+    raw = _ssm_get_parameter(f"{prefix}/ci_publishers")
+    return {"ci_publishers": _parse_ci_publishers_csv(raw), "source": "ssm"}
+
+
+def _write_ci_publishers_to_ssm(ci_publishers: list[str]) -> None:
+    prefix = _ssm_prefix()
+    _ssm_put_parameter(f"{prefix}/ci_publishers", ",".join(ci_publishers))
+
+
 def _validate_update_payload(payload: object) -> tuple[Optional[dict], Optional[str]]:
     if not isinstance(payload, dict):
         return None, "Payload must be an object"
@@ -128,6 +143,26 @@ def _validate_update_payload(payload: object) -> tuple[Optional[dict], Optional[
     except ValueError as exc:
         return None, str(exc)
     return {"read_rpm": read_rpm, "mutate_rpm": mutate_rpm}, None
+
+
+def _validate_ci_publishers_payload(payload: object) -> tuple[Optional[list[str]], Optional[str]]:
+    if not isinstance(payload, dict):
+        return None, "Payload must be an object"
+    if "ci_publishers" not in payload:
+        return None, "ci_publishers is required"
+    values = payload.get("ci_publishers")
+    if not isinstance(values, list):
+        return None, "ci_publishers must be an array of non-empty strings"
+    cleaned: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            return None, "ci_publishers must be an array of non-empty strings"
+        item = value.strip()
+        if not item:
+            return None, "ci_publishers must be an array of non-empty strings"
+        if item not in cleaned:
+            cleaned.append(item)
+    return cleaned, None
 
 
 def register_admin_system_routes(
@@ -191,3 +226,47 @@ def register_admin_system_routes(
             return error_response(500, "INTERNAL_ERROR", str(exc))
         except Exception:
             return error_response(500, "INTERNAL_ERROR", "Unable to update system rate limits in SSM")
+
+    @app.get("/v1/admin/system/ci-publishers")
+    def get_system_ci_publishers(request: Request, authorization: Optional[str] = Header(None)):
+        actor = get_actor(authorization)
+        rate_limiter.check_read(actor.actor_id)
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view system CI publishers")
+        if role_error:
+            return role_error
+        try:
+            return _read_ci_publishers_from_ssm()
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to read system CI publishers from SSM")
+
+    @app.put("/v1/admin/system/ci-publishers")
+    def update_system_ci_publishers(
+        payload: dict,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+    ):
+        actor = get_actor(authorization)
+        rate_limiter.check_mutate(actor.actor_id, "admin_system_ci_publishers_update")
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system CI publishers")
+        if role_error:
+            return role_error
+        validated, validation_error = _validate_ci_publishers_payload(payload)
+        if validation_error:
+            return error_response(400, "INVALID_REQUEST", validation_error)
+        try:
+            old_values = _read_ci_publishers_from_ssm()
+            _write_ci_publishers_to_ssm(validated)
+            SETTINGS.ci_publishers = list(validated)
+            new_values = {"ci_publishers": list(validated), "source": "ssm"}
+            request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
+            logger.info(
+                "event=admin.system_ci_publishers.updated request_id=%s actor_id=%s actor_role=%s old_ci_publishers=%s new_ci_publishers=%s",
+                request_id,
+                actor.actor_id,
+                actor.role.value,
+                ",".join(old_values.get("ci_publishers", [])),
+                ",".join(new_values.get("ci_publishers", [])),
+            )
+            return new_values
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to update system CI publishers in SSM")

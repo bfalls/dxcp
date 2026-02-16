@@ -46,6 +46,8 @@ class Settings:
         self.oidc_audience = self._get("oidc/audience", "DXCP_OIDC_AUDIENCE", "", str)
         self.oidc_jwks_url = self._get("oidc/jwks_url", "DXCP_OIDC_JWKS_URL", "", str)
         self.oidc_roles_claim = self._get("oidc/roles_claim", "DXCP_OIDC_ROLES_CLAIM", "", str)
+        ci_publishers = self._get("ci_publishers", "DXCP_CI_PUBLISHERS", "", str)
+        self.ci_publishers = [item.strip() for item in ci_publishers.split(",") if item.strip()]
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.ui_default_refresh_seconds = self._get(
