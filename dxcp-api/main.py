@@ -39,6 +39,7 @@ from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
 from storage import build_storage, utc_now
+from admin_system_routes import register_admin_system_routes
 
 
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -177,6 +178,15 @@ def can_rollback(actor: Actor) -> bool:
 
 def can_view(actor: Actor) -> bool:
     return actor.role in {Role.OBSERVER, Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
+
+
+register_admin_system_routes(
+    app,
+    get_actor=get_actor,
+    rate_limiter=rate_limiter,
+    require_role=require_role,
+    error_response=error_response,
+)
 
 
 def _policy_denied(code: str, detail: str, actor: Optional[Actor] = None) -> JSONResponse:

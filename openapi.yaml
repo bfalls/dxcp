@@ -326,6 +326,48 @@ paths:
         '503':
           $ref: '#/components/responses/MutationsDisabled'
 
+  /admin/system/rate-limits:
+    get:
+      summary: Get global system rate limits
+      operationId: getAdminSystemRateLimits
+      responses:
+        '200':
+          description: Current global rate-limit policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSystemRateLimits'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+    put:
+      summary: Update global system rate limits
+      operationId: updateAdminSystemRateLimits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminSystemRateLimitsUpdateRequest'
+      responses:
+        '200':
+          description: Updated global rate-limit policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminSystemRateLimits'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -562,6 +604,33 @@ components:
           type: integer
         daily_rollback_quota:
           type: integer
+    AdminSystemRateLimits:
+      type: object
+      required: [read_rpm, mutate_rpm, source]
+      properties:
+        read_rpm:
+          type: integer
+          minimum: 1
+          maximum: 5000
+        mutate_rpm:
+          type: integer
+          minimum: 1
+          maximum: 5000
+        source:
+          type: string
+          enum: [ssm]
+    AdminSystemRateLimitsUpdateRequest:
+      type: object
+      required: [read_rpm, mutate_rpm]
+      properties:
+        read_rpm:
+          type: integer
+          minimum: 1
+          maximum: 5000
+        mutate_rpm:
+          type: integer
+          minimum: 1
+          maximum: 5000
     Environment:
       type: object
       required:
@@ -877,6 +946,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Caller does not have the required role.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     DeploymentLocked:
       description: Delivery group concurrency limit reached.
       content:
@@ -891,6 +966,12 @@ components:
             $ref: '#/components/schemas/Error'
     MutationsDisabled:
       description: Mutating operations are disabled by kill switch.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotImplemented:
+      description: Endpoint exists but is not implemented yet.
       content:
         application/json:
           schema:
