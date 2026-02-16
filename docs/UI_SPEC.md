@@ -235,7 +235,7 @@ Defaults and bounds:
 
 ### Admin section
 
-Status: Current (Delivery Groups and Recipes)
+Status: Current (Delivery Groups, Recipes, and System Settings)
 
 Entry visibility:
 - Visible to all authenticated roles; controls are disabled unless PLATFORM_ADMIN.
@@ -243,6 +243,7 @@ Entry visibility:
 Subsections:
 - Delivery Groups
 - Recipes
+- System Settings
 
 #### Delivery Groups
 
@@ -285,3 +286,33 @@ Blocked-action UX:
 - Engine mapping is read-only while the recipe is in use.
 - If validation returns warnings, require explicit confirmation before saving.
 - If validation returns errors, block save.
+
+#### System Settings
+
+User goal:
+- Manage global rate-limit governance without direct infrastructure access.
+
+Key data:
+- Read RPM.
+- Mutate RPM.
+- API request_id when errors occur.
+
+Primary actions:
+- Load current values.
+- Save updated values.
+
+Validation:
+- Integer values only.
+- Allowed range: 1 to 5000.
+- Save is enabled only when values are changed.
+
+Safety text:
+- "Changing rate limits affects platform safety and cost controls."
+
+Blocked-action UX:
+- Non-admin users cannot access this subsection.
+- On API failure, show clear error text with request_id when available.
+
+Operator note:
+- Changes typically take effect within about 60 seconds.
+- High values increase abuse and cost risk.

@@ -43,6 +43,12 @@ Idempotency:
 Rate limits and quotas (defaults):
 - Read requests: 60 requests per minute per client
 - Mutating requests: 10 requests per minute per client
+- Global governance policy:
+  - read_rpm and mutate_rpm are platform-level limits managed by PLATFORM_ADMIN in Admin UI -> System Settings.
+  - Values are persisted in SSM under `DXCP_SSM_PREFIX` (for example `/dxcp/config/read_rpm` and `/dxcp/config/mutate_rpm`).
+  - Allowed bounds are integer `1..5000` (no zero, no negatives, no fractional values).
+  - Enforcement refreshes from config on a short window; operator expectation is propagation in about 60 seconds.
+  - Higher values increase abuse and cost risk; raise only with deliberate platform review.
 - Daily quotas per delivery group:
   - Deployments: 25 per day
   - Rollbacks: 10 per day
@@ -416,6 +422,7 @@ Notes:
 - 404 RECIPE_NOT_FOUND
 - 409 CONCURRENCY_LIMIT_REACHED
 - 429 QUOTA_EXCEEDED
+- 429 RATE_LIMITED (message: "Rate limit exceeded. Try again shortly or contact a platform admin.")
 - 503 MUTATIONS_DISABLED
 - 400 RECIPE_INCOMPATIBLE
 

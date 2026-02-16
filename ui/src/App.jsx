@@ -873,6 +873,7 @@ export default function App() {
   )
   const [validatedIntentKey, setValidatedIntentKey] = useState('')
   const lastAutoPreflightKeyRef = useRef('')
+  const lastAutoPreflightFailedKeyRef = useRef('')
   const lastChangeSummaryFilledRef = useRef(false)
   const lastPolicySummaryKeyRef = useRef('')
   const lastPreflightKeyRef = useRef('')
@@ -2105,7 +2106,7 @@ export default function App() {
         VERSION_NOT_FOUND: 'Version must be registered for this service.',
         INVALID_VERSION: 'Version format is invalid.',
         DEPLOYMENT_LOCKED: 'Deployment lock active for this delivery group.',
-        RATE_LIMITED: 'Rate limit exceeded. Please retry shortly.',
+        RATE_LIMITED: 'Rate limit exceeded. Try again shortly or contact a platform admin.',
         RECIPE_NOT_ALLOWED: 'Selected recipe is not allowed for this delivery group.',
         RECIPE_INCOMPATIBLE: 'Selected recipe is not compatible with this service.',
         RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
@@ -2306,7 +2307,7 @@ export default function App() {
             ENVIRONMENT_NOT_ALLOWED: 'Environment is not allowed for this delivery group.',
             RECIPE_DEPRECATED: 'Selected recipe is deprecated and cannot be used for new deployments.',
             MUTATIONS_DISABLED: 'Deployments are currently disabled by the platform.',
-            RATE_LIMITED: 'Rate limit exceeded while checking policy.'
+            RATE_LIMITED: 'Rate limit exceeded. Try again shortly or contact a platform admin.'
           }
           const inline = messages[result.code]
           setPreflightStatus('error')
@@ -2343,6 +2344,8 @@ export default function App() {
 
   async function handleReviewDeploy() {
     if (!canRunPreflight || preflightStatus === 'checking') return
+    // Manual review should always be allowed after user intent to retry.
+    lastAutoPreflightFailedKeyRef.current = ''
     await runPreflight({ advanceToConfirm: true })
   }
 
@@ -2700,6 +2703,7 @@ export default function App() {
       setPreflightErrorHeadline('')
       setValidatedIntentKey('')
       lastAutoPreflightKeyRef.current = ''
+      lastAutoPreflightFailedKeyRef.current = ''
       lastChangeSummaryFilledRef.current = false
       lastPreflightKeyRef.current = preflightKey
       return
@@ -2711,6 +2715,7 @@ export default function App() {
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
+    lastAutoPreflightFailedKeyRef.current = ''
     lastPreflightKeyRef.current = preflightKey
   }, [
     canRunPreflight,
@@ -2731,10 +2736,16 @@ export default function App() {
       lastChangeSummaryFilledRef.current = false
       return
     }
+    // Prevent an automatic retry loop for the same invalid intent key.
+    if (lastAutoPreflightFailedKeyRef.current === preflightKey) return
     if (lastAutoPreflightKeyRef.current === preflightKey && lastChangeSummaryFilledRef.current) return
     lastAutoPreflightKeyRef.current = preflightKey
     lastChangeSummaryFilledRef.current = true
-    runPreflight({ advanceToConfirm: false })
+    runPreflight({ advanceToConfirm: false }).then((ok) => {
+      if (!ok) {
+        lastAutoPreflightFailedKeyRef.current = preflightKey
+      }
+    })
   }, [
     canRunPreflight,
     deployStep,

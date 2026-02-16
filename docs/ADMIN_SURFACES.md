@@ -97,6 +97,34 @@ SSM keys (when `DXCP_SSM_PREFIX` is configured):
 - `/dxcp/config/ui_min_refresh_seconds`
 - `/dxcp/config/ui_max_refresh_seconds`
 
+## System settings (global rate limits)
+
+Status: Current (read and write)
+
+Purpose:
+- Manage global API rate limits as governance policy.
+- Keep abuse and cost controls centralized in platform admin workflows.
+
+Fields:
+- read_rpm
+- mutate_rpm
+
+Validation:
+- Integers only.
+- Minimum: 1.
+- Maximum: 5000.
+- Zero, negative, and fractional values are rejected.
+
+Storage and source of truth:
+- Values are persisted in SSM and read from `DXCP_SSM_PREFIX`.
+- Expected keys:
+  - `/dxcp/config/read_rpm`
+  - `/dxcp/config/mutate_rpm`
+
+Operator notes:
+- Changes typically propagate to enforcement within about 60 seconds.
+- High values increase abuse and cost risk and should be changed carefully.
+
 ---
 
 ## Minimum API needed
@@ -125,5 +153,7 @@ Current:
 - Admin CRUD endpoints exist for DeliveryGroup create and update.
 - Admin UI supports Recipe create, edit, and deprecation.
 - Admin CRUD endpoints exist for Recipe create and update.
+- Admin UI supports System Settings for global read/mutate RPM.
+- Admin API supports GET and PUT for system rate limits.
 - Recipes and delivery groups are seeded in storage by the platform.
 - Admin UI exposes read-only audit events for PLATFORM_ADMIN.

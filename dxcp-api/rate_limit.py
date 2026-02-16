@@ -17,6 +17,8 @@ except Exception:  # pragma: no cover - optional dependency for local mode
 
 
 class RateLimiter:
+    RATE_LIMIT_EXCEEDED_MESSAGE = "Rate limit exceeded. Try again shortly or contact a platform admin."
+
     def __init__(self) -> None:
         self._table_name = os.getenv("DXCP_DDB_TABLE", "")
         self._refresh_seconds = int(os.getenv("DXCP_RATE_LIMIT_REFRESH_SECONDS", "30"))
@@ -111,7 +113,7 @@ class RateLimiter:
                 limit,
                 120,
                 "RATE_LIMITED",
-                "Rate limit exceeded",
+                self.RATE_LIMIT_EXCEEDED_MESSAGE,
             )
             return
         now = time.time()
@@ -121,7 +123,7 @@ class RateLimiter:
             bucket["count"] = 0
             bucket["limit"] = limit
         if bucket["count"] >= limit:
-            raise PolicyError(429, "RATE_LIMITED", "Rate limit exceeded")
+            raise PolicyError(429, "RATE_LIMITED", self.RATE_LIMIT_EXCEEDED_MESSAGE)
         bucket["count"] += 1
 
     def _check_daily(self, client_id: str, key: str, limit: int) -> None:
