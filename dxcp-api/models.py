@@ -9,6 +9,13 @@ class Role(str, Enum):
     OBSERVER = "OBSERVER"
 
 
+class CiPublisherProvider(str, Enum):
+    GITHUB = "github"
+    JENKINS = "jenkins"
+    SPINNAKER = "spinnaker"
+    CUSTOM = "custom"
+
+
 class DeploymentState(str, Enum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
@@ -210,6 +217,22 @@ class AuditEvent(BaseModel):
 class Actor(BaseModel):
     actor_id: str
     role: Role
+
+
+class CiPublisher(BaseModel):
+    name: str
+    provider: CiPublisherProvider
+
+    issuers: Optional[List[str]] = None
+    audiences: Optional[List[str]] = None
+    authorized_party_azp: Optional[List[str]] = None
+    subjects: Optional[List[str]] = None
+    subject_prefixes: Optional[List[str]] = None
+    emails: Optional[List[str]] = None
+
+    description: Optional[str] = None
+    owner: Optional[str] = None
+    links: Optional[List[str]] = None
 
 
 class BuildUploadRequest(BaseModel):
