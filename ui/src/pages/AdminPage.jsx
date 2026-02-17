@@ -82,11 +82,16 @@ export default function AdminPage({
   handleSystemCiPublishersDraftChange,
   saveSystemCiPublishers,
   loadSystemCiPublishers,
+  systemCiPublishersList,
   systemCiPublishersLoading,
   systemCiPublishersSaving,
   systemCiPublishersDirty,
   systemCiPublishersError,
-  systemCiPublishersNote
+  systemCiPublishersNote,
+  whoamiData,
+  whoamiLoading,
+  whoamiError,
+  loadWhoAmI
 }) {
   const headerAction =
     adminTab === 'delivery-groups'
@@ -114,13 +119,32 @@ export default function AdminPage({
                   onClick={() => {
                     loadSystemRateLimits({ force: true })
                     loadSystemCiPublishers({ force: true })
+                    loadWhoAmI({ force: true })
                   }}
-                  disabled={systemRateLimitLoading || systemRateLimitSaving || systemCiPublishersLoading || systemCiPublishersSaving}
+                  disabled={
+                    systemRateLimitLoading ||
+                    systemRateLimitSaving ||
+                    systemCiPublishersLoading ||
+                    systemCiPublishersSaving ||
+                    whoamiLoading
+                  }
                 >
-                  {systemRateLimitLoading || systemCiPublishersLoading ? 'Loading...' : 'Refresh'}
+                  {systemRateLimitLoading || systemCiPublishersLoading || whoamiLoading ? 'Loading...' : 'Refresh'}
                 </button>
               )
           : null
+
+  const summarizePublisherRules = (publisher) => {
+    const counts = [
+      ['iss', Array.isArray(publisher?.issuers) ? publisher.issuers.length : 0],
+      ['aud', Array.isArray(publisher?.audiences) ? publisher.audiences.length : 0],
+      ['azp', Array.isArray(publisher?.authorized_party_azp) ? publisher.authorized_party_azp.length : 0],
+      ['sub', Array.isArray(publisher?.subjects) ? publisher.subjects.length : 0],
+      ['sub_prefix', Array.isArray(publisher?.subject_prefixes) ? publisher.subject_prefixes.length : 0],
+      ['email', Array.isArray(publisher?.emails) ? publisher.emails.length : 0]
+    ]
+    return counts.map(([label, count]) => `${label}:${count}`).join(' ')
+  }
 
   return (
     <div className="shell two-column">
@@ -915,19 +939,41 @@ export default function AdminPage({
               {systemRateLimitSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
-          <h2 className="space-12">CI publisher allowlist</h2>
-          <div className="helper">Comma-separated subject identifiers allowed to publish/register builds.</div>
+          <h2 className="space-12">CI publishers</h2>
+          <div className="helper">Manage named CI publishers and token match rules.</div>
+          {Array.isArray(systemCiPublishersList) && systemCiPublishersList.length > 0 ? (
+            <table className="space-12" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Name</th>
+                  <th style={{ textAlign: 'left' }}>Provider</th>
+                  <th style={{ textAlign: 'left' }}>Match rules</th>
+                </tr>
+              </thead>
+              <tbody>
+                {systemCiPublishersList.map((publisher) => (
+                  <tr key={`${publisher?.name || 'publisher'}-${publisher?.provider || 'custom'}`}>
+                    <td>{publisher?.name || '-'}</td>
+                    <td>{publisher?.provider || '-'}</td>
+                    <td>{summarizePublisherRules(publisher)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="helper space-8">No CI publishers configured.</div>
+          )}
           <div className="field space-12">
-            <label htmlFor="system-ci-publishers">Allowed CI publishers</label>
+            <label htmlFor="system-ci-publishers">Publishers JSON (View/Edit)</label>
             <textarea
               id="system-ci-publishers"
-              rows={3}
+              rows={12}
               value={systemCiPublishersDraft}
               onChange={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
               onInput={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
               disabled={systemCiPublishersLoading || systemCiPublishersSaving}
             />
-            <div className="helper">Example: ci-bot-1, ci-bot-2</div>
+            <div className="helper">PUT payload format: {"{ \"publishers\": [ ... ] }"}.</div>
           </div>
           {systemCiPublishersError && <div className="helper space-8">{systemCiPublishersError}</div>}
           {systemCiPublishersNote && <div className="helper space-8">{systemCiPublishersNote}</div>}
@@ -940,6 +986,46 @@ export default function AdminPage({
               {systemCiPublishersSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
+          <h2 className="space-12">Who am I</h2>
+          <div className="helper">Identity fields seen by DXCP for CI publisher matching.</div>
+          {whoamiError && <div className="helper space-8">{whoamiError}</div>}
+          <div className="space-8">
+            <button className="button secondary" onClick={() => loadWhoAmI({ force: true })} disabled={whoamiLoading}>
+              {whoamiLoading ? 'Loading...' : 'Refresh identity'}
+            </button>
+          </div>
+          {whoamiData && (
+            <div className="list space-12">
+              <div className="list-item admin-detail">
+                <div>actor_id</div>
+                <div>{whoamiData.actor_id || '-'}</div>
+              </div>
+              <div className="list-item admin-detail">
+                <div>sub</div>
+                <div>{whoamiData.sub || '-'}</div>
+              </div>
+              <div className="list-item admin-detail">
+                <div>email</div>
+                <div>{whoamiData.email || '-'}</div>
+              </div>
+              <div className="list-item admin-detail">
+                <div>iss</div>
+                <div>{whoamiData.iss || '-'}</div>
+              </div>
+              <div className="list-item admin-detail">
+                <div>aud</div>
+                <div>
+                  {Array.isArray(whoamiData.aud)
+                    ? whoamiData.aud.join(', ')
+                    : (whoamiData.aud || '-')}
+                </div>
+              </div>
+              <div className="list-item admin-detail">
+                <div>azp</div>
+                <div>{whoamiData.azp || '-'}</div>
+              </div>
+            </div>
+          )}
         </SectionCard>
       )}
     </div>

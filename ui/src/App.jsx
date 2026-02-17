@@ -543,19 +543,35 @@ function parseSystemRateLimitValue(value, label) {
 }
 
 function parseCiPublishersValue(value) {
-  const raw = String(value ?? '')
-  const parsed = raw
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-  const unique = []
-  parsed.forEach((item) => {
-    if (!unique.includes(item)) unique.push(item)
-  })
-  if (unique.length === 0) {
-    return { error: 'At least one CI publisher is required.' }
+  const raw = String(value ?? '').trim()
+  if (!raw) {
+    return { error: 'Publishers JSON is required.' }
   }
-  return { value: unique }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    return { error: 'Publishers JSON must be valid JSON.' }
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: 'Publishers JSON must be an array.' }
+  }
+  for (const publisher of parsed) {
+    if (!publisher || typeof publisher !== 'object' || Array.isArray(publisher)) {
+      return { error: 'Each publisher must be an object.' }
+    }
+    if (typeof publisher.name !== 'string' || !publisher.name.trim()) {
+      return { error: 'Each publisher must have a non-empty name.' }
+    }
+    if (typeof publisher.provider !== 'string' || !publisher.provider.trim()) {
+      return { error: 'Each publisher must have a provider.' }
+    }
+  }
+  return { value: parsed }
+}
+
+function formatCiPublishersJson(value) {
+  return JSON.stringify(Array.isArray(value) ? value : [], null, 2)
 }
 
 function formatApiError(result, fallbackMessage) {
@@ -737,12 +753,16 @@ export default function App() {
   const [systemRateLimitSaving, setSystemRateLimitSaving] = useState(false)
   const [systemRateLimitError, setSystemRateLimitError] = useState('')
   const [systemRateLimitNote, setSystemRateLimitNote] = useState('')
-  const [systemCiPublishersDraft, setSystemCiPublishersDraft] = useState('')
-  const [systemCiPublishersBaseline, setSystemCiPublishersBaseline] = useState('')
+  const [systemCiPublishersDraft, setSystemCiPublishersDraft] = useState('[]')
+  const [systemCiPublishersBaseline, setSystemCiPublishersBaseline] = useState('[]')
+  const [systemCiPublishersList, setSystemCiPublishersList] = useState([])
   const [systemCiPublishersLoading, setSystemCiPublishersLoading] = useState(false)
   const [systemCiPublishersSaving, setSystemCiPublishersSaving] = useState(false)
   const [systemCiPublishersError, setSystemCiPublishersError] = useState('')
   const [systemCiPublishersNote, setSystemCiPublishersNote] = useState('')
+  const [whoamiData, setWhoamiData] = useState(null)
+  const [whoamiLoading, setWhoamiLoading] = useState(false)
+  const [whoamiError, setWhoamiError] = useState('')
   const [auditEvents, setAuditEvents] = useState([])
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
@@ -1574,15 +1594,17 @@ export default function App() {
         const force = Boolean(options?.force)
         const data = await api.get('/admin/system/ci-publishers', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
         if (data && data.code) {
-          setSystemCiPublishersError(formatApiError(data, 'Failed to load CI publisher allowlist.'))
+          setSystemCiPublishersError(formatApiError(data, 'Failed to load CI publishers.'))
           return
         }
-        const next = Array.isArray(data?.ci_publishers) ? data.ci_publishers.join(', ') : ''
+        const publishers = Array.isArray(data?.publishers) ? data.publishers : []
+        const next = formatCiPublishersJson(publishers)
+        setSystemCiPublishersList(publishers)
         setSystemCiPublishersDraft(next)
         setSystemCiPublishersBaseline(next)
       } catch (err) {
         if (isLoginRequiredError(err)) return
-        setSystemCiPublishersError('Failed to load CI publisher allowlist.')
+        setSystemCiPublishersError('Failed to load CI publishers.')
       } finally {
         setSystemCiPublishersLoading(false)
       }
@@ -1610,23 +1632,48 @@ export default function App() {
     }
     setSystemCiPublishersSaving(true)
     try {
-      const payload = { ci_publishers: parsed.value }
+      const payload = { publishers: parsed.value }
       const result = await api.put('/admin/system/ci-publishers', payload)
       if (result && result.code) {
-        setSystemCiPublishersError(formatApiError(result, 'Failed to save CI publisher allowlist.'))
+        setSystemCiPublishersError(formatApiError(result, 'Failed to save CI publishers.'))
         return
       }
-      const next = Array.isArray(result?.ci_publishers) ? result.ci_publishers.join(', ') : payload.ci_publishers.join(', ')
+      const publishers = Array.isArray(result?.publishers) ? result.publishers : payload.publishers
+      const next = formatCiPublishersJson(publishers)
+      setSystemCiPublishersList(publishers)
       setSystemCiPublishersDraft(next)
       setSystemCiPublishersBaseline(next)
-      setSystemCiPublishersNote('CI publisher allowlist saved.')
+      setSystemCiPublishersNote('CI publishers saved.')
     } catch (err) {
       if (isLoginRequiredError(err)) return
-      setSystemCiPublishersError('Failed to save CI publisher allowlist.')
+      setSystemCiPublishersError('Failed to save CI publishers.')
     } finally {
       setSystemCiPublishersSaving(false)
     }
   }, [api, isPlatformAdmin, systemCiPublishersDraft])
+
+  const loadWhoAmI = useCallback(
+    async (options = {}) => {
+      if (!isPlatformAdmin) return
+      setWhoamiError('')
+      setWhoamiLoading(true)
+      try {
+        const force = Boolean(options?.force)
+        const data = await api.get('/whoami', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
+        if (data && data.code) {
+          setWhoamiError(formatApiError(data, 'Failed to load identity.'))
+          return
+        }
+        setWhoamiData(data || null)
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setWhoamiError('Failed to load identity.')
+      } finally {
+        setWhoamiLoading(false)
+      }
+    },
+    [api, isPlatformAdmin]
+  )
 
   const loadPolicyDeployments = useCallback(async (options = {}) => {
     setPolicyDeploymentsError('')
@@ -2477,8 +2524,9 @@ export default function App() {
     if (view === 'admin' && adminTab === 'system-settings') {
       loadSystemRateLimits()
       loadSystemCiPublishers()
+      loadWhoAmI()
     }
-  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits, loadSystemCiPublishers])
+  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits, loadSystemCiPublishers, loadWhoAmI])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
@@ -3672,11 +3720,16 @@ export default function App() {
     handleSystemCiPublishersDraftChange,
     saveSystemCiPublishers,
     loadSystemCiPublishers,
+    systemCiPublishersList,
     systemCiPublishersLoading,
     systemCiPublishersSaving,
     systemCiPublishersDirty: String(systemCiPublishersDraft).trim() !== String(systemCiPublishersBaseline).trim(),
     systemCiPublishersError,
-    systemCiPublishersNote
+    systemCiPublishersNote,
+    whoamiData,
+    whoamiLoading,
+    whoamiError,
+    loadWhoAmI
   }
 
   const infoItems = []
