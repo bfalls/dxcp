@@ -2,6 +2,8 @@ import os
 import json
 from typing import Callable, Optional
 
+from models import CiPublisher, CiPublisherProvider
+
 
 class Settings:
     def __init__(self) -> None:
@@ -135,18 +137,42 @@ class Settings:
         except Exception:
             return value
 
-    def _parse_ci_publishers(self, value: Optional[str]) -> list[object]:
+    def _parse_ci_publishers(self, value: Optional[str]) -> list[CiPublisher]:
         raw = str(value or "").strip()
         if not raw:
             return []
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, list):
-            return parsed
-        # Legacy CSV fallback.
-        return [item.strip() for item in raw.split(",") if item.strip()]
+            parsed = []
+        if not isinstance(parsed, list):
+            return []
+        publishers: list[CiPublisher] = []
+        for item in parsed:
+            if isinstance(item, CiPublisher):
+                publishers.append(item)
+                continue
+            if isinstance(item, dict):
+                payload = dict(item)
+                if "provider" not in payload:
+                    payload["provider"] = CiPublisherProvider.CUSTOM.value
+                try:
+                    publishers.append(CiPublisher(**payload))
+                except Exception:
+                    continue
+                continue
+            if isinstance(item, str):
+                normalized = item.strip()
+                if not normalized:
+                    continue
+                publishers.append(
+                    CiPublisher(
+                        name=normalized,
+                        provider=CiPublisherProvider.CUSTOM,
+                        subjects=[normalized],
+                    )
+                )
+        return publishers
 
 
 SETTINGS = Settings()

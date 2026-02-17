@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import Iterable
+from typing import Iterable, Optional
 
 import jwt
 import requests
@@ -38,6 +38,7 @@ def build_token(
     issuer: str = ISSUER,
     audience: str = AUDIENCE,
     include_roles: bool = True,
+    extra_claims: Optional[dict] = None,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -50,6 +51,8 @@ def build_token(
     }
     if include_roles:
         payload[ROLES_CLAIM] = list(roles)
+    if isinstance(extra_claims, dict):
+        payload.update(extra_claims)
     return jwt.encode(payload, _PRIVATE_KEY, algorithm="RS256", headers={"kid": KID})
 
 

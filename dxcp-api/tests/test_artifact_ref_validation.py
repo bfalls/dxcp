@@ -53,7 +53,15 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
-    os.environ["DXCP_CI_PUBLISHERS"] = "ci-publisher-1"
+    os.environ["DXCP_CI_PUBLISHERS"] = json.dumps(
+        [
+            {
+                "name": "ci-publisher-1",
+                "provider": "custom",
+                "subjects": ["ci-publisher-1"],
+            }
+        ]
+    )
     configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 

@@ -14,6 +14,14 @@ from test_helpers import seed_defaults
 pytestmark = pytest.mark.anyio
 
 
+def _publisher(name: str, subject: str) -> dict:
+    return {
+        "name": name,
+        "provider": "custom",
+        "subjects": [subject],
+    }
+
+
 class _FakeSSMClient:
     def __init__(self, store: dict[str, str]) -> None:
         self.store = store
@@ -99,7 +107,7 @@ async def _client(tmp_path: Path, monkeypatch, store: dict[str, str]):
 
 
 async def test_get_system_ci_publishers_admin_only(tmp_path: Path, monkeypatch):
-    store = {"/dxcp/config/ci_publishers": "ci-bot-1,ci-bot-2"}
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1"), _publisher("ci-bot-2", "ci-bot-2")])}
     async with _client(tmp_path, monkeypatch, store) as (client, _):
         admin = await client.get(
             "/v1/admin/system/ci-publishers",
@@ -110,33 +118,40 @@ async def test_get_system_ci_publishers_admin_only(tmp_path: Path, monkeypatch):
             headers=auth_header(["dxcp-observers"]),
         )
     assert admin.status_code == 200
-    assert admin.json() == {"ci_publishers": ["ci-bot-1", "ci-bot-2"], "source": "ssm"}
+    assert admin.json() == {
+        "publishers": [_publisher("ci-bot-1", "ci-bot-1"), _publisher("ci-bot-2", "ci-bot-2")],
+        "source": "ssm",
+    }
     assert observer.status_code == 403
 
 
 async def test_get_system_ci_publishers_falls_back_to_runtime_when_ssm_missing(tmp_path: Path, monkeypatch):
     store = {}
     async with _client(tmp_path, monkeypatch, store) as (client, main):
-        main.SETTINGS.ci_publishers = ["runtime-ci-1", "runtime-ci-2"]
+        main.SETTINGS.ci_publishers = [_publisher("runtime-ci-1", "runtime-ci-1"), _publisher("runtime-ci-2", "runtime-ci-2")]
         response = await client.get(
             "/v1/admin/system/ci-publishers",
             headers=auth_header(["dxcp-platform-admins"]),
         )
     assert response.status_code == 200
-    assert response.json() == {"ci_publishers": ["runtime-ci-1", "runtime-ci-2"], "source": "runtime"}
+    assert response.json() == {
+        "publishers": [_publisher("runtime-ci-1", "runtime-ci-1"), _publisher("runtime-ci-2", "runtime-ci-2")],
+        "source": "runtime",
+    }
 
 
 @pytest.mark.parametrize(
     "payload",
     [
         {},
-        {"ci_publishers": "ci-bot-1"},
-        {"ci_publishers": ["ci-bot-1", ""]},
-        {"ci_publishers": ["ci-bot-1", 42]},
+        {"publishers": "ci-bot-1"},
+        {"publishers": [_publisher("ci-bot-1", "ci-bot-1"), {"name": "ci-bot-1", "provider": "custom", "subjects": ["other"]}]},
+        {"publishers": [{"name": "", "provider": "custom", "subjects": ["ci-bot-1"]}]},
+        {"publishers": [42]},
     ],
 )
 async def test_put_system_ci_publishers_validation(tmp_path: Path, monkeypatch, payload: dict):
-    store = {"/dxcp/config/ci_publishers": "ci-bot-1"}
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
     async with _client(tmp_path, monkeypatch, store) as (client, _):
         response = await client.put(
             "/v1/admin/system/ci-publishers",
@@ -148,21 +163,22 @@ async def test_put_system_ci_publishers_validation(tmp_path: Path, monkeypatch, 
 
 
 async def test_put_system_ci_publishers_writes_ssm_and_updates_runtime(tmp_path: Path, monkeypatch):
-    store = {"/dxcp/config/ci_publishers": "ci-bot-1"}
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
+    updated_publishers = [_publisher("ci-bot-2", "ci-bot-2"), _publisher("ci-bot-3", "ci-bot-3")]
     async with _client(tmp_path, monkeypatch, store) as (client, main):
         response = await client.put(
             "/v1/admin/system/ci-publishers",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"ci_publishers": ["ci-bot-2", "ci-bot-3", "ci-bot-2"]},
+            json={"publishers": updated_publishers},
         )
     assert response.status_code == 200
-    assert response.json() == {"ci_publishers": ["ci-bot-2", "ci-bot-3"], "source": "ssm"}
-    assert store["/dxcp/config/ci_publishers"] == "ci-bot-2,ci-bot-3"
-    assert main.SETTINGS.ci_publishers == ["ci-bot-2", "ci-bot-3"]
+    assert response.json() == {"publishers": updated_publishers, "source": "ssm"}
+    assert json.loads(store["/dxcp/config/ci_publishers"]) == updated_publishers
+    assert [publisher.name for publisher in main.SETTINGS.ci_publishers] == ["ci-bot-2", "ci-bot-3"]
 
 
 async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path: Path, monkeypatch):
-    store = {"/dxcp/config/ci_publishers": "ci-bot-1"}
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
     payload = {
         "service": "demo-service",
         "version": "1.0.1",
@@ -179,7 +195,7 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
         update = await client.put(
             "/v1/admin/system/ci-publishers",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"ci_publishers": ["user-1"]},
+            json={"publishers": [_publisher("user-1", "user-1")]},
         )
         after = await client.post(
             "/v1/builds/upload-capability",

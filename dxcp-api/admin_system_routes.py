@@ -18,13 +18,14 @@
 """
 
 import logging
+import json
 import uuid
 from typing import Callable, Optional
 
 from fastapi import Header, Request
 
 from config import SETTINGS
-from models import Role
+from models import CiPublisher, CiPublisherProvider, Role
 
 try:
     import boto3
@@ -117,14 +118,25 @@ def _write_rate_limits_to_ssm(read_rpm: int, mutate_rpm: int) -> None:
     _ssm_put_parameter(f"{prefix}/mutate_rpm", str(mutate_rpm))
 
 
-def _parse_ci_publishers_csv(value: str) -> list[str]:
-    return [item.strip() for item in str(value).split(",") if item.strip()]
+def _publisher_to_dict(publisher: CiPublisher) -> dict:
+    return publisher.dict(exclude_none=True)
 
 
 def _read_ci_publishers_from_ssm() -> dict:
     prefix = _ssm_prefix()
     raw = _ssm_get_parameter(f"{prefix}/ci_publishers")
-    return {"ci_publishers": _parse_ci_publishers_csv(raw), "source": "ssm"}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list):
+        raise ValueError("ci_publishers SSM value must be a JSON array")
+    publishers: list[dict] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("ci_publishers SSM array must contain publisher objects")
+        payload = dict(item)
+        if "provider" not in payload:
+            payload["provider"] = CiPublisherProvider.CUSTOM.value
+        publishers.append(_publisher_to_dict(CiPublisher(**payload)))
+    return {"publishers": publishers, "source": "ssm"}
 
 
 def _read_ci_publishers_with_fallback() -> dict:
@@ -132,12 +144,22 @@ def _read_ci_publishers_with_fallback() -> dict:
         return _read_ci_publishers_from_ssm()
     except Exception:
         logger.warning("event=admin.system_ci_publishers.read_fallback source=runtime")
-        return {"ci_publishers": list(SETTINGS.ci_publishers), "source": "runtime"}
+        runtime = []
+        for publisher in list(SETTINGS.ci_publishers):
+            if isinstance(publisher, CiPublisher):
+                runtime.append(_publisher_to_dict(publisher))
+            elif isinstance(publisher, dict):
+                try:
+                    runtime.append(_publisher_to_dict(CiPublisher(**publisher)))
+                except Exception:
+                    continue
+        return {"publishers": runtime, "source": "runtime"}
 
 
-def _write_ci_publishers_to_ssm(ci_publishers: list[str]) -> None:
+def _write_ci_publishers_to_ssm(publishers: list[CiPublisher]) -> None:
     prefix = _ssm_prefix()
-    _ssm_put_parameter(f"{prefix}/ci_publishers", ",".join(ci_publishers))
+    payload = json.dumps([_publisher_to_dict(publisher) for publisher in publishers])
+    _ssm_put_parameter(f"{prefix}/ci_publishers", payload)
 
 
 def _validate_update_payload(payload: object) -> tuple[Optional[dict], Optional[str]]:
@@ -153,23 +175,34 @@ def _validate_update_payload(payload: object) -> tuple[Optional[dict], Optional[
     return {"read_rpm": read_rpm, "mutate_rpm": mutate_rpm}, None
 
 
-def _validate_ci_publishers_payload(payload: object) -> tuple[Optional[list[str]], Optional[str]]:
+def _validate_ci_publishers_payload(payload: object) -> tuple[Optional[list[CiPublisher]], Optional[str]]:
     if not isinstance(payload, dict):
         return None, "Payload must be an object"
-    if "ci_publishers" not in payload:
-        return None, "ci_publishers is required"
-    values = payload.get("ci_publishers")
+    if "publishers" not in payload:
+        return None, "publishers is required"
+    values = payload.get("publishers")
     if not isinstance(values, list):
-        return None, "ci_publishers must be an array of non-empty strings"
-    cleaned: list[str] = []
+        return None, "publishers must be an array of publisher objects"
+    cleaned: list[CiPublisher] = []
+    seen_names: set[str] = set()
     for value in values:
-        if not isinstance(value, str):
-            return None, "ci_publishers must be an array of non-empty strings"
-        item = value.strip()
-        if not item:
-            return None, "ci_publishers must be an array of non-empty strings"
-        if item not in cleaned:
-            cleaned.append(item)
+        if not isinstance(value, dict):
+            return None, "publishers must be an array of publisher objects"
+        payload_item = dict(value)
+        if "provider" not in payload_item:
+            payload_item["provider"] = CiPublisherProvider.CUSTOM.value
+        try:
+            publisher = CiPublisher(**payload_item)
+        except Exception:
+            return None, "publishers must be valid publisher objects"
+        name = publisher.name.strip()
+        if not name:
+            return None, "publishers must have a non-empty name"
+        publisher.name = name
+        if publisher.name in seen_names:
+            return None, "publisher names must be unique"
+        seen_names.add(publisher.name)
+        cleaned.append(publisher)
     return cleaned, None
 
 
@@ -262,15 +295,18 @@ def register_admin_system_routes(
             old_values = _read_ci_publishers_with_fallback()
             _write_ci_publishers_to_ssm(validated)
             SETTINGS.ci_publishers = list(validated)
-            new_values = {"ci_publishers": list(validated), "source": "ssm"}
+            new_values = {
+                "publishers": [_publisher_to_dict(publisher) for publisher in validated],
+                "source": "ssm",
+            }
             request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
             logger.info(
                 "event=admin.system_ci_publishers.updated request_id=%s actor_id=%s actor_role=%s old_ci_publishers=%s new_ci_publishers=%s",
                 request_id,
                 actor.actor_id,
                 actor.role.value,
-                ",".join(old_values.get("ci_publishers", [])),
-                ",".join(new_values.get("ci_publishers", [])),
+                ",".join(item.get("name", "") for item in old_values.get("publishers", [])),
+                ",".join(item.get("name", "") for item in new_values.get("publishers", [])),
             )
             return new_values
         except Exception:

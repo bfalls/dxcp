@@ -2547,6 +2547,20 @@ def get_config_sanity(request: Request, authorization: Optional[str] = Header(No
     }
 
 
+@app.get("/v1/whoami")
+def whoami(request: Request, authorization: Optional[str] = Header(None)):
+    actor, claims = get_actor_and_claims(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    return {
+        "actor_id": actor.actor_id,
+        "sub": claims.get("sub"),
+        "email": claims.get("email") or claims.get("https://dxcp.example/claims/email"),
+        "iss": claims.get("iss"),
+        "aud": claims.get("aud"),
+        "azp": claims.get("azp"),
+    }
+
+
 @app.get("/v1/insights/failures")
 def get_failure_insights(
     request: Request,
