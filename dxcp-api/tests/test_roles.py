@@ -195,6 +195,29 @@ async def test_observer_denied_build_register(tmp_path: Path, monkeypatch):
     assert response.json()["code"] == "CI_ONLY"
 
 
+async def test_ci_gate_runs_before_build_payload_validation(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-invalid-ci-gate-first", **auth_header(["dxcp-observers"])},
+            json={
+                "service": "demo-service",
+                "version": "not-semver",
+                "artifactRef": "s3://dxcp-test-bucket/demo-service-not-semver.zip",
+                "git_sha": "f" * 40,
+                "git_branch": "main",
+                "ci_provider": "github_actions",
+                "ci_run_id": "run-invalid",
+                "built_at": "2026-02-16T00:00:00Z",
+                "sha256": "a" * 64,
+                "sizeBytes": 1024,
+                "contentType": "application/zip",
+            },
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "CI_ONLY"
+
+
 async def test_observer_denied_build_register_existing(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
@@ -281,3 +304,37 @@ async def test_ci_publisher_can_register_build_without_admin_role(tmp_path: Path
         )
     assert cap_response.status_code == 201
     assert response.status_code == 201
+    assert response.json()["ci_publisher"] == "ci-publisher-1"
+
+
+async def test_ci_publisher_object_rules_match_subject(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        main.SETTINGS.ci_publishers = [
+            {
+                "name": "github-ci",
+                "provider": "github",
+                "issuers": ["https://dxcp.example/"],
+                "audiences": ["https://dxcp-api"],
+                "subjects": ["repo-ci-bot"],
+            }
+        ]
+        cap_request = {
+            "service": "demo-service",
+            "version": "1.0.2",
+            "expectedSizeBytes": 1024,
+            "expectedSha256": "a" * 64,
+            "contentType": "application/zip",
+        }
+        allowed = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ci-obj-1", **auth_header_for_subject(["dxcp-observers"], "repo-ci-bot")},
+            json=cap_request,
+        )
+        denied = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ci-obj-2", **auth_header_for_subject(["dxcp-observers"], "someone-else")},
+            json=cap_request,
+        )
+    assert allowed.status_code == 201
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "CI_ONLY"

@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Callable, Optional
 
 
@@ -47,7 +48,7 @@ class Settings:
         self.oidc_jwks_url = self._get("oidc/jwks_url", "DXCP_OIDC_JWKS_URL", "", str)
         self.oidc_roles_claim = self._get("oidc/roles_claim", "DXCP_OIDC_ROLES_CLAIM", "", str)
         ci_publishers = self._get("ci_publishers", "DXCP_CI_PUBLISHERS", "", str)
-        self.ci_publishers = [item.strip() for item in ci_publishers.split(",") if item.strip()]
+        self.ci_publishers = self._parse_ci_publishers(ci_publishers)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
         self.cors_origins = [o.strip() for o in cors.split(",") if o.strip()]
         self.ui_default_refresh_seconds = self._get(
@@ -133,6 +134,19 @@ class Settings:
             return response.get("SecretString", value)
         except Exception:
             return value
+
+    def _parse_ci_publishers(self, value: Optional[str]) -> list[object]:
+        raw = str(value or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        # Legacy CSV fallback.
+        return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 SETTINGS = Settings()

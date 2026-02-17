@@ -133,8 +133,10 @@ async def test_build_registration_idempotent_reregister_returns_existing(tmp_pat
         )
 
     assert first.status_code == 201
+    assert first.json()["ci_publisher"] == "ci-publisher-1"
     assert second.status_code == 200
     assert second.json()["id"] == first.json()["id"]
+    assert second.json()["ci_publisher"] == "ci-publisher-1"
 
 
 async def test_build_registration_conflicting_reregister_returns_409(tmp_path: Path, monkeypatch):

@@ -7,7 +7,7 @@ import time
 import types
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,7 +36,8 @@ except Exception:  # pragma: no cover - optional dependency behavior in local en
     PartialCredentialsError = Exception
     ReadTimeoutError = Exception
 
-from auth import get_actor
+from auth import get_actor, get_actor_and_claims
+from ci_publisher_matcher import match_ci_publisher
 from config import SETTINGS
 from idempotency import IdempotencyStore
 from models import (
@@ -44,6 +45,8 @@ from models import (
     AuditOutcome,
     BuildRegisterExistingRequest,
     BuildRegistration,
+    CiPublisher,
+    CiPublisherProvider,
     BuildUploadCapability,
     BuildUploadRequest,
     DeliveryGroup,
@@ -218,10 +221,76 @@ def require_role(actor: Actor, allowed: set[Role], action: str):
     return error_response(403, "ROLE_FORBIDDEN", f"Role {actor.role.value} cannot {action}")
 
 
-def require_ci_publisher(actor: Actor, action: str):
-    if actor.actor_id in SETTINGS.ci_publishers:
+def _coerce_ci_publishers(values: Any) -> list[CiPublisher]:
+    publishers: list[CiPublisher] = []
+    if not isinstance(values, list):
+        return publishers
+    for value in values:
+        if isinstance(value, CiPublisher):
+            publishers.append(value)
+            continue
+        if isinstance(value, dict):
+            candidate = dict(value)
+            if "provider" not in candidate:
+                candidate["provider"] = CiPublisherProvider.CUSTOM.value
+            try:
+                publishers.append(CiPublisher(**candidate))
+            except Exception:
+                continue
+            continue
+        if isinstance(value, str):
+            item = value.strip()
+            if not item:
+                continue
+            publishers.append(
+                CiPublisher(
+                    name=item,
+                    provider=CiPublisherProvider.CUSTOM,
+                    subjects=[item],
+                )
+            )
+    return publishers
+
+
+def _read_ci_publishers_from_ssm() -> Optional[list[CiPublisher]]:
+    prefix = (SETTINGS.ssm_prefix or "").strip().rstrip("/")
+    if not prefix:
         return None
-    return error_response(403, "CI_ONLY", f"Only CI publisher identities can {action}")
+    if boto3 is None:
+        return None
+    try:
+        if BotoConfig is not None:
+            cfg = BotoConfig(connect_timeout=1, read_timeout=1, retries={"max_attempts": 1, "mode": "standard"})
+            client = boto3.client("ssm", config=cfg)
+        else:
+            client = boto3.client("ssm")
+        response = client.get_parameter(Name=f"{prefix}/ci_publishers", WithDecryption=True)
+        raw = response.get("Parameter", {}).get("Value", "")
+    except Exception:
+        return None
+
+    payload: Any = None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        payload = [item.strip() for item in str(raw).split(",") if item.strip()]
+    publishers = _coerce_ci_publishers(payload)
+    return publishers if publishers else None
+
+
+def _configured_ci_publishers() -> list[CiPublisher]:
+    ssm_publishers = _read_ci_publishers_from_ssm()
+    if ssm_publishers is not None:
+        return ssm_publishers
+    return _coerce_ci_publishers(SETTINGS.ci_publishers)
+
+
+def require_ci_publisher(claims: dict, action: str) -> tuple[Optional[str], Optional[JSONResponse]]:
+    publishers = _configured_ci_publishers()
+    publisher_name = match_ci_publisher(claims, publishers)
+    if publisher_name:
+        return publisher_name, None
+    return None, error_response(403, "CI_ONLY", f"Only CI publisher identities can {action}")
 
 
 def can_deploy(actor: Actor) -> bool:
@@ -1441,6 +1510,7 @@ def _register_existing_build_internal(
     checksum_sha256: Optional[str],
     repo: Optional[str],
     actor: Optional[str],
+    ci_publisher: Optional[str],
 ) -> dict:
     if not SETTINGS.runtime_artifact_bucket:
         raise ValueError("Runtime artifact bucket is not configured")
@@ -1509,6 +1579,7 @@ def _register_existing_build_internal(
         "checksum_sha256": checksum_sha256,
         "repo": repo,
         "actor": actor,
+        "ci_publisher": ci_publisher,
         "registeredAt": utc_now(),
     }
     record = storage.insert_build(record)
@@ -2728,8 +2799,8 @@ def create_upload_capability(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
-    ci_error = require_ci_publisher(actor, "request build upload capability")
+    actor, claims = get_actor_and_claims(authorization)
+    _, ci_error = require_ci_publisher(claims, "request build upload capability")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()
@@ -2773,8 +2844,8 @@ def register_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
-    ci_error = require_ci_publisher(actor, "register builds")
+    actor, claims = get_actor_and_claims(authorization)
+    publisher_name, ci_error = require_ci_publisher(claims, "register builds")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()
@@ -2822,8 +2893,20 @@ def register_build(
 
     record = reg.dict()
     record["built_at"] = built_at
+    record["ci_publisher"] = publisher_name
     record["registeredAt"] = utc_now()
     record = storage.insert_build(record)
+    logger.info(
+        "event=build.registration.succeeded request_id=%s publisher_name=%s actor_id=%s sub=%s email=%s service=%s version=%s artifactRef=%s",
+        request_id_ctx.get() or str(uuid.uuid4()),
+        publisher_name,
+        actor.actor_id,
+        claims.get("sub"),
+        claims.get("email") or claims.get("https://dxcp.example/claims/email"),
+        record.get("service"),
+        record.get("version"),
+        record.get("artifactRef"),
+    )
     storage.delete_upload_capability(cap["id"])
     store_idempotency(request, idempotency_key, record, 201)
     return record
@@ -2836,8 +2919,8 @@ def register_existing_build(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
-    ci_error = require_ci_publisher(actor, "register builds")
+    actor, claims = get_actor_and_claims(authorization)
+    publisher_name, ci_error = require_ci_publisher(claims, "register builds")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()
@@ -2884,11 +2967,23 @@ def register_existing_build(
             req.checksum_sha256,
             req.repo,
             req.actor,
+            publisher_name,
         )
     except ValueError as exc:
         return error_response(400, "INVALID_ARTIFACT", str(exc))
     except RuntimeError as exc:
         return error_response(500, "INTERNAL_ERROR", str(exc))
 
+    logger.info(
+        "event=build.registration.succeeded request_id=%s publisher_name=%s actor_id=%s sub=%s email=%s service=%s version=%s artifactRef=%s",
+        request_id_ctx.get() or str(uuid.uuid4()),
+        publisher_name,
+        actor.actor_id,
+        claims.get("sub"),
+        claims.get("email") or claims.get("https://dxcp.example/claims/email"),
+        record.get("service"),
+        record.get("version"),
+        record.get("artifactRef"),
+    )
     store_idempotency(request, idempotency_key, record, 201)
     return record

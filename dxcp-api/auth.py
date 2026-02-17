@@ -100,7 +100,7 @@ def _extract_actor_id(claims: dict) -> str:
     )
 
 
-def get_actor(authorization: Optional[str]) -> Actor:
+def get_actor_and_claims(authorization: Optional[str]) -> tuple[Actor, dict]:
     if not authorization:
         _auth_error(401, "UNAUTHORIZED", "Authorization header required")
     parts = authorization.split(" ")
@@ -115,4 +115,9 @@ def get_actor(authorization: Optional[str]) -> Actor:
         _auth_error(403, "AUTHZ_ROLE_REQUIRED", "Roles claim missing or invalid")
     role = _map_role(roles_value)
     actor_id = _extract_actor_id(claims)
-    return Actor(actor_id=actor_id, role=role)
+    return Actor(actor_id=actor_id, role=role), claims
+
+
+def get_actor(authorization: Optional[str]) -> Actor:
+    actor, _ = get_actor_and_claims(authorization)
+    return actor

@@ -145,6 +145,7 @@ class Storage:
                 artifact_ref TEXT NOT NULL,
                 git_sha TEXT,
                 git_branch TEXT,
+                ci_publisher TEXT,
                 ci_provider TEXT,
                 ci_run_id TEXT,
                 built_at TEXT,
@@ -160,6 +161,7 @@ class Storage:
         )
         self._ensure_column(cur, "builds", "git_sha", "TEXT")
         self._ensure_column(cur, "builds", "git_branch", "TEXT")
+        self._ensure_column(cur, "builds", "ci_publisher", "TEXT")
         self._ensure_column(cur, "builds", "ci_provider", "TEXT")
         self._ensure_column(cur, "builds", "ci_run_id", "TEXT")
         self._ensure_column(cur, "builds", "built_at", "TEXT")
@@ -1274,9 +1276,9 @@ class Storage:
         cur.execute(
             """
             INSERT INTO builds (
-                id, service, version, artifact_ref, git_sha, git_branch, ci_provider, ci_run_id, built_at,
+                id, service, version, artifact_ref, git_sha, git_branch, ci_publisher, ci_provider, ci_run_id, built_at,
                 sha256, size_bytes, content_type, checksum_sha256, repo, actor, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 build_id,
@@ -1285,6 +1287,7 @@ class Storage:
                 record["artifactRef"],
                 record.get("git_sha"),
                 record.get("git_branch"),
+                record.get("ci_publisher"),
                 record.get("ci_provider"),
                 record.get("ci_run_id"),
                 record.get("built_at"),
@@ -1325,6 +1328,7 @@ class Storage:
             "artifactRef": row["artifact_ref"],
             "git_sha": row["git_sha"],
             "git_branch": row["git_branch"],
+            "ci_publisher": row["ci_publisher"],
             "ci_provider": row["ci_provider"],
             "ci_run_id": row["ci_run_id"],
             "built_at": row["built_at"],
@@ -1358,6 +1362,7 @@ class Storage:
                 "artifactRef": row["artifact_ref"],
                 "git_sha": row["git_sha"],
                 "git_branch": row["git_branch"],
+                "ci_publisher": row["ci_publisher"],
                 "ci_provider": row["ci_provider"],
                 "ci_run_id": row["ci_run_id"],
                 "built_at": row["built_at"],
@@ -2333,6 +2338,7 @@ class DynamoStorage:
             "artifactRef": record["artifactRef"],
             "git_sha": record.get("git_sha"),
             "git_branch": record.get("git_branch"),
+            "ci_publisher": record.get("ci_publisher"),
             "ci_provider": record.get("ci_provider"),
             "ci_run_id": record.get("ci_run_id"),
             "built_at": record.get("built_at"),
@@ -2368,6 +2374,7 @@ class DynamoStorage:
             "artifactRef": item.get("artifactRef"),
             "git_sha": item.get("git_sha"),
             "git_branch": item.get("git_branch"),
+            "ci_publisher": item.get("ci_publisher"),
             "ci_provider": item.get("ci_provider"),
             "ci_run_id": item.get("ci_run_id"),
             "built_at": item.get("built_at"),
@@ -2395,6 +2402,7 @@ class DynamoStorage:
                 "artifactRef": item.get("artifactRef"),
                 "git_sha": item.get("git_sha"),
                 "git_branch": item.get("git_branch"),
+                "ci_publisher": item.get("ci_publisher"),
                 "ci_provider": item.get("ci_provider"),
                 "ci_run_id": item.get("ci_run_id"),
                 "built_at": item.get("built_at"),
