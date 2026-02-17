@@ -244,7 +244,7 @@ jobs:
               "built_at": "${built_at}"
             }
             JSON
-)"
+            )"
             response="$(curl -sS --fail --show-error -X POST "${dxcp_base}/builds/register" \
               -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
               -H "Content-Type: application/json" \
