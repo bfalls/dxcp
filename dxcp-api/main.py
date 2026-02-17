@@ -279,9 +279,6 @@ def _read_ci_publishers_from_ssm() -> Optional[list[CiPublisher]]:
 
 
 def _configured_ci_publishers() -> list[CiPublisher]:
-    ssm_publishers = _read_ci_publishers_from_ssm()
-    if ssm_publishers is not None:
-        return ssm_publishers
     return _coerce_ci_publishers(SETTINGS.ci_publishers)
 
 
