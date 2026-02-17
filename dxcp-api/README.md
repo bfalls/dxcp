@@ -90,3 +90,41 @@ API invariant suite only (from repo root):
 ```
 pytest dxcp-api/tests/test_*_invariants.py
 ```
+
+## CI publishers and build registration
+
+DXCP only allows build registration from caller identities that match a configured
+CI Publisher object.
+
+### Add CI publishers
+
+1. Call `GET /v1/admin/system/ci-publishers` as a Platform Admin.
+2. Update and save with `PUT /v1/admin/system/ci-publishers` using:
+   - `{ "publishers": [ ... ] }`
+3. Prefer matching on stable token claims such as `authorized_party_azp`, then
+   `iss`/`aud`, and use `sub`/`email` when appropriate.
+
+### Verify token identity without decoding JWTs
+
+Use:
+
+```
+curl -sS https://<api-base>/v1/whoami \
+  -H "Authorization: Bearer <token>"
+```
+
+Response fields are the same identity values DXCP uses for CI publisher matching:
+`actor_id`, `sub`, `email`, `iss`, `aud`, `azp`.
+
+### Build registration flow
+
+1. Upload artifact to S3 (for example `s3://<bucket>/<service>/<service>-<version>.zip`).
+2. Register with `POST /v1/builds/register` including:
+   - `service`, `version`, `artifactRef`
+   - `git_sha`, `git_branch`
+   - `ci_provider` (for GitHub Actions, `"github"`)
+   - `ci_run_id`, `built_at` (UTC ISO-8601)
+3. Send an idempotency key (example:
+   `github-<run_id>-demo-service-<version>`).
+
+If the caller token does not match any configured publisher, DXCP returns `CI_ONLY`.

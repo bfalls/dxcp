@@ -64,12 +64,15 @@ jobs:
           echo "services=${services[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Build and publish changed demo service artifacts
+        id: publish
         if: steps.changed.outputs.services != ''
         env:
           DXCP_ARTIFACT_BUCKET: ${{ vars.DXCP_ARTIFACT_BUCKET }}
         shell: bash
         run: |
           set -euo pipefail
+          published_manifest="${RUNNER_TEMP}/dxcp-published-builds.tsv"
+          : > "$published_manifest"
 
           latest_semver_from_tag() {
             local service="$1"
@@ -162,6 +165,7 @@ jobs:
             DXCP_ARTIFACT_BUCKET="$DXCP_ARTIFACT_BUCKET" bash scripts/publish_build.sh "$service" "$version"
 
             artifact_uri="s3://${DXCP_ARTIFACT_BUCKET}/${service}/${service}-${version}.zip"
+            printf "%s\t%s\t%s\n" "$service" "$version" "$artifact_uri" >> "$published_manifest"
             git tag "$tag_name" "${GITHUB_SHA}"
             git push origin "$tag_name"
             echo "Published service=${service} version=${version} artifact=${artifact_uri}"
@@ -172,3 +176,84 @@ jobs:
               echo "  artifact: ${artifact_uri}"
             } >> "$GITHUB_STEP_SUMMARY"
           done
+          echo "manifest=${published_manifest}" >> "$GITHUB_OUTPUT"
+
+      - name: Register published builds in DXCP
+        if: steps.changed.outputs.services != ''
+        env:
+          DXCP_API_BASE: ${{ vars.DXCP_API_BASE }}
+          DXCP_URL: ${{ vars.DXCP_URL }}
+          DXCP_API_TOKEN: ${{ secrets.DXCP_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DXCP_API_TOKEN:-}" ]]; then
+            echo "DXCP_API_TOKEN secret is required for build registration." >&2
+            exit 1
+          fi
+
+          dxcp_base="${DXCP_API_BASE:-${DXCP_URL:-}}"
+          if [[ -z "$dxcp_base" ]]; then
+            echo "Set repo variable DXCP_API_BASE (or DXCP_URL) to the DXCP API endpoint." >&2
+            exit 1
+          fi
+          dxcp_base="${dxcp_base%/}"
+          if [[ "$dxcp_base" != */v1 ]]; then
+            dxcp_base="${dxcp_base}/v1"
+          fi
+
+          manifest_path="${{ steps.publish.outputs.manifest }}"
+          if [[ -z "$manifest_path" || ! -s "$manifest_path" ]]; then
+            echo "No published artifacts manifest found; nothing to register."
+            exit 0
+          fi
+
+          whoami="$(curl -sS --fail --show-error \
+            -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
+            "${dxcp_base}/whoami")"
+          echo "DXCP caller identity: ${whoami}"
+          python3 - <<'PY' "${whoami}"
+import json
+import sys
+
+identity = json.loads(sys.argv[1])
+if not (identity.get("azp") or identity.get("sub") or identity.get("email")):
+    raise SystemExit("DXCP /whoami returned no azp/sub/email; configure a CI Publisher rule that matches your token claims.")
+PY
+          {
+            echo "### DXCP CI identity"
+            echo '```json'
+            echo "${whoami}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS=$'\t' read -r service version artifact_ref; do
+            [[ -z "$service" || -z "$version" || -z "$artifact_ref" ]] && continue
+            built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            idem_key="github-${{ github.run_id }}-${service}-${version}"
+            payload="$(cat <<JSON
+{
+  "service": "${service}",
+  "version": "${version}",
+  "artifactRef": "${artifact_ref}",
+  "git_sha": "${{ github.sha }}",
+  "git_branch": "${{ github.ref_name }}",
+  "ci_provider": "github",
+  "ci_run_id": "${{ github.run_id }}",
+  "built_at": "${built_at}"
+}
+JSON
+)"
+            response="$(curl -sS --fail --show-error -X POST "${dxcp_base}/builds/register" \
+              -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Idempotency-Key: ${idem_key}" \
+              -d "${payload}")"
+            echo "Registered ${service}@${version}: ${response}"
+            {
+              echo "- registered: ${service}@${version}"
+              echo "  artifact: ${artifact_ref}"
+              echo "  idempotency_key: ${idem_key}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < "$manifest_path"
