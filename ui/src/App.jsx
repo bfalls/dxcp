@@ -1061,6 +1061,51 @@ export default function App() {
     return token || accessToken || null
   }, [authClient, authAudience, accessToken])
 
+  const copyAccessTokenToClipboard = useCallback(async () => {
+    if (!isPlatformAdmin) return { ok: false, message: 'Only Platform Admins can copy tokens.' }
+    try {
+      const token = await getAccessToken()
+      if (!token) return { ok: false, message: 'No access token available. Try signing in again.' }
+      try {
+        const clipboardApi =
+          typeof window !== 'undefined' && window.navigator ? window.navigator.clipboard : null
+        if (clipboardApi?.writeText) {
+          await clipboardApi.writeText(token)
+          return { ok: true, message: `Copied token (first 8 chars: ${token.slice(0, 8)}...)` }
+        }
+      } catch (_) {
+        // Fall through to legacy clipboard fallback.
+      }
+
+      let copied = false
+      try {
+        if (typeof document === 'undefined') return { ok: false, message: 'Copy failed. Use DevTools header copy instead.' }
+        const textarea = document.createElement('textarea')
+        textarea.value = token
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.top = '-9999px'
+        textarea.style.left = '-9999px'
+        document.body.appendChild(textarea)
+        try {
+          textarea.focus()
+          textarea.select()
+          copied = Boolean(document.execCommand && document.execCommand('copy'))
+        } finally {
+          document.body.removeChild(textarea)
+        }
+      } catch (_) {
+        copied = false
+      }
+      if (copied) {
+        return { ok: true, message: `Copied token (first 8 chars: ${token.slice(0, 8)}...)` }
+      }
+      return { ok: false, message: 'Copy failed. Use DevTools header copy instead.' }
+    } catch (_) {
+      return { ok: false, message: 'Copy failed. Use DevTools header copy instead.' }
+    }
+  }, [getAccessToken, isPlatformAdmin])
+
   const api = useMemo(() => createApiClient({ baseUrl: apiBase, getToken: getAccessToken }), [apiBase, getAccessToken])
 
   const getRuntimeConfig = useCallback(async () => {
@@ -3729,7 +3774,8 @@ export default function App() {
     whoamiData,
     whoamiLoading,
     whoamiError,
-    loadWhoAmI
+    loadWhoAmI,
+    copyAccessTokenToClipboard
   }
 
   const infoItems = []

@@ -91,8 +91,26 @@ export default function AdminPage({
   whoamiData,
   whoamiLoading,
   whoamiError,
-  loadWhoAmI
+  loadWhoAmI,
+  copyAccessTokenToClipboard
 }) {
+  const [copyTokenBusy, setCopyTokenBusy] = React.useState(false)
+  const [copyTokenNote, setCopyTokenNote] = React.useState('')
+  const [copyTokenError, setCopyTokenError] = React.useState('')
+
+  const handleCopyAccessToken = async () => {
+    setCopyTokenBusy(true)
+    setCopyTokenNote('')
+    setCopyTokenError('')
+    const result = await copyAccessTokenToClipboard()
+    if (result?.ok) {
+      setCopyTokenNote(result.message || 'Copied.')
+    } else {
+      setCopyTokenError(result?.message || 'Copy failed. Use DevTools header copy instead.')
+    }
+    setCopyTokenBusy(false)
+  }
+
   const headerAction =
     adminTab === 'delivery-groups'
       ? (
@@ -988,6 +1006,15 @@ export default function AdminPage({
           </div>
           <h2 className="space-12">Who am I</h2>
           <div className="helper">Identity fields seen by DXCP for CI publisher matching.</div>
+          <div className="space-8">
+            <button className="button secondary" onClick={handleCopyAccessToken} disabled={copyTokenBusy}>
+              {copyTokenBusy ? 'Copying...' : 'Copy access token'}
+            </button>
+          </div>
+          <div className="helper">Copies your current Auth0 access token for API debugging.</div>
+          <div className="helper">Treat as a secret; expires quickly.</div>
+          {copyTokenError && <div className="helper space-8">{copyTokenError}</div>}
+          {copyTokenNote && <div className="helper space-8">{copyTokenNote}</div>}
           {whoamiError && <div className="helper space-8">{whoamiError}</div>}
           <div className="space-8">
             <button className="button secondary" onClick={() => loadWhoAmI({ force: true })} disabled={whoamiLoading}>
