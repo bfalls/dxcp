@@ -1,4 +1,4 @@
-from auth import match_ci_publisher
+from ci_publisher_matcher import match_ci_publisher
 from models import CiPublisher, CiPublisherProvider
 
 

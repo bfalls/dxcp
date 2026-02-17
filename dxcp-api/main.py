@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+import types
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -939,6 +940,11 @@ def _artifact_preflight_timeout_seconds() -> int:
 
 
 def _check_s3_artifact_availability(bucket: str, key: str) -> str:
+    # In local/test environments with real boto3 credentials available, probing
+    # arbitrary artifact refs can create nondeterministic behavior. If no runtime
+    # artifact bucket is configured, skip real boto3 preflight checks.
+    if not SETTINGS.runtime_artifact_bucket and isinstance(boto3, types.ModuleType):
+        return "skip"
     if boto3 is None or BotoConfig is None:
         return "skip"
     timeout_seconds = _artifact_preflight_timeout_seconds()
