@@ -147,6 +147,27 @@ async def test_build_registration_idempotent_reregister_returns_existing(tmp_pat
     assert second.json()["ci_publisher"] == "ci-publisher-1"
 
 
+async def test_build_registration_idempotency_replayed_header(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        _insert_upload_capability(main)
+        payload = _build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip")
+        first = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-replay-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            json=payload,
+        )
+        second = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-replay-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            json=payload,
+        )
+
+    assert first.status_code == 201
+    assert first.headers["Idempotency-Replayed"] == "false"
+    assert second.status_code == 201
+    assert second.headers["Idempotency-Replayed"] == "true"
+
+
 async def test_build_registration_conflicting_reregister_returns_409(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         _insert_upload_capability(main)

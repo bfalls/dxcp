@@ -111,6 +111,12 @@ spinnaker = SpinnakerAdapter(
 logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
 artifact_source = None
+IDEMPOTENCY_REPLAYED_HEADER = "Idempotency-Replayed"
+IDEMPOTENCY_OBSERVABLE_PATHS = {
+    "/v1/builds/register",
+    "/v1/builds",
+    "/v1/builds/upload-capability",
+}
 
 logger.info(
     "config.engine loaded engine_url=%s engine_token=%s",
@@ -212,6 +218,16 @@ async def attach_request_id(request: Request, call_next):
     finally:
         request_id_ctx.reset(token)
     response.headers["X-Request-Id"] = request_id
+    return response
+
+
+@app.middleware("http")
+async def attach_idempotency_replayed_header(request: Request, call_next):
+    response = await call_next(request)
+    if request.method == "POST" and request.url.path in IDEMPOTENCY_OBSERVABLE_PATHS:
+        replayed = getattr(request.state, "idempotency_replayed", None)
+        if replayed is not None:
+            response.headers[IDEMPOTENCY_REPLAYED_HEADER] = "true" if replayed else "false"
     return response
 
 
@@ -1302,11 +1318,15 @@ def enforce_idempotency(request: Request, idempotency_key: str):
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
     cached = idempotency.get(key)
     if cached:
+        if request.method == "POST" and request.url.path in IDEMPOTENCY_OBSERVABLE_PATHS:
+            request.state.idempotency_replayed = True
         return JSONResponse(status_code=cached["status_code"], content=cached["response"])
     return None
 
 
 def store_idempotency(request: Request, idempotency_key: str, response: dict, status_code: int) -> None:
+    if request.method == "POST" and request.url.path in IDEMPOTENCY_OBSERVABLE_PATHS:
+        request.state.idempotency_replayed = False
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
     idempotency.set(key, response, status_code)
 
