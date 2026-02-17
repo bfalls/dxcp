@@ -214,13 +214,13 @@ jobs:
             "${dxcp_base}/whoami")"
           echo "DXCP caller identity: ${whoami}"
           python3 - <<'PY' "${whoami}"
-import json
-import sys
+          import json
+          import sys
 
-identity = json.loads(sys.argv[1])
-if not (identity.get("azp") or identity.get("sub") or identity.get("email")):
-    raise SystemExit("DXCP /whoami returned no azp/sub/email; configure a CI Publisher rule that matches your token claims.")
-PY
+          identity = json.loads(sys.argv[1])
+          if not (identity.get("azp") or identity.get("sub") or identity.get("email")):
+              raise SystemExit("DXCP /whoami returned no azp/sub/email; configure a CI Publisher rule that matches your token claims.")
+          PY
           {
             echo "### DXCP CI identity"
             echo '```json'
