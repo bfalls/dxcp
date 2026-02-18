@@ -938,7 +938,7 @@ export async function runAllTests() {
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
 
     await view.findByText('Build Provenance')
-    await view.findByText('s3://dxcp-artifacts/demo-service/2.1.0.zip')
+    await view.findByText('2.1.0.zip')
     assert.ok(view.getByRole('button', { name: 'Copy full artifact reference' }))
   })
 

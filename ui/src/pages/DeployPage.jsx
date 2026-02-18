@@ -91,7 +91,8 @@ export default function DeployPage({
   const shortGitSha = selectedBuildDetails?.git_sha ? String(selectedBuildDetails.git_sha).slice(0, 10) : '-'
   const artifactRef = selectedBuildDetails?.artifactRef || ''
   const showArtifactRef = artifactRefDisplayEnabled === true && Boolean(artifactRef)
-  const artifactValue = showArtifactRef ? artifactRef : artifactRefDisplayEnabled === true ? '-' : 'Hidden by policy'
+  const artifactName = artifactRef ? artifactRef.split('/').filter(Boolean).pop() || artifactRef : '-'
+  const artifactValue = showArtifactRef ? artifactName : artifactRefDisplayEnabled === true ? '-' : 'Hidden by policy'
   const commitUrl = selectedBuildDetails?.commit_url || ''
   const runUrl = selectedBuildDetails?.run_url || ''
   const showCommitLink = externalLinksDisplayEnabled === true && Boolean(commitUrl)
@@ -325,7 +326,7 @@ export default function DeployPage({
                                 </dd>
                                 <dt>Artifact</dt>
                                 <dd className="helper" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                  <span>{artifactValue}</span>
+                                  <span title={showArtifactRef ? artifactRef : undefined}>{artifactValue}</span>
                                   {showArtifactRef && (
                                     <button
                                       type="button"
