@@ -17,7 +17,6 @@ export default function AppShell({
   onEnvironmentChange,
   environmentLoading,
   environmentNote,
-  environmentAutoApplied,
   alertRail,
   children
 }) {
@@ -66,9 +65,6 @@ export default function AppShell({
                 </select>
               )}
               {environmentNote && <span className="context-helper">{environmentNote}</span>}
-              {!environmentNote && environmentAutoApplied && selectedEnvironment && (
-                <span className="context-helper">Default applied.</span>
-              )}
             </div>
             {currentDeliveryGroup && (
               <div className="context-item">

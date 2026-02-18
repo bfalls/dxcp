@@ -34,6 +34,7 @@ const cacheStore = {
   servicesView: { ts: 0 },
   policy: { ts: 0 },
   versions: new Map(),
+  buildDetails: new Map(),
   deployments: { ts: 0 },
   deploymentDetail: new Map()
 }
@@ -658,6 +659,10 @@ export default function App() {
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [versionsRefreshing, setVersionsRefreshing] = useState(false)
   const [versionsError, setVersionsError] = useState('')
+  const [selectedBuildDetails, setSelectedBuildDetails] = useState(null)
+  const [selectedBuildDetailsLoading, setSelectedBuildDetailsLoading] = useState(false)
+  const [selectedBuildDetailsError, setSelectedBuildDetailsError] = useState('')
+  const [lastBuildDetailsKey, setLastBuildDetailsKey] = useState('')
   const [deployQueryParams, setDeployQueryParams] = useState(null)
   const [deployUrlSyncEnabled, setDeployUrlSyncEnabled] = useState(false)
   const [deploymentsQueryService, setDeploymentsQueryService] = useState('')
@@ -669,7 +674,6 @@ export default function App() {
   const [environmentsLoading, setEnvironmentsLoading] = useState(false)
   const [environmentsError, setEnvironmentsError] = useState('')
   const [selectedEnvironment, setSelectedEnvironment] = useState('')
-  const [environmentAutoApplied, setEnvironmentAutoApplied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [timeline, setTimeline] = useState([])
   const [insights, setInsights] = useState(null)
@@ -2194,6 +2198,66 @@ export default function App() {
     return false
   }, [api, service])
 
+  const loadBuildDetails = useCallback(async (serviceName, versionName, { force = false } = {}) => {
+    if (!serviceName || !versionName) {
+      setSelectedBuildDetails(null)
+      setSelectedBuildDetailsLoading(false)
+      setSelectedBuildDetailsError('')
+      setLastBuildDetailsKey('')
+      return false
+    }
+    const buildKey = `${serviceName}@${versionName}`
+    if (!force && buildKey === lastBuildDetailsKey && selectedBuildDetails) {
+      return true
+    }
+    if (!force) {
+      const cached = cacheStore.buildDetails.get(buildKey)
+      if (cached && isCacheFresh(cached)) {
+        setSelectedBuildDetails(cached.data || null)
+        setSelectedBuildDetailsError(cached.error || '')
+        setLastBuildDetailsKey(buildKey)
+        return true
+      }
+    }
+    setSelectedBuildDetailsLoading(true)
+    setSelectedBuildDetailsError('')
+    try {
+      const data = await api.get(
+        `/builds?service=${encodeURIComponent(serviceName)}&version=${encodeURIComponent(versionName)}`,
+        { bypassCache: force, cacheTtlMs: force ? 0 : CACHE_TTL_MS }
+      )
+      if (data && !data.code) {
+        setSelectedBuildDetails(data)
+        setSelectedBuildDetailsError('')
+        setLastBuildDetailsKey(buildKey)
+        cacheStore.buildDetails.set(buildKey, { ts: Date.now(), data })
+        return true
+      }
+      setSelectedBuildDetails(null)
+      setSelectedBuildDetailsError('Build provenance unavailable for this version.')
+      setLastBuildDetailsKey(buildKey)
+      cacheStore.buildDetails.set(buildKey, {
+        ts: Date.now(),
+        data: null,
+        error: 'Build provenance unavailable for this version.'
+      })
+      return false
+    } catch (err) {
+      if (isLoginRequiredError(err)) return false
+      setSelectedBuildDetails(null)
+      setSelectedBuildDetailsError('Build provenance unavailable for this version.')
+      setLastBuildDetailsKey(buildKey)
+      cacheStore.buildDetails.set(buildKey, {
+        ts: Date.now(),
+        data: null,
+        error: 'Build provenance unavailable for this version.'
+      })
+      return false
+    } finally {
+      setSelectedBuildDetailsLoading(false)
+    }
+  }, [api, lastBuildDetailsKey, selectedBuildDetails])
+
   async function refreshData() {
     setRefreshing(true)
     const tasks = [
@@ -2677,7 +2741,6 @@ export default function App() {
       setEnvironmentsLoading(false)
       setEnvironmentsError('')
       setSelectedEnvironment('')
-      setEnvironmentAutoApplied(false)
       setPublicSettings({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
@@ -2709,7 +2772,6 @@ export default function App() {
     if (environmentOptions.length === 0) {
       if (selectedEnvironment) {
         setSelectedEnvironment('')
-        setEnvironmentAutoApplied(false)
       }
       return
     }
@@ -2718,7 +2780,6 @@ export default function App() {
     const next = pickDefaultEnvironment(environmentOptions)
     if (next) {
       setSelectedEnvironment(next)
-      setEnvironmentAutoApplied(true)
     }
   }, [environmentOptions, selectedEnvironment, environmentsLoading])
 
@@ -2838,6 +2899,18 @@ export default function App() {
       loadAllowedActions(service)
     }
   }, [service, isAuthenticated, accessToken, loadVersions, loadAllowedActions])
+
+  useEffect(() => {
+    if (!isAuthenticated || view !== 'deploy') return
+    if (!service || !version) {
+      setSelectedBuildDetails(null)
+      setSelectedBuildDetailsLoading(false)
+      setSelectedBuildDetailsError('')
+      setLastBuildDetailsKey('')
+      return
+    }
+    loadBuildDetails(service, version)
+  }, [isAuthenticated, view, service, version, loadBuildDetails])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'deploy') return
@@ -3207,7 +3280,7 @@ export default function App() {
         setDeployQueryParams((prev) => (prev ? { ...prev, recipe: '' } : prev))
         return
       }
-      if (recipeId !== queryRecipe) {
+      if (!recipeId) {
         setRecipeId(queryRecipe)
         setRecipeAutoApplied(false)
         return
@@ -3446,7 +3519,6 @@ export default function App() {
 
   const handleEnvironmentChange = useCallback((value) => {
     setSelectedEnvironment(value)
-    setEnvironmentAutoApplied(false)
   }, [])
 
   const navigateToService = useCallback(
@@ -3594,6 +3666,10 @@ export default function App() {
     versionsLoading,
     versionsRefreshing,
     versionsError,
+    selectedBuildDetails,
+    selectedBuildDetailsLoading,
+    selectedBuildDetailsError,
+    formatTime,
     validVersion,
     versionAutoApplied,
     versionUnverifiable,
@@ -3628,8 +3704,6 @@ export default function App() {
     trimmedChangeSummary,
     environmentLabel: environmentDisplayName,
     environmentNotice: deployEnvironmentNotice,
-    environmentScopeNote,
-    environmentAutoApplied,
     headerMeta: <HeaderStatus items={policyStatusItems} />
   }
 
@@ -3808,7 +3882,6 @@ export default function App() {
       onEnvironmentChange={handleEnvironmentChange}
       environmentLoading={environmentsLoading}
       environmentNote={environmentHeaderNote}
-      environmentAutoApplied={environmentAutoApplied}
       alertRail={
         <AlertRail
           errorMessage={errorMessage}

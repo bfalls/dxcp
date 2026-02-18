@@ -371,6 +371,17 @@ body {
     justify-content: flex-start;
   }
 
+  .list-item.recipe-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .recipe-selector-detail {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 10px;
+  }
+
 }
 
 .card {
@@ -531,6 +542,44 @@ body {
 
 .list-item.recipe-choice input {
   margin-top: 4px;
+}
+
+.list-item.recipe-selector {
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr);
+  align-items: start;
+}
+
+.recipe-selector-options {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.recipe-selector-options legend {
+  margin-bottom: 6px;
+}
+
+.recipe-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.recipe-option input {
+  margin: 0;
+}
+
+.recipe-selector-detail {
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+  min-width: 0;
+}
+
+.list-item.provenance-block {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .list-item.admin-group {
