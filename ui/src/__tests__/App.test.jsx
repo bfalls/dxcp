@@ -37,7 +37,9 @@ const buildFetchMock = ({
   versionsByService,
   environments,
   uiExposureArtifactRefDisplay,
-  uiExposureExternalLinksDisplay
+  uiExposureExternalLinksDisplay,
+  buildCommitUrl,
+  buildRunUrl
 }) => {
   let groups = deliveryGroups || [
     {
@@ -371,6 +373,8 @@ const buildFetchMock = ({
         ci_publisher: 'ci-bot-1',
         ci_provider: 'github',
         ci_run_id: 'run-123',
+        commit_url: buildCommitUrl || 'https://scm.example.internal/commit/abc123',
+        run_url: buildRunUrl || 'https://ci.example.internal/runs/123',
         registeredAt: '2025-01-01T00:00:00Z'
       })
     }
@@ -903,6 +907,8 @@ export async function runAllTests() {
     await view.findByText('Hidden by policy')
     assert.equal(view.queryByRole('button', { name: 'Copy full artifact reference' }), null)
     assert.equal(view.queryByText('s3://dxcp-artifacts/demo-service/2.1.0.zip'), null)
+    assert.equal(view.queryByRole('link', { name: 'Open commit' }), null)
+    assert.equal(view.queryByRole('link', { name: 'Open run' }), null)
   })
 
   await runTest('Deploy provenance shows artifact reference and copy when policy enables display', async () => {
@@ -934,6 +940,41 @@ export async function runAllTests() {
     await view.findByText('Build Provenance')
     await view.findByText('s3://dxcp-artifacts/demo-service/2.1.0.zip')
     assert.ok(view.getByRole('button', { name: 'Copy full artifact reference' }))
+  })
+
+  await runTest('Deploy provenance shows commit and run links when external links are allowed', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      versionsByService: { 'demo-service': ['2.1.0'] },
+      uiExposureArtifactRefDisplay: true,
+      uiExposureExternalLinksDisplay: true
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    const versionSelect = view.container.querySelector('#deploy-version')
+    assert.ok(versionSelect)
+    fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
+
+    const commitLink = await view.findByRole('link', { name: 'Open commit' })
+    const runLink = await view.findByRole('link', { name: 'Open run' })
+    assert.equal(commitLink.getAttribute('target'), '_blank')
+    assert.equal(commitLink.getAttribute('rel'), 'noreferrer noopener')
+    assert.equal(runLink.getAttribute('target'), '_blank')
+    assert.equal(runLink.getAttribute('rel'), 'noreferrer noopener')
   })
 
   await runTest('No environments configured shows clear empty state', async () => {

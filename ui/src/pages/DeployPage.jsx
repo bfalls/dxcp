@@ -69,6 +69,7 @@ export default function DeployPage({
   environmentLabel,
   environmentNotice,
   artifactRefDisplayEnabled,
+  externalLinksDisplayEnabled,
   headerMeta
 }) {
   const [artifactCopyState, setArtifactCopyState] = React.useState('')
@@ -91,6 +92,10 @@ export default function DeployPage({
   const artifactRef = selectedBuildDetails?.artifactRef || ''
   const showArtifactRef = artifactRefDisplayEnabled === true && Boolean(artifactRef)
   const artifactValue = showArtifactRef ? artifactRef : artifactRefDisplayEnabled === true ? '-' : 'Hidden by policy'
+  const commitUrl = selectedBuildDetails?.commit_url || ''
+  const runUrl = selectedBuildDetails?.run_url || ''
+  const showCommitLink = externalLinksDisplayEnabled === true && Boolean(commitUrl)
+  const showRunLink = externalLinksDisplayEnabled === true && Boolean(runUrl)
   const selectedRecipeForPanel = selectedRecipe || (filteredRecipes.length > 0 ? filteredRecipes[0] : null)
 
   React.useEffect(() => {
@@ -354,6 +359,22 @@ export default function DeployPage({
                                 <dd className="helper">{selectedBuildDetails.ci_provider || '-'}</dd>
                                 <dt>Run ID</dt>
                                 <dd className="helper">{selectedBuildDetails.ci_run_id || '-'}</dd>
+                                {showCommitLink && (
+                                  <>
+                                    <dt>Commit</dt>
+                                    <dd className="helper">
+                                      <a href={commitUrl} target="_blank" rel="noreferrer noopener">Open commit</a>
+                                    </dd>
+                                  </>
+                                )}
+                                {showRunLink && (
+                                  <>
+                                    <dt>CI run</dt>
+                                    <dd className="helper">
+                                      <a href={runUrl} target="_blank" rel="noreferrer noopener">Open run</a>
+                                    </dd>
+                                  </>
+                                )}
                               </dl>
                             </div>
                           </div>

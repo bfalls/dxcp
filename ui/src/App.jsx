@@ -3825,6 +3825,7 @@ export default function App() {
     environmentLabel: environmentDisplayName,
     environmentNotice: deployEnvironmentNotice,
     artifactRefDisplayEnabled: publicSettings?.policy?.uiExposure?.artifactRef?.display === true,
+    externalLinksDisplayEnabled: publicSettings?.policy?.uiExposure?.externalLinks?.display === true,
     headerMeta: <HeaderStatus items={policyStatusItems} />
   }
 
