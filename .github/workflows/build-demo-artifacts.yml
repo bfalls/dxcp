@@ -231,19 +231,19 @@ jobs:
             [[ -z "$service" || -z "$version" || -z "$artifact_ref" ]] && continue
             built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             idem_key="github-${{ github.run_id }}-${service}-${version}"
-            payload="$(cat <<JSON
-            {
-              "service": "${service}",
-              "version": "${version}",
-              "artifactRef": "${artifact_ref}",
-              "git_sha": "${{ github.sha }}",
-              "git_branch": "${{ github.ref_name }}",
-              "ci_provider": "github",
-              "ci_run_id": "${{ github.run_id }}",
-              "built_at": "${built_at}"
-            }
-            JSON
-            )"
+          payload="$(cat <<JSON
+{
+  "service": "${service}",
+  "version": "${version}",
+  "artifactRef": "${artifact_ref}",
+  "git_sha": "${{ github.sha }}",
+  "git_branch": "${{ github.ref_name }}",
+  "ci_provider": "github",
+  "ci_run_id": "${{ github.run_id }}",
+  "built_at": "${built_at}"
+}
+JSON
+)"
             response="$(curl -sS --fail --show-error -X POST "${dxcp_base}/builds/register" \
               -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
               -H "Content-Type: application/json" \
