@@ -68,6 +68,7 @@ export default function DeployPage({
   trimmedChangeSummary,
   environmentLabel,
   environmentNotice,
+  artifactRefDisplayEnabled,
   headerMeta
 }) {
   const [artifactCopyState, setArtifactCopyState] = React.useState('')
@@ -88,7 +89,8 @@ export default function DeployPage({
     : '-'
   const shortGitSha = selectedBuildDetails?.git_sha ? String(selectedBuildDetails.git_sha).slice(0, 10) : '-'
   const artifactRef = selectedBuildDetails?.artifactRef || ''
-  const artifactName = artifactRef ? artifactRef.split('/').filter(Boolean).pop() || artifactRef : '-'
+  const showArtifactRef = artifactRefDisplayEnabled === true && Boolean(artifactRef)
+  const artifactValue = showArtifactRef ? artifactRef : artifactRefDisplayEnabled === true ? '-' : 'Hidden by policy'
   const selectedRecipeForPanel = selectedRecipe || (filteredRecipes.length > 0 ? filteredRecipes[0] : null)
 
   React.useEffect(() => {
@@ -318,8 +320,8 @@ export default function DeployPage({
                                 </dd>
                                 <dt>Artifact</dt>
                                 <dd className="helper" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                  <span title={artifactRef || undefined}>{artifactName}</span>
-                                  {artifactRef && (
+                                  <span>{artifactValue}</span>
+                                  {showArtifactRef && (
                                     <button
                                       type="button"
                                       className="button secondary"
@@ -346,7 +348,7 @@ export default function DeployPage({
                                   )}
                                 </dd>
                               </dl>
-                              {artifactCopyState && <div className="helper space-4">{artifactCopyState}</div>}
+                              {showArtifactRef && artifactCopyState && <div className="helper space-4">{artifactCopyState}</div>}
                               <dl className="definition-grid space-8">
                                 <dt>CI Provider</dt>
                                 <dd className="helper">{selectedBuildDetails.ci_provider || '-'}</dd>

@@ -39,6 +39,19 @@ const cacheStore = {
   deploymentDetail: new Map()
 }
 
+const DEFAULT_PUBLIC_SETTINGS = {
+  default_refresh_interval_seconds: 300,
+  min_refresh_interval_seconds: 60,
+  max_refresh_interval_seconds: 3600,
+  policy: {
+    uiExposure: {
+      artifactRef: {
+        display: false
+      }
+    }
+  }
+}
+
 function getCacheEntry(map, key) {
   if (!map.has(key)) {
     map.set(key, { ts: 0 })
@@ -722,11 +735,7 @@ export default function App() {
   const [policyDeploymentsLoading, setPolicyDeploymentsLoading] = useState(false)
   const [policyDeploymentsError, setPolicyDeploymentsError] = useState('')
   const [policyRefreshedAt, setPolicyRefreshedAt] = useState('')
-  const [publicSettings, setPublicSettings] = useState({
-    default_refresh_interval_seconds: 300,
-    min_refresh_interval_seconds: 60,
-    max_refresh_interval_seconds: 3600
-  })
+  const [publicSettings, setPublicSettings] = useState(DEFAULT_PUBLIC_SETTINGS)
   const [adminSettings, setAdminSettings] = useState(null)
   const [userSettingsKey, setUserSettingsKey] = useState('')
   const [userSettings, setUserSettings] = useState(null)
@@ -1525,12 +1534,23 @@ export default function App() {
 
   const loadPublicSettings = useCallback(async () => {
     try {
-      const data = await api.get('/settings/public')
+      const [data, uiExposureData] = await Promise.all([
+        api.get('/settings/public'),
+        api.get('/ui/policy/ui-exposure')
+      ])
       if (!data || data.code) return
+      const artifactRefDisplay = uiExposureData?.policy?.artifactRef?.display === true
       setPublicSettings({
         default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
         min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
-        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600
+        max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600,
+        policy: {
+          uiExposure: {
+            artifactRef: {
+              display: artifactRefDisplay
+            }
+          }
+        }
       })
     } catch (err) {
       if (isLoginRequiredError(err)) return
@@ -2262,7 +2282,8 @@ export default function App() {
     setRefreshing(true)
     const tasks = [
       refreshPolicyContext({ bypassCache: true }),
-      loadVersions(true, { bypassCache: true })
+      loadVersions(true, { bypassCache: true }),
+      loadPublicSettings()
     ]
     const results = await Promise.allSettled(tasks)
     const policyOk = results[0].status === 'fulfilled' && results[0].value === true
@@ -2741,11 +2762,7 @@ export default function App() {
       setEnvironmentsLoading(false)
       setEnvironmentsError('')
       setSelectedEnvironment('')
-      setPublicSettings({
-        default_refresh_interval_seconds: 300,
-        min_refresh_interval_seconds: 60,
-        max_refresh_interval_seconds: 3600
-      })
+      setPublicSettings(DEFAULT_PUBLIC_SETTINGS)
       setAdminSettings(null)
       setUserSettingsKey('')
       setUserSettings(null)
@@ -3704,6 +3721,7 @@ export default function App() {
     trimmedChangeSummary,
     environmentLabel: environmentDisplayName,
     environmentNotice: deployEnvironmentNotice,
+    artifactRefDisplayEnabled: publicSettings?.policy?.uiExposure?.artifactRef?.display === true,
     headerMeta: <HeaderStatus items={policyStatusItems} />
   }
 

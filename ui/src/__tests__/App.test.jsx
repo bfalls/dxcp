@@ -35,7 +35,8 @@ const buildFetchMock = ({
   promotionResponse,
   policySummaryResponse,
   versionsByService,
-  environments
+  environments,
+  uiExposureArtifactRefDisplay
 }) => {
   let groups = deliveryGroups || [
     {
@@ -181,6 +182,16 @@ const buildFetchMock = ({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
+      })
+    }
+    if (pathname === '/v1/ui/policy/ui-exposure') {
+      return ok({
+        policy: {
+          artifactRef: {
+            display: uiExposureArtifactRefDisplay === true
+          }
+        },
+        source: 'ssm'
       })
     }
     if (pathname === '/v1/settings/admin') {
@@ -330,6 +341,20 @@ const buildFetchMock = ({
       const rawVersions = versionsByService?.[serviceName] || []
       const versions = rawVersions.map((item) => (typeof item === 'string' ? { version: item } : item))
       return ok({ versions })
+    }
+    if (pathname === '/v1/builds') {
+      const serviceName = parsed.searchParams.get('service') || 'demo-service'
+      const version = parsed.searchParams.get('version') || '2.1.0'
+      return ok({
+        service: serviceName,
+        version,
+        artifactRef: `s3://dxcp-artifacts/${serviceName}/${version}.zip`,
+        git_sha: '0123456789abcdef0123456789abcdef01234567',
+        ci_publisher: 'ci-bot-1',
+        ci_provider: 'github',
+        ci_run_id: 'run-123',
+        registeredAt: '2025-01-01T00:00:00Z'
+      })
     }
     if (pathname.endsWith('/allowed-actions')) {
       return ok({
@@ -794,6 +819,69 @@ export async function runAllTests() {
     await view.findAllByText('Default Delivery Group')
     await waitForCondition(() => view.getByLabelText(/Default Deploy/).checked === true)
     assert.ok(view.queryByText('No delivery group assigned.') === null)
+  })
+
+  await runTest('Deploy provenance hides artifact reference when policy disables display', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      versionsByService: { 'demo-service': ['2.1.0'] },
+      uiExposureArtifactRefDisplay: false
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    const versionSelect = view.container.querySelector('#deploy-version')
+    assert.ok(versionSelect)
+    fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
+
+    await view.findByText('Build Provenance')
+    await view.findByText('Hidden by policy')
+    assert.equal(view.queryByRole('button', { name: 'Copy full artifact reference' }), null)
+    assert.equal(view.queryByText('s3://dxcp-artifacts/demo-service/2.1.0.zip'), null)
+  })
+
+  await runTest('Deploy provenance shows artifact reference and copy when policy enables display', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      versionsByService: { 'demo-service': ['2.1.0'] },
+      uiExposureArtifactRefDisplay: true
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    await ensureServiceSelected(view)
+    await ensureEnvironmentSelected(view)
+    const versionSelect = view.container.querySelector('#deploy-version')
+    assert.ok(versionSelect)
+    fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
+
+    await view.findByText('Build Provenance')
+    await view.findByText('s3://dxcp-artifacts/demo-service/2.1.0.zip')
+    assert.ok(view.getByRole('button', { name: 'Copy full artifact reference' }))
   })
 
   await runTest('No environments configured shows clear empty state', async () => {
