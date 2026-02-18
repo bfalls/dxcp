@@ -126,5 +126,9 @@ Response fields are the same identity values DXCP uses for CI publisher matching
    - `ci_run_id`, `built_at` (UTC ISO-8601)
 3. Send an idempotency key (example:
    `github-<run_id>-demo-service-<version>`).
+4. Read back a single build with `GET /v1/builds?service=<service>&version=<version>`.
+   The response matches build registration shape and includes `ci_publisher` plus
+   provenance fields such as `git_sha`, `git_branch`, `ci_provider`, `ci_run_id`,
+   `built_at`, `checksum_sha256`, `repo`, `actor`, `registeredAt`, and `id`.
 
 If the caller token does not match any configured publisher, DXCP returns `CI_ONLY`.

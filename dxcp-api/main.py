@@ -195,7 +195,7 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
                 missing_fields.append(field_name)
             else:
                 invalid_fields.append(field_name)
-    if request.url.path in {"/v1/builds", "/v1/builds/register"}:
+    if request.method == "POST" and request.url.path in {"/v1/builds", "/v1/builds/register"}:
         details = {
             "missing_fields": sorted(set(missing_fields)),
             "invalid_fields": sorted(set(invalid_fields)),
@@ -206,6 +206,8 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
             "Build registration request is invalid",
             details=details,
         )
+    if request.method == "GET" and request.url.path == "/v1/builds":
+        return error_response(400, "INVALID_REQUEST", "service and version are required")
     return error_response(400, "INVALID_REQUEST", "Invalid request")
 
 
@@ -2866,6 +2868,21 @@ def create_upload_capability(
     ).dict()
     store_idempotency(request, idempotency_key, response, 201)
     return response
+
+
+@app.get("/v1/builds")
+def get_build(
+    request: Request,
+    service: str = Query(...),
+    version: str = Query(...),
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    build = storage.find_latest_build(service, version)
+    if not build:
+        return error_response(404, "NOT_FOUND", "Build not found")
+    return build
 
 
 @app.post("/v1/builds", status_code=201)

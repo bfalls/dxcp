@@ -185,3 +185,49 @@ async def test_build_registration_conflicting_reregister_returns_409(tmp_path: P
     assert first.status_code == 201
     assert second.status_code == 409
     assert second.json()["code"] == "BUILD_REGISTRATION_CONFLICT"
+
+
+async def test_get_build_returns_registered_record_with_ci_publisher(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        _insert_upload_capability(main)
+        register_response = await client.post(
+            "/v1/builds",
+            headers={"Idempotency-Key": "build-read-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip"),
+        )
+        read_response = await client.get(
+            "/v1/builds",
+            params={"service": "demo-service", "version": "1.0.0"},
+            headers=auth_header_for_subject(["dxcp-observers"], "observer-1"),
+        )
+
+    assert register_response.status_code == 201
+    assert read_response.status_code == 200
+    assert read_response.json() == register_response.json()
+    assert read_response.json()["ci_publisher"] == "ci-publisher-1"
+
+
+async def test_get_build_unknown_service_version_returns_404(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        response = await client.get(
+            "/v1/builds",
+            params={"service": "demo-service", "version": "9.9.9"},
+            headers=auth_header_for_subject(["dxcp-observers"], "observer-1"),
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "NOT_FOUND"
+
+
+async def test_get_build_missing_query_params_returns_400(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        response = await client.get(
+            "/v1/builds",
+            params={"service": "demo-service"},
+            headers=auth_header_for_subject(["dxcp-observers"], "observer-1"),
+        )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "INVALID_REQUEST"
+    assert body["message"] == "service and version are required"
