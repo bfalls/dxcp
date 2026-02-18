@@ -182,7 +182,6 @@ jobs:
         if: steps.changed.outputs.services != ''
         env:
           DXCP_API_BASE: ${{ vars.DXCP_API_BASE }}
-          DXCP_URL: ${{ vars.DXCP_URL }}
           DXCP_API_TOKEN: ${{ secrets.DXCP_API_TOKEN }}
         shell: bash
         run: |
@@ -193,9 +192,9 @@ jobs:
             exit 1
           fi
 
-          dxcp_base="${DXCP_API_BASE:-${DXCP_URL:-}}"
+          dxcp_base="${DXCP_API_BASE:-}"
           if [[ -z "$dxcp_base" ]]; then
-            echo "Set repo variable DXCP_API_BASE (or DXCP_URL) to the DXCP API endpoint." >&2
+            echo "Set repo variable DXCP_API_BASE to the DXCP API endpoint." >&2
             exit 1
           fi
           dxcp_base="${dxcp_base%/}"
