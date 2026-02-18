@@ -60,6 +60,17 @@ async def test_valid_token_allows_services(tmp_path: Path, monkeypatch):
     assert response.status_code == 200
 
 
+async def test_delivery_owner_token_allows_services(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/v1/services", headers=auth_header(["dxcp-delivery-owners"]))
+    assert response.status_code == 200
+
+
 async def test_wrong_issuer_rejected(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
     mock_jwks(monkeypatch)

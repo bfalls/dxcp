@@ -38,6 +38,7 @@ def _load_main(tmp_path: Path):
     sys.path.insert(0, str(dxcp_api_dir))
     os.environ["DXCP_DB_PATH"] = str(tmp_path / "dxcp-test.db")
     os.environ["DXCP_SERVICE_REGISTRY_PATH"] = str(tmp_path / "services.json")
+    os.environ["DXCP_SPINNAKER_GATE_URL"] = ""
     configure_auth_env()
     _write_service_registry(Path(os.environ["DXCP_SERVICE_REGISTRY_PATH"]))
 
@@ -254,6 +255,35 @@ async def test_validate_preflight_no_credentials_skips_check(tmp_path: Path, mon
         )
     assert response.status_code == 200
     assert fake_client.calls == [("dxcp-test-bucket", "payments-1.2.3.zip")]
+
+
+async def test_validate_engine_unavailable_returns_discriminator_and_sanitized_diagnostics(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        main.SETTINGS.spinnaker_base_url = "https://user:pass@gate.internal.example/api/v1"
+        main.spinnaker.base_url = main.SETTINGS.spinnaker_base_url
+
+        def _down(timeout_seconds=None):
+            raise RuntimeError("Spinnaker HTTP 502: <!DOCTYPE html> ngrok upstream down")
+
+        monkeypatch.setattr(main.spinnaker, "check_health", _down)
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(),
+        )
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "ENGINE_CALL_FAILED"
+    assert body["error_code"] == "ENGINE_CALL_FAILED"
+    assert body["message"] == "Unable to validate deployment"
+    assert body.get("details", {}).get("engine_unavailable") is True
+    diagnostics = body.get("details", {}).get("diagnostics") or {}
+    assert diagnostics.get("engine") == "spinnaker"
+    assert diagnostics.get("upstream_status") == 502
+    assert diagnostics.get("engine_host") == "gate.internal.example"
+    assert diagnostics.get("request_id")
+    assert "://" not in diagnostics.get("engine_host", "")
+    assert "/" not in diagnostics.get("engine_host", "")
 
 
 async def test_validate_missing_recipe_id_returns_error_schema(tmp_path: Path, monkeypatch):

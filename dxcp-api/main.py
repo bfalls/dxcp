@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 import types
@@ -210,6 +211,12 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
     if request.method == "GET" and request.url.path == "/v1/builds":
         return error_response(400, "INVALID_REQUEST", "service and version are required")
     return error_response(400, "INVALID_REQUEST", "Invalid request")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("request.unhandled_exception path=%s error=%s", request.url.path, str(exc))
+    return error_response(500, "INTERNAL_ERROR", "Unexpected server error")
 
 
 @app.middleware("http")
@@ -743,10 +750,53 @@ def _validate_recipe_preview(recipe: dict) -> dict:
 def _delivery_groups_for_actor(actor: Actor) -> list[dict]:
     if actor.role == Role.PLATFORM_ADMIN:
         return storage.list_delivery_groups()
-    actor_id = actor.actor_id
-    if not actor_id:
+    actor_email = (actor.email or "").strip().lower()
+    if not actor_email:
+        logger.warning(
+            "delivery_group_scope_missing_email actor_id=%s role=%s",
+            actor.actor_id,
+            actor.role.value,
+        )
         return []
-    return [group for group in storage.list_delivery_groups() if group.get("owner") == actor_id]
+    return [group for group in storage.list_delivery_groups() if actor_email in _owner_emails(group.get("owner"))]
+
+
+def _owner_emails(owner_value: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(owner_value, str):
+        values = owner_value.split(",")
+    elif isinstance(owner_value, list):
+        for item in owner_value:
+            if isinstance(item, str):
+                values.extend(item.split(","))
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        email = value.strip().lower()
+        if not email or email in seen:
+            continue
+        seen.add(email)
+        normalized.append(email)
+    return normalized
+
+
+def _is_email_like(value: str) -> bool:
+    if "@" not in value:
+        return False
+    local, _, domain = value.partition("@")
+    if not local or not domain:
+        return False
+    return "." in domain
+
+
+def _normalize_owner_value(owner_value: Any) -> Optional[str]:
+    emails = _owner_emails(owner_value)
+    if not emails:
+        return None
+    invalid = [email for email in emails if not _is_email_like(email)]
+    if invalid:
+        raise ValueError("Owner must be one or more email addresses separated by commas.")
+    return ", ".join(emails)
 
 
 def _spinnaker_scope_for_actor(actor: Actor) -> tuple[Optional[dict], Optional[JSONResponse]]:
@@ -840,6 +890,10 @@ def _validate_delivery_group_payload(group: dict, group_id: Optional[str] = None
     guardrail_error = _validate_guardrails(group.get("guardrails"))
     if guardrail_error:
         return guardrail_error
+    try:
+        group["owner"] = _normalize_owner_value(group.get("owner"))
+    except ValueError as exc:
+        return error_response(400, "INVALID_OWNER", str(exc))
     return None
 
 
@@ -1132,12 +1186,58 @@ def _classify_engine_error(message: str) -> tuple[str, int]:
     return "ENGINE_CALL_FAILED", 502
 
 
+def _extract_upstream_status(message: str) -> Optional[int]:
+    match = re.search(r"\bhttp\s+(\d{3})\b", message or "", flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _engine_host() -> str:
+    base = (SETTINGS.spinnaker_base_url or "").strip()
+    if not base:
+        return ""
+    parsed = urlparse(base)
+    return parsed.hostname or ""
+
+
+def _engine_unavailable_discriminator(code: str, raw_message: str, upstream_status: Optional[int]) -> bool:
+    if code in {"ENGINE_UNAVAILABLE", "ENGINE_TIMEOUT"}:
+        return True
+    lowered = (raw_message or "").lower()
+    if "connection failed" in lowered or "base url is required" in lowered or "stub mode" in lowered:
+        return True
+    if "timeout" in lowered or "timed out" in lowered:
+        return True
+    if code == "ENGINE_CALL_FAILED" and upstream_status is not None and upstream_status >= 500:
+        return True
+    return False
+
+
+def _preflight_engine_readiness(actor: Actor) -> Optional[JSONResponse]:
+    if spinnaker.mode != "http":
+        return None
+    if not SETTINGS.spinnaker_base_url:
+        return None
+    try:
+        spinnaker.check_health(timeout_seconds=2.0)
+    except Exception as exc:
+        return _engine_error_response(actor, "Unable to validate deployment", exc)
+    return None
+
+
 def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> JSONResponse:
     raw_message = str(exc) if exc else ""
     redacted = redact_text(raw_message)
     code, status = _classify_engine_error(raw_message)
+    upstream_status = _extract_upstream_status(raw_message)
+    engine_unavailable = _engine_unavailable_discriminator(code, raw_message, upstream_status)
     response_message = user_message
     operator_hint = None
+    request_id = request_id_ctx.get() or str(uuid.uuid4())
     if code == "ARTIFACT_NOT_FOUND":
         response_message = (
             "Artifact is no longer available in the artifact store. "
@@ -1147,6 +1247,24 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
             operator_hint = "If using demo artifact retention, older artifacts may expire."
     elif _include_operator_hint(actor) and redacted:
         operator_hint = redacted
+    details = {
+        "engine_unavailable": engine_unavailable,
+    }
+    if engine_unavailable:
+        diagnostics = {
+            "upstream_status": upstream_status,
+            "engine": "spinnaker",
+            "request_id": request_id,
+        }
+        if actor.role == Role.PLATFORM_ADMIN:
+            diagnostics["engine_host"] = _engine_host()
+        details["diagnostics"] = diagnostics
+        logger.warning(
+            "engine.unavailable request_id=%s engine=spinnaker engine_host=%s upstream_status=%s",
+            request_id,
+            _engine_host(),
+            upstream_status if upstream_status is not None else "unknown",
+        )
     log_event(
         "engine_error",
         outcome="FAILED",
@@ -1154,17 +1272,29 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
         error_code=code,
         status_code=status,
     )
-    request_id = request_id_ctx.get() or str(uuid.uuid4())
     payload = {
         "code": code,
         "error_code": code,
         "failure_cause": classify_failure_cause(code),
         "message": response_message,
         "request_id": request_id,
+        "details": details,
     }
     if operator_hint:
         payload["operator_hint"] = operator_hint
     return JSONResponse(status_code=status, content=payload)
+
+
+def _extract_engine_execution(execution: object) -> tuple[Optional[str], Optional[str]]:
+    if not isinstance(execution, dict):
+        return None, None
+    execution_id = execution.get("executionId")
+    execution_url = execution.get("executionUrl")
+    if not isinstance(execution_id, str) or not execution_id.strip():
+        return None, None
+    if not isinstance(execution_url, str) or not execution_url.strip():
+        return None, None
+    return execution_id.strip(), execution_url.strip()
 
 
 def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> Optional[JSONResponse]:
@@ -1383,6 +1513,60 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
         if state == "SUCCEEDED":
             storage.apply_supersession(deployment)
     return deployment
+
+
+def _deployment_lock_stale_seconds() -> int:
+    raw_value = os.getenv("DXCP_DEPLOYMENT_LOCK_STALE_SECONDS", "900")
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return 900
+    return parsed if parsed > 0 else 900
+
+
+def _active_deployments_for_group(group_id: str, environment: Optional[str]) -> list[dict]:
+    deployments = storage.list_deployments(None, None, environment)
+    return [
+        item
+        for item in deployments
+        if item.get("deliveryGroupId") == group_id and item.get("state") in {"ACTIVE", "IN_PROGRESS"}
+    ]
+
+
+def _reap_stale_group_locks(group_id: str, environment: Optional[str]) -> None:
+    stale_seconds = _deployment_lock_stale_seconds()
+    now = datetime.now(timezone.utc)
+    for deployment in _active_deployments_for_group(group_id, environment):
+        refreshed = refresh_from_spinnaker(deployment)
+        if refreshed.get("state") not in {"ACTIVE", "IN_PROGRESS"}:
+            continue
+        reference_time = _parse_iso(refreshed.get("updatedAt")) or _parse_iso(refreshed.get("createdAt"))
+        if not reference_time:
+            continue
+        age_seconds = (now - reference_time).total_seconds()
+        if age_seconds < stale_seconds:
+            continue
+        storage.update_deployment(
+            refreshed["id"],
+            "FAILED",
+            [
+                {
+                    "category": "INFRASTRUCTURE",
+                    "summary": "Deployment lock expired due to stale in-progress state.",
+                    "detail": "No terminal engine status was observed before lock timeout.",
+                    "actionHint": "Review engine health, then retry deployment.",
+                    "observedAt": utc_now(),
+                }
+            ],
+            outcome=base_outcome_from_state("FAILED"),
+        )
+        logger.warning(
+            "deployment.lock_reaped deployment_id=%s group_id=%s environment=%s stale_seconds=%s",
+            refreshed.get("id"),
+            group_id,
+            environment or "",
+            stale_seconds,
+        )
 
 
 def _timeline_event(key: str, label: str, occurred_at: str, detail: Optional[str] = None) -> dict:
@@ -1747,6 +1931,7 @@ def create_deployment(
             quota_scope=_quota_scope(group["id"], env_entry.get("name")),
             quota_limit=daily_deploy_quota,
         )
+        _reap_stale_group_locks(group["id"], env_entry.get("name"))
         guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
     except PolicyError as exc:
         _record_deploy_denied(actor, intent, exc.code, group.get("id"))
@@ -1768,6 +1953,13 @@ def create_deployment(
         execution = spinnaker.trigger_deploy(payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start deployment", exc)
+    execution_id, execution_url = _extract_engine_execution(execution)
+    if not execution_id or not execution_url:
+        return _engine_error_response(
+            actor,
+            "Unable to start deployment",
+            RuntimeError("Spinnaker trigger failed: missing execution metadata"),
+        )
     record = {
         "id": str(uuid.uuid4()),
         "service": intent.service,
@@ -1785,8 +1977,8 @@ def create_deployment(
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
         "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
-        "spinnakerExecutionId": execution["executionId"],
-        "spinnakerExecutionUrl": execution["executionUrl"],
+        "spinnakerExecutionId": execution_id,
+        "spinnakerExecutionUrl": execution_url,
         "spinnakerApplication": payload.get("spinnakerApplication"),
         "spinnakerPipeline": payload.get("spinnakerPipeline"),
         "deliveryGroupId": group["id"],
@@ -1916,6 +2108,9 @@ def validate_deployment(
     preflight_artifact_error = _preflight_artifact_availability(build, actor)
     if preflight_artifact_error:
         return preflight_artifact_error
+    preflight_engine_error = _preflight_engine_readiness(actor)
+    if preflight_engine_error:
+        return preflight_engine_error
 
     policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
@@ -2017,6 +2212,7 @@ def create_promotion(
         quota_scope=_quota_scope(group["id"], target_env.get("name")),
         quota_limit=daily_deploy_quota,
     )
+    _reap_stale_group_locks(group["id"], target_env.get("name"))
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, target_env.get("name"))
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
@@ -2038,6 +2234,13 @@ def create_promotion(
         execution = spinnaker.trigger_deploy(payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start promotion", exc)
+    execution_id, execution_url = _extract_engine_execution(execution)
+    if not execution_id or not execution_url:
+        return _engine_error_response(
+            actor,
+            "Unable to start promotion",
+            RuntimeError("Spinnaker trigger failed: missing execution metadata"),
+        )
     record = {
         "id": str(uuid.uuid4()),
         "service": intent.service,
@@ -2056,8 +2259,8 @@ def create_promotion(
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
         "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
-        "spinnakerExecutionId": execution["executionId"],
-        "spinnakerExecutionUrl": execution["executionUrl"],
+        "spinnakerExecutionId": execution_id,
+        "spinnakerExecutionUrl": execution_url,
         "spinnakerApplication": payload.get("spinnakerApplication"),
         "spinnakerPipeline": payload.get("spinnakerPipeline"),
         "deliveryGroupId": group["id"],
@@ -2793,6 +2996,7 @@ def rollback_deployment(
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
+    _reap_stale_group_locks(group["id"], env_entry.get("name"))
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
 
     prior = storage.find_prior_successful_deployment(deployment_id)
@@ -2828,6 +3032,13 @@ def rollback_deployment(
         execution = spinnaker.trigger_rollback(payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start rollback", exc)
+    execution_id, execution_url = _extract_engine_execution(execution)
+    if not execution_id or not execution_url:
+        return _engine_error_response(
+            actor,
+            "Unable to start rollback",
+            RuntimeError("Spinnaker trigger failed: missing execution metadata"),
+        )
     record = {
         "id": str(uuid.uuid4()),
         "service": deployment["service"],
@@ -2846,8 +3057,8 @@ def rollback_deployment(
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
         "engine_type": (recipe.get("engine_type") if recipe else None) or EngineType.SPINNAKER.value,
-        "spinnakerExecutionId": execution["executionId"],
-        "spinnakerExecutionUrl": execution["executionUrl"],
+        "spinnakerExecutionId": execution_id,
+        "spinnakerExecutionUrl": execution_url,
         "deliveryGroupId": group["id"],
         "failures": [],
     }

@@ -55,13 +55,18 @@ class SpinnakerAdapter:
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         return self._http_get_execution(execution_id)
 
-    def check_health(self) -> dict:
+    def check_health(self, timeout_seconds: Optional[float] = None) -> dict:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/health"
-        response, status_code, _ = self._request_json("GET", url, operation="check_health")
+        response, status_code, _ = self._request_json(
+            "GET",
+            url,
+            operation="check_health",
+            timeout_seconds=timeout_seconds,
+        )
         return {"status": "UP" if 200 <= status_code < 300 else "DOWN", "details": response}
 
     def list_applications(self) -> List[dict]:
@@ -211,6 +216,7 @@ class SpinnakerAdapter:
         url: str,
         body: Optional[dict] = None,
         operation: str = "request",
+        timeout_seconds: Optional[float] = None,
     ) -> tuple[dict, int, dict]:
         data = None
         headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
@@ -231,10 +237,11 @@ class SpinnakerAdapter:
             url,
         )
         try:
-            if self.request_timeout_seconds is None:
+            effective_timeout = self.request_timeout_seconds if timeout_seconds is None else timeout_seconds
+            if effective_timeout is None:
                 response_ctx = urlopen(request)
             else:
-                response_ctx = urlopen(request, timeout=self.request_timeout_seconds)
+                response_ctx = urlopen(request, timeout=effective_timeout)
             with response_ctx as response:
                 status_code = response.status
                 response_headers = dict(response.headers.items())

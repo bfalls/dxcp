@@ -613,6 +613,27 @@ function versionNotFoundActionMessage(result) {
   return `Action required: build not registered by CI. Confirm CI build ran and registered this version. If you deployed directly via Spinnaker, that can cause drift; redeploy via DXCP after CI registers.${requestPart}`
 }
 
+function isEngineUnavailableResult(result) {
+  if (!result || typeof result !== 'object') return false
+  if (result?.details?.engine_unavailable === true) return true
+  return result?.error_code === 'ENGINE_UNAVAILABLE'
+}
+
+function extractEngineDiagnostics(result) {
+  if (!result || typeof result !== 'object') return null
+  const diagnostics = result?.details?.diagnostics
+  if (!diagnostics || typeof diagnostics !== 'object') return null
+  const parsed = {
+    upstream_status: diagnostics.upstream_status ?? null,
+    engine: diagnostics.engine || '',
+    request_id: diagnostics.request_id || result?.request_id || ''
+  }
+  if (typeof diagnostics.engine_host === 'string' && diagnostics.engine_host.trim()) {
+    parsed.engine_host = diagnostics.engine_host.trim()
+  }
+  return parsed
+}
+
 function summarizeGuardrails(guardrails) {
   if (!guardrails) return 'No guardrails'
   const parts = []
@@ -734,12 +755,15 @@ export default function App() {
   const [promotionInlineError, setPromotionInlineError] = useState('')
   const [deployInlineMessage, setDeployInlineMessage] = useState('')
   const [deployInlineHeadline, setDeployInlineHeadline] = useState('')
+  const [deployInlineDiagnostics, setDeployInlineDiagnostics] = useState(null)
   const [deployStep, setDeployStep] = useState('form')
   const [deployEntryReady, setDeployEntryReady] = useState(true)
   const [preflightStatus, setPreflightStatus] = useState('idle')
   const [preflightResult, setPreflightResult] = useState(null)
   const [preflightError, setPreflightError] = useState('')
   const [preflightErrorHeadline, setPreflightErrorHeadline] = useState('')
+  const [preflightDiagnostics, setPreflightDiagnostics] = useState(null)
+  const [preflightEngineUnavailable, setPreflightEngineUnavailable] = useState(false)
   const [policySummary, setPolicySummary] = useState(null)
   const [policySummaryStatus, setPolicySummaryStatus] = useState('idle')
   const [policySummaryError, setPolicySummaryError] = useState('')
@@ -811,6 +835,7 @@ export default function App() {
   const queryAlertRef = useRef({ deployService: '', deployRecipe: '', deployVersion: '', deploymentsService: '' })
   const urlSyncRef = useRef({ deploy: '', deployments: '' })
   const deployQueryAppliedRef = useRef(false)
+  const lastBuildExposureRefreshKeyRef = useRef('')
   const previousServiceRef = useRef('')
   const view = useMemo(() => resolveViewFromPath(currentPath), [currentPath])
   const deploymentMatch = useMemo(() => matchPath('/deployments/:deploymentId', currentPath), [currentPath])
@@ -889,6 +914,8 @@ export default function App() {
   const derivedRole = Array.isArray(derivedRoles)
     ? derivedRoles.includes('dxcp-platform-admins')
       ? 'PLATFORM_ADMIN'
+      : derivedRoles.includes('dxcp-delivery-owners')
+        ? 'DELIVERY_OWNER'
       : derivedRoles.includes('dxcp-observers')
         ? 'OBSERVER'
         : 'UNKNOWN'
@@ -1799,6 +1826,8 @@ export default function App() {
           uiExposure: next
         }
       }))
+      cacheStore.buildDetails.clear()
+      setLastBuildDetailsKey('')
     } catch (err) {
       if (isLoginRequiredError(err)) return
       setSystemUiExposurePolicyError('Failed to save build provenance exposure policy.')
@@ -2420,6 +2449,7 @@ export default function App() {
     setDeployResult(null)
       setDeployInlineMessage('')
       setDeployInlineHeadline('')
+    setDeployInlineDiagnostics(null)
     if (!validVersion) {
       setErrorMessage('Version format is invalid')
       return
@@ -2454,6 +2484,12 @@ export default function App() {
     }
     const result = await api.post('/deployments', payload, key)
     if (result && result.code) {
+      if (isEngineUnavailableResult(result)) {
+        setDeployInlineHeadline('Deployment engine unavailable')
+        setDeployInlineMessage('DXCP cannot reach the deployment engine. Please contact your platform administrator.')
+        setDeployInlineDiagnostics(extractEngineDiagnostics(result))
+        return
+      }
       if (result.code === 'VERSION_NOT_FOUND') {
         setDeployInlineHeadline('Action required: build not registered by CI')
         setDeployInlineMessage(`VERSION_NOT_FOUND: ${versionNotFoundActionMessage(result)}`)
@@ -2644,6 +2680,8 @@ export default function App() {
       setPreflightStatus('checking')
       setPreflightError('')
       setPreflightErrorHeadline('')
+      setPreflightDiagnostics(null)
+      setPreflightEngineUnavailable(false)
       try {
         const payload = {
           service,
@@ -2654,6 +2692,14 @@ export default function App() {
         }
         const result = await api.post('/deployments/validate', payload)
         if (result && result.code) {
+          if (isEngineUnavailableResult(result)) {
+            setPreflightStatus('error')
+            setPreflightErrorHeadline('Deployment engine unavailable')
+            setPreflightError('DXCP cannot reach the deployment engine. Please contact your platform administrator.')
+            setPreflightDiagnostics(extractEngineDiagnostics(result))
+            setPreflightEngineUnavailable(true)
+            return false
+          }
           if (result.code === 'VERSION_NOT_FOUND') {
             // Suppress repeated automatic preflight retries for the same unresolved version key.
             lastAutoPreflightFailedKeyRef.current = preflightKey
@@ -2683,6 +2729,8 @@ export default function App() {
         }
         setPreflightResult(result)
         setPreflightStatus('ok')
+      setPreflightDiagnostics(null)
+      setPreflightEngineUnavailable(false)
       setValidatedIntentKey(preflightKey)
         if (advanceToConfirm) {
           setDeployStep('confirm')
@@ -2692,6 +2740,8 @@ export default function App() {
         setPreflightStatus('error')
         setPreflightErrorHeadline('Fix these issues to continue')
         setPreflightError('Failed to check policy and guardrails.')
+        setPreflightDiagnostics(null)
+        setPreflightEngineUnavailable(false)
         return false
       }
     },
@@ -2840,6 +2890,14 @@ export default function App() {
       setPolicyDeploymentsError('')
       setPolicyDeploymentsLoading(false)
       setDeployInlineMessage('')
+      setDeployInlineHeadline('')
+      setDeployInlineDiagnostics(null)
+      setPreflightStatus('idle')
+      setPreflightResult(null)
+      setPreflightError('')
+      setPreflightErrorHeadline('')
+      setPreflightDiagnostics(null)
+      setPreflightEngineUnavailable(false)
       setSelected(null)
       setFailures([])
       setTimeline([])
@@ -2922,6 +2980,7 @@ export default function App() {
     setPolicySummaryError('')
     setDeployInlineMessage('')
     setDeployInlineHeadline('')
+    setDeployInlineDiagnostics(null)
     if (!selectedEnvironment) {
       setDeployments([])
       setServicesView([])
@@ -3033,6 +3092,26 @@ export default function App() {
   }, [isAuthenticated, view, service, version, loadBuildDetails])
 
   useEffect(() => {
+    if (!isAuthenticated || view !== 'deploy') return
+    if (!service || !version) return
+    const artifactVisible = publicSettings?.policy?.uiExposure?.artifactRef?.display === true ? '1' : '0'
+    const linksVisible = publicSettings?.policy?.uiExposure?.externalLinks?.display === true ? '1' : '0'
+    const refreshKey = `${service}|${version}|${artifactVisible}|${linksVisible}`
+    if (lastBuildExposureRefreshKeyRef.current === refreshKey) return
+    lastBuildExposureRefreshKeyRef.current = refreshKey
+    // Policy changes can change redacted provenance fields; refresh once per service/version/policy state.
+    loadBuildDetails(service, version, { force: true })
+  }, [
+    isAuthenticated,
+    view,
+    service,
+    version,
+    loadBuildDetails,
+    publicSettings?.policy?.uiExposure?.artifactRef?.display,
+    publicSettings?.policy?.uiExposure?.externalLinks?.display
+  ])
+
+  useEffect(() => {
     if (!authReady || !isAuthenticated || view !== 'deploy') return
     if (!accessToken) return
     if (!service || !selectedEnvironment) return
@@ -3069,6 +3148,8 @@ export default function App() {
       setPreflightResult(null)
       setPreflightError('')
       setPreflightErrorHeadline('')
+      setPreflightDiagnostics(null)
+      setPreflightEngineUnavailable(false)
       setValidatedIntentKey('')
       lastAutoPreflightKeyRef.current = ''
       lastChangeSummaryFilledRef.current = false
@@ -3090,6 +3171,8 @@ export default function App() {
       setPreflightResult(null)
       setPreflightError('')
       setPreflightErrorHeadline('')
+      setPreflightDiagnostics(null)
+      setPreflightEngineUnavailable(false)
       setValidatedIntentKey('')
       lastAutoPreflightKeyRef.current = ''
       lastAutoPreflightFailedKeyRef.current = ''
@@ -3104,6 +3187,8 @@ export default function App() {
     setPreflightResult(null)
     setPreflightError('')
     setPreflightErrorHeadline('')
+    setPreflightDiagnostics(null)
+    setPreflightEngineUnavailable(false)
     lastAutoPreflightFailedKeyRef.current = ''
     lastPreflightKeyRef.current = preflightKey
   }, [
@@ -3348,6 +3433,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated || view !== 'deploy' || !deployQueryParams) return
+    if (deployUrlSyncEnabled) return
     const queryService = deployQueryParams.service
     const queryRecipe = deployQueryParams.recipe
     const queryVersion = deployQueryParams.version
@@ -3436,10 +3522,12 @@ export default function App() {
     }
 
     setDeployUrlSyncEnabled(true)
+    setDeployQueryParams(null)
   }, [
     isAuthenticated,
     view,
     deployQueryParams,
+    deployUrlSyncEnabled,
     deployEntryReady,
     services,
     service,
@@ -3799,6 +3887,8 @@ export default function App() {
     preflightStatus,
     preflightError,
     preflightErrorHeadline,
+    preflightDiagnostics,
+    preflightEngineUnavailable,
     policySummary,
     policySummaryStatus,
     policySummaryError,
@@ -3810,6 +3900,7 @@ export default function App() {
     handleReviewDeploy,
     deployInlineMessage,
     deployInlineHeadline,
+    deployInlineDiagnostics,
     selectedRecipeNarrative,
     policyQuotaStats,
     handleDeploy,

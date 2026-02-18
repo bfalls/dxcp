@@ -226,3 +226,46 @@ async def test_group_quota_scoped(tmp_path: Path, monkeypatch):
     assert first.status_code == 201
     assert second.status_code == 429
     assert second.json()["code"] == "QUOTA_EXCEEDED"
+
+
+async def test_stale_in_progress_lock_is_reaped_and_allows_new_deploy(tmp_path: Path, monkeypatch):
+    os.environ["DXCP_DEPLOYMENT_LOCK_STALE_SECONDS"] = "60"
+    try:
+        async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+            old_time = "2026-01-01T00:00:00Z"
+            main.storage.insert_deployment(
+                {
+                    "id": "stale-lock",
+                    "service": "service-a",
+                    "environment": "sandbox",
+                    "version": "1.0.0",
+                    "recipeId": "default",
+                    "recipeRevision": 1,
+                    "effectiveBehaviorSummary": "seed",
+                    "state": "IN_PROGRESS",
+                    "deploymentKind": "ROLL_FORWARD",
+                    "outcome": None,
+                    "intentCorrelationId": "seed",
+                    "supersededBy": None,
+                    "changeSummary": "seed stale lock",
+                    "createdAt": old_time,
+                    "updatedAt": old_time,
+                    "engine_type": "SPINNAKER",
+                    "spinnakerExecutionId": "missing-execution",
+                    "spinnakerExecutionUrl": "http://spinnaker.local/pipelines/missing-execution",
+                    "deliveryGroupId": "group-a",
+                    "failures": [],
+                },
+                [],
+            )
+            response = await client.post(
+                "/v1/deployments",
+                headers={"Idempotency-Key": "deploy-after-stale-lock", **auth_header(["dxcp-platform-admins"])},
+                json=_deploy_payload("service-a"),
+            )
+            assert response.status_code == 201
+            stale = main.storage.get_deployment("stale-lock")
+            assert stale is not None
+            assert stale["state"] == "FAILED"
+    finally:
+        os.environ.pop("DXCP_DEPLOYMENT_LOCK_STALE_SECONDS", None)

@@ -235,6 +235,52 @@ async def test_deploy_unknown_engine_error_uses_existing_fallback(tmp_path: Path
     assert body.get("request_id")
 
 
+async def test_deploy_malformed_engine_response_returns_structured_error(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        def _malformed_response(payload: dict, idempotency_key: str) -> dict:
+            return {"id": "exec-1"}
+
+        monkeypatch.setattr(main.spinnaker, "trigger_deploy", _malformed_response)
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-engine-malformed", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "ENGINE_CALL_FAILED"
+    assert body["error_code"] == "ENGINE_CALL_FAILED"
+    assert body["message"] == "Unable to start deployment"
+    assert body.get("request_id")
+
+
+async def test_deploy_engine_down_includes_unavailable_discriminator_and_sanitized_diagnostics(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        main.SETTINGS.spinnaker_base_url = "https://gate.internal.example/api"
+
+        def _raise_unavailable(payload: dict, idempotency_key: str) -> dict:
+            raise RuntimeError("Spinnaker HTTP 503: ngrok tunnel unavailable")
+
+        monkeypatch.setattr(main.spinnaker, "trigger_deploy", _raise_unavailable)
+        response = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-engine-down", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["code"] == "ENGINE_CALL_FAILED"
+    assert body["message"] == "Unable to start deployment"
+    assert body.get("details", {}).get("engine_unavailable") is True
+    diagnostics = body.get("details", {}).get("diagnostics") or {}
+    assert diagnostics.get("engine") == "spinnaker"
+    assert diagnostics.get("upstream_status") == 503
+    assert diagnostics.get("engine_host") == "gate.internal.example"
+    assert diagnostics.get("request_id")
+
+
 async def test_deploy_rejects_incompatible_recipe(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(

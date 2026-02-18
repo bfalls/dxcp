@@ -52,11 +52,16 @@ class IdempotencyStore:
     def set(self, key: str, response: dict, status_code: int) -> None:
         expires_at = int(time.time() + SETTINGS.idempotency_ttl_seconds)
         if self._ddb:
+            def _json_default(value):
+                if isinstance(value, Decimal):
+                    return int(value) if value == value.to_integral_value() else float(value)
+                raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
             self._ddb.put_item(
                 Item={
                     "pk": "IDEMPOTENCY",
                     "sk": key,
-                    "response": json.dumps(response),
+                    "response": json.dumps(response, default=_json_default),
                     "statusCode": Decimal(status_code),
                     "expiresAt": str(expires_at),
                     "ttl": Decimal(expires_at),

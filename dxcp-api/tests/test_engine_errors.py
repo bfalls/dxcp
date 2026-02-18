@@ -131,3 +131,24 @@ async def test_engine_error_schema_non_admin(tmp_path: Path, monkeypatch):
     body = response.json()
     assert body["code"] == "ROLE_FORBIDDEN"
     assert "operator_hint" not in body
+
+
+async def test_engine_unavailable_diagnostics_omit_engine_host_for_non_admin(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (_, main):
+        main.SETTINGS.demo_mode = True
+        main.SETTINGS.spinnaker_base_url = "https://gate.internal.example/api/v1"
+        actor = main.Actor(actor_id="observer-1", role=main.Role.OBSERVER)
+        response = main._engine_error_response(
+            actor,
+            "Unable to validate deployment",
+            RuntimeError("Spinnaker HTTP 502: ngrok upstream down"),
+        )
+    assert response.status_code == 502
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["code"] == "ENGINE_CALL_FAILED"
+    assert body["details"]["engine_unavailable"] is True
+    diagnostics = body["details"]["diagnostics"]
+    assert diagnostics["engine"] == "spinnaker"
+    assert diagnostics["upstream_status"] == 502
+    assert diagnostics.get("request_id")
+    assert "engine_host" not in diagnostics

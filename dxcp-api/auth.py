@@ -85,6 +85,8 @@ def _decode_jwt(token: str) -> dict:
 def _map_role(roles: list) -> Role:
     if "dxcp-platform-admins" in roles:
         return Role.PLATFORM_ADMIN
+    if "dxcp-delivery-owners" in roles:
+        return Role.DELIVERY_OWNER
     if "dxcp-observers" in roles:
         return Role.OBSERVER
     _auth_error(403, "AUTHZ_ROLE_REQUIRED", "No recognized DXCP role in token")
@@ -115,7 +117,9 @@ def get_actor_and_claims(authorization: Optional[str]) -> tuple[Actor, dict]:
         _auth_error(403, "AUTHZ_ROLE_REQUIRED", "Roles claim missing or invalid")
     role = _map_role(roles_value)
     actor_id = _extract_actor_id(claims)
-    return Actor(actor_id=actor_id, role=role), claims
+    email = claims.get("email") or claims.get("https://dxcp.example/claims/email")
+    normalized_email = email.strip().lower() if isinstance(email, str) and email.strip() else None
+    return Actor(actor_id=actor_id, role=role, email=normalized_email), claims
 
 
 def get_actor(authorization: Optional[str]) -> Actor:

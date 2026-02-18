@@ -365,6 +365,7 @@ const buildFetchMock = ({
     if (pathname === '/v1/builds') {
       const serviceName = parsed.searchParams.get('service') || 'demo-service'
       const version = parsed.searchParams.get('version') || '2.1.0'
+      const allowExternalLinks = uiExposurePolicy?.externalLinks?.display === true
       return ok({
         service: serviceName,
         version,
@@ -373,8 +374,8 @@ const buildFetchMock = ({
         ci_publisher: 'ci-bot-1',
         ci_provider: 'github',
         ci_run_id: 'run-123',
-        commit_url: buildCommitUrl || 'https://scm.example.internal/commit/abc123',
-        run_url: buildRunUrl || 'https://ci.example.internal/runs/123',
+        commit_url: allowExternalLinks ? (buildCommitUrl || 'https://scm.example.internal/commit/abc123') : null,
+        run_url: allowExternalLinks ? (buildRunUrl || 'https://ci.example.internal/runs/123') : null,
         registeredAt: '2025-01-01T00:00:00Z'
       })
     }
@@ -667,6 +668,23 @@ export async function runAllTests() {
     assert.ok(view.getByRole('link', { name: 'Admin' }))
   })
 
+  await runTest('DELIVERY_OWNER role is recognized in UI context', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: true })
+    const view = renderApp()
+
+    await view.findByText('DELIVERY_OWNER')
+    assert.ok(view.getByRole('link', { name: 'Deploy' }))
+    assert.ok(view.queryByText('UNKNOWN') === null)
+  })
+
   await runTest('Admin system settings saves external links exposure toggle', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
@@ -699,6 +717,42 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('button', { name: 'Save exposure policy' }))
     await view.findByText('Build provenance exposure policy saved.')
     assert.equal(view.getByLabelText('Show external links (commit and CI run)').checked, true)
+  })
+
+  await runTest('Deploy version selection remains changed after URL-seeded initial version', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      versionsByService: {
+        'demo-service': ['0.1.14', '0.1.13']
+      }
+    })
+    const view = renderApp('/deploy?service=demo-service&recipe=default&version=0.1.13')
+
+    await view.findByText('PLATFORM_ADMIN')
+    await waitForCondition(() => {
+      const current = view.queryByTestId('deploy-version-select')
+      return current && current.value === '0.1.13'
+    })
+
+    const versionSelect = view.getByTestId('deploy-version-select')
+    fireEvent.change(versionSelect, { target: { value: '0.1.14' } })
+
+    await waitForCondition(() => {
+      const current = view.queryByTestId('deploy-version-select')
+      return current && current.value === '0.1.14'
+    })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.equal(view.getByTestId('deploy-version-select').value, '0.1.14')
   })
 
   await runTest('Settings page shows default refresh interval', async () => {
@@ -907,8 +961,8 @@ export async function runAllTests() {
     await view.findByText('Hidden by policy')
     assert.equal(view.queryByRole('button', { name: 'Copy full artifact reference' }), null)
     assert.equal(view.queryByText('s3://dxcp-artifacts/demo-service/2.1.0.zip'), null)
-    assert.equal(view.queryByRole('link', { name: 'Open commit' }), null)
-    assert.equal(view.queryByRole('link', { name: 'Open run' }), null)
+    assert.equal(view.queryByRole('link', { name: '0123456789' }), null)
+    assert.equal(view.queryByRole('link', { name: 'run-123' }), null)
   })
 
   await runTest('Deploy provenance shows artifact reference and copy when policy enables display', async () => {
@@ -942,7 +996,7 @@ export async function runAllTests() {
     assert.ok(view.getByRole('button', { name: 'Copy full artifact reference' }))
   })
 
-  await runTest('Deploy provenance shows commit and run links when external links are allowed', async () => {
+  await runTest('Deploy provenance links update after toggling external links policy without page refresh', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -957,7 +1011,7 @@ export async function runAllTests() {
       rollbackAllowed: true,
       versionsByService: { 'demo-service': ['2.1.0'] },
       uiExposureArtifactRefDisplay: true,
-      uiExposureExternalLinksDisplay: true
+      uiExposureExternalLinksDisplay: false
     })
     const view = renderApp()
 
@@ -969,12 +1023,22 @@ export async function runAllTests() {
     assert.ok(versionSelect)
     fireEvent.change(versionSelect, { target: { value: '2.1.0' } })
 
-    const commitLink = await view.findByRole('link', { name: 'Open commit' })
-    const runLink = await view.findByRole('link', { name: 'Open run' })
-    assert.equal(commitLink.getAttribute('target'), '_blank')
-    assert.equal(commitLink.getAttribute('rel'), 'noreferrer noopener')
-    assert.equal(runLink.getAttribute('target'), '_blank')
-    assert.equal(runLink.getAttribute('rel'), 'noreferrer noopener')
+    await view.findByText('Build Provenance')
+    assert.equal(view.queryByRole('link', { name: '0123456789' }), null)
+    assert.equal(view.queryByRole('link', { name: 'run-123' }), null)
+
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'System Settings' }))
+    await view.findByText('Build Provenance Exposure')
+    fireEvent.click(view.getByLabelText('Show external links (commit and CI run)'))
+    fireEvent.click(view.getByRole('button', { name: 'Save exposure policy' }))
+    await view.findByText('Build provenance exposure policy saved.')
+
+    fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
+    const commitLink = await view.findByRole('link', { name: '0123456789' })
+    const runLink = await view.findByRole('link', { name: 'run-123' })
+    assert.equal(commitLink.getAttribute('href'), 'https://scm.example.internal/commit/abc123')
+    assert.equal(runLink.getAttribute('href'), 'https://ci.example.internal/runs/123')
   })
 
   await runTest('No environments configured shows clear empty state', async () => {
@@ -1373,9 +1437,11 @@ export async function runAllTests() {
     const nameInput = view.getByLabelText('Name')
     fireEvent.input(nameInput, { target: { value: 'Payments Group' } })
     await waitForCondition(() => view.getByLabelText('Name').value === 'Payments Group')
-    const ownerInput = view.getByLabelText('Owner')
-    fireEvent.input(ownerInput, { target: { value: 'team-payments' } })
-    await waitForCondition(() => view.getByLabelText('Owner').value === 'team-payments')
+    const ownerInput = view.getByLabelText('Owner emails (comma-separated)')
+    fireEvent.input(ownerInput, { target: { value: 'team-payments@example.com, team-ops@example.com' } })
+    await waitForCondition(
+      () => view.getByLabelText('Owner emails (comma-separated)').value === 'team-payments@example.com, team-ops@example.com'
+    )
     fireEvent.click(view.getByLabelText('payments-service'))
     fireEvent.click(view.getByLabelText(/Canary Deploy/))
     fireEvent.change(view.getByLabelText('Max concurrent deployments'), { target: { value: '2' } })

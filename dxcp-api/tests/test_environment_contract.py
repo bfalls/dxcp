@@ -60,7 +60,7 @@ async def test_environments_endpoint_includes_environment_contract_fields(tmp_pa
     async with _client(tmp_path, monkeypatch) as (client, main):
         group = main.storage.get_delivery_group("default")
         assert group is not None
-        group["owner"] = "user-1"
+        group["owner"] = "owner1@example.com"
         group["allowed_environments"] = ["sandbox", "staging"]
         main.storage.update_delivery_group(group)
         staging = main.storage.get_environment_for_group("staging", "default")
@@ -71,7 +71,9 @@ async def test_environments_endpoint_includes_environment_contract_fields(tmp_pa
 
         response = await client.get(
             "/v1/environments",
-            headers={"Authorization": f"Bearer {build_token(['dxcp-observers'], subject='user-1')}"},
+            headers={
+                "Authorization": f"Bearer {build_token(['dxcp-observers'], subject='user-1', email='owner1@example.com')}"
+            },
         )
     assert response.status_code == 200
     body = response.json()
@@ -88,14 +90,14 @@ async def test_environments_endpoint_is_scoped_to_actor_delivery_groups(tmp_path
         default_group = main.storage.get_delivery_group("default")
         assert default_group is not None
         default_group["services"] = []
-        default_group["owner"] = "user-2"
+        default_group["owner"] = "owner2@example.com"
         main.storage.update_delivery_group(default_group)
         main.storage.insert_delivery_group(
             {
                 "id": "group-user-1",
                 "name": "Group User 1",
                 "description": None,
-                "owner": "user-1",
+                "owner": "owner1@example.com",
                 "services": [],
                 "allowed_environments": ["sandbox"],
                 "allowed_recipes": ["default"],
@@ -109,7 +111,9 @@ async def test_environments_endpoint_is_scoped_to_actor_delivery_groups(tmp_path
 
         response = await client.get(
             "/v1/environments",
-            headers={"Authorization": f"Bearer {build_token(['dxcp-observers'], subject='user-1')}"},
+            headers={
+                "Authorization": f"Bearer {build_token(['dxcp-observers'], subject='user-1', email='owner1@example.com')}"
+            },
         )
     assert response.status_code == 200
     body = response.json()

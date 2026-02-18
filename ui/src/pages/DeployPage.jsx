@@ -43,6 +43,8 @@ export default function DeployPage({
   preflightStatus,
   preflightError,
   preflightErrorHeadline,
+  preflightDiagnostics,
+  preflightEngineUnavailable,
   policySummary,
   policySummaryStatus,
   policySummaryError,
@@ -54,6 +56,7 @@ export default function DeployPage({
   handleReviewDeploy,
   deployInlineMessage,
   deployInlineHeadline,
+  deployInlineDiagnostics,
   selectedRecipeNarrative,
   policyQuotaStats,
   handleDeploy,
@@ -73,6 +76,8 @@ export default function DeployPage({
   headerMeta
 }) {
   const [artifactCopyState, setArtifactCopyState] = React.useState('')
+  const [versionMenuOpen, setVersionMenuOpen] = React.useState(false)
+  const versionMenuRef = React.useRef(null)
   const policySnapshot = preflightResult?.policy || policySummary?.policy || null
   const deploysRemaining =
     policySnapshot?.deployments_remaining ??
@@ -88,20 +93,79 @@ export default function DeployPage({
       ? 'Compatible'
       : 'Incompatible'
     : '-'
-  const shortGitSha = selectedBuildDetails?.git_sha ? String(selectedBuildDetails.git_sha).slice(0, 10) : '-'
+  const gitSha = selectedBuildDetails?.git_sha || ''
+  const shortGitSha = gitSha ? String(gitSha).slice(0, 10) : '-'
   const artifactRef = selectedBuildDetails?.artifactRef || ''
   const showArtifactRef = artifactRefDisplayEnabled === true && Boolean(artifactRef)
   const artifactName = artifactRef ? artifactRef.split('/').filter(Boolean).pop() || artifactRef : '-'
   const artifactValue = showArtifactRef ? artifactName : artifactRefDisplayEnabled === true ? '-' : 'Hidden by policy'
   const commitUrl = selectedBuildDetails?.commit_url || ''
+  const runId = selectedBuildDetails?.ci_run_id || ''
   const runUrl = selectedBuildDetails?.run_url || ''
   const showCommitLink = externalLinksDisplayEnabled === true && Boolean(commitUrl)
   const showRunLink = externalLinksDisplayEnabled === true && Boolean(runUrl)
+  const showGitShaLink = showCommitLink && Boolean(gitSha)
+  const showRunIdLink = showRunLink && Boolean(runId)
   const selectedRecipeForPanel = selectedRecipe || (filteredRecipes.length > 0 ? filteredRecipes[0] : null)
+  const versionSelectValue = versionMode === 'auto' ? (version || '__select__') : '__custom__'
+  const versionDisplayLabel =
+    versionSelectValue === '__custom__'
+      ? 'Custom (registered)'
+      : versionSelectValue === '__select__'
+        ? 'Select discovered version'
+        : versionSelectValue
 
   React.useEffect(() => {
     setArtifactCopyState('')
   }, [artifactRef])
+
+  React.useEffect(() => {
+    setVersionMenuOpen(false)
+  }, [service])
+
+  React.useEffect(() => {
+    if (!versionMenuOpen) return undefined
+    const handlePointerDown = (event) => {
+      if (!versionMenuRef.current) return
+      if (!versionMenuRef.current.contains(event.target)) {
+        setVersionMenuOpen(false)
+      }
+    }
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setVersionMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [versionMenuOpen])
+
+  const applyVersionSelection = (nextValue) => {
+    if (nextValue === '__custom__') {
+      setVersionMode('custom')
+      setVersionSelection('user')
+      setVersionAutoApplied(false)
+      setDeployStep('form')
+      return
+    }
+    if (nextValue === '__select__') {
+      setVersionMode('auto')
+      setVersion('')
+      setVersionSelection('none')
+      setVersionAutoApplied(false)
+      setDeployStep('form')
+      return
+    }
+    setVersionMode('auto')
+    setVersion(nextValue)
+    setVersionSelection('user')
+    setVersionAutoApplied(false)
+    setDeployStep('form')
+  }
 
   const handleCopyArtifactRef = async () => {
     if (!artifactRef) return
@@ -242,30 +306,70 @@ export default function DeployPage({
             </div>
             <div className="field">
                 <label htmlFor="deploy-version">Version</label>
+                <div className="custom-select" ref={versionMenuRef}>
+                  <button
+                    type="button"
+                    className="custom-select-trigger"
+                    aria-haspopup="listbox"
+                    aria-expanded={versionMenuOpen}
+                    aria-controls="deploy-version-options"
+                    onClick={() => setVersionMenuOpen((prev) => !prev)}
+                  >
+                    <span>{versionDisplayLabel}</span>
+                    <span className="custom-select-caret" aria-hidden="true">▾</span>
+                  </button>
+                  {versionMenuOpen && (
+                    <div className="custom-select-menu" id="deploy-version-options" role="listbox">
+                      <button
+                        type="button"
+                        className={`custom-select-option ${versionSelectValue === '__select__' ? 'selected' : ''}`}
+                        role="option"
+                        aria-selected={versionSelectValue === '__select__'}
+                        onClick={() => {
+                          applyVersionSelection('__select__')
+                          setVersionMenuOpen(false)
+                        }}
+                      >
+                        Select discovered version
+                      </button>
+                      {versions.map((item) => (
+                        <button
+                          key={item.version}
+                          type="button"
+                          className={`custom-select-option ${versionSelectValue === item.version ? 'selected' : ''}`}
+                          role="option"
+                          aria-selected={versionSelectValue === item.version}
+                          onClick={() => {
+                            applyVersionSelection(item.version)
+                            setVersionMenuOpen(false)
+                          }}
+                        >
+                          {item.version}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className={`custom-select-option ${versionSelectValue === '__custom__' ? 'selected' : ''}`}
+                        role="option"
+                        aria-selected={versionSelectValue === '__custom__'}
+                        onClick={() => {
+                          applyVersionSelection('__custom__')
+                          setVersionMenuOpen(false)
+                        }}
+                      >
+                        Custom (registered)
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <select
                   id="deploy-version"
                   data-testid="deploy-version-select"
-                  value={versionMode === 'auto' ? (version || '__select__') : '__custom__'}
-                  onChange={(e) => {
-                    if (e.target.value === '__custom__') {
-                      setVersionMode('custom')
-                      setVersionSelection('user')
-                      setVersionAutoApplied(false)
-                      setDeployStep('form')
-                    } else if (e.target.value === '__select__') {
-                      setVersionMode('auto')
-                      setVersion('')
-                      setVersionSelection('none')
-                      setVersionAutoApplied(false)
-                      setDeployStep('form')
-                    } else {
-                      setVersionMode('auto')
-                      setVersion(e.target.value)
-                      setVersionSelection('user')
-                      setVersionAutoApplied(false)
-                      setDeployStep('form')
-                    }
-                  }}
+                  value={versionSelectValue}
+                  onChange={(e) => applyVersionSelection(e.target.value)}
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  className="visually-hidden-select"
                 >
                   <option value="__select__">Select discovered version</option>
                   {versions.map((item) => (
@@ -317,8 +421,29 @@ export default function DeployPage({
                                 <dt>Publisher</dt>
                                 <dd className="helper">{selectedBuildDetails.ci_publisher || '-'}</dd>
                                 <dt>Git SHA</dt>
-                                <dd className="helper" title={selectedBuildDetails.git_sha || undefined}>
-                                  {shortGitSha || '-'}
+                                <dd className="helper" title={gitSha || undefined}>
+                                  {showGitShaLink ? (
+                                    <a className="provenance-link" href={commitUrl} target="_blank" rel="noreferrer noopener" title={gitSha}>
+                                      {shortGitSha}
+                                      <svg
+                                        className="provenance-link-icon"
+                                        width="11"
+                                        height="11"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                      >
+                                        <path d="M7 17L17 7" />
+                                        <path d="M8 7h9v9" />
+                                      </svg>
+                                    </a>
+                                  ) : (
+                                    shortGitSha || '-'
+                                  )}
                                 </dd>
                                 <dt>Registered</dt>
                                 <dd className="helper">
@@ -359,23 +484,30 @@ export default function DeployPage({
                                 <dt>CI Provider</dt>
                                 <dd className="helper">{selectedBuildDetails.ci_provider || '-'}</dd>
                                 <dt>Run ID</dt>
-                                <dd className="helper">{selectedBuildDetails.ci_run_id || '-'}</dd>
-                                {showCommitLink && (
-                                  <>
-                                    <dt>Commit</dt>
-                                    <dd className="helper">
-                                      <a href={commitUrl} target="_blank" rel="noreferrer noopener">Open commit</a>
-                                    </dd>
-                                  </>
-                                )}
-                                {showRunLink && (
-                                  <>
-                                    <dt>CI run</dt>
-                                    <dd className="helper">
-                                      <a href={runUrl} target="_blank" rel="noreferrer noopener">Open run</a>
-                                    </dd>
-                                  </>
-                                )}
+                                <dd className="helper" title={runId || undefined}>
+                                  {showRunIdLink ? (
+                                    <a className="provenance-link" href={runUrl} target="_blank" rel="noreferrer noopener" title={runId}>
+                                      {runId}
+                                      <svg
+                                        className="provenance-link-icon"
+                                        width="11"
+                                        height="11"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                      >
+                                        <path d="M7 17L17 7" />
+                                        <path d="M8 7h9v9" />
+                                      </svg>
+                                    </a>
+                                  ) : (
+                                    runId || '-'
+                                  )}
+                                </dd>
                               </dl>
                             </div>
                           </div>
@@ -452,6 +584,17 @@ export default function DeployPage({
               <div className="helper space-8">
                 {preflightErrorHeadline && <strong>{preflightErrorHeadline}. </strong>}
                 {preflightError}
+                {preflightDiagnostics && (
+                  <details className="space-8">
+                    <summary>Details</summary>
+                    <div className="helper">upstream_status: {preflightDiagnostics.upstream_status ?? '-'}</div>
+                    <div className="helper">engine: {preflightDiagnostics.engine || '-'}</div>
+                    {isPlatformAdmin && preflightDiagnostics.engine_host && (
+                      <div className="helper">engine_host: {preflightDiagnostics.engine_host}</div>
+                    )}
+                    <div className="helper">request_id: {preflightDiagnostics.request_id || '-'}</div>
+                  </details>
+                )}
               </div>
             )}
             {debugDeployGatesEnabled && (
@@ -496,6 +639,17 @@ export default function DeployPage({
               <div className="helper space-8">
                 {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                 {deployInlineMessage}
+                {deployInlineDiagnostics && (
+                  <details className="space-8">
+                    <summary>Details</summary>
+                    <div className="helper">upstream_status: {deployInlineDiagnostics.upstream_status ?? '-'}</div>
+                    <div className="helper">engine: {deployInlineDiagnostics.engine || '-'}</div>
+                    {isPlatformAdmin && deployInlineDiagnostics.engine_host && (
+                      <div className="helper">engine_host: {deployInlineDiagnostics.engine_host}</div>
+                    )}
+                    <div className="helper">request_id: {deployInlineDiagnostics.request_id || '-'}</div>
+                  </details>
+                )}
               </div>
             )}
           </>
@@ -563,7 +717,7 @@ export default function DeployPage({
                 className="button"
                 data-testid="deploy-confirm-button"
                 onClick={handleDeploy}
-                disabled={!canReviewDeploy}
+                disabled={!canReviewDeploy || preflightEngineUnavailable}
               >
                 Confirm deploy
               </button>
@@ -575,6 +729,17 @@ export default function DeployPage({
               <div className="helper space-8">
                 {deployInlineHeadline && <strong>{deployInlineHeadline}. </strong>}
                 {deployInlineMessage}
+                {deployInlineDiagnostics && (
+                  <details className="space-8">
+                    <summary>Details</summary>
+                    <div className="helper">upstream_status: {deployInlineDiagnostics.upstream_status ?? '-'}</div>
+                    <div className="helper">engine: {deployInlineDiagnostics.engine || '-'}</div>
+                    {isPlatformAdmin && deployInlineDiagnostics.engine_host && (
+                      <div className="helper">engine_host: {deployInlineDiagnostics.engine_host}</div>
+                    )}
+                    <div className="helper">request_id: {deployInlineDiagnostics.request_id || '-'}</div>
+                  </details>
+                )}
               </div>
             )}
           </>

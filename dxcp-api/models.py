@@ -217,6 +217,7 @@ class AuditEvent(BaseModel):
 class Actor(BaseModel):
     actor_id: str
     role: Role
+    email: Optional[str] = None
 
 
 class CiPublisher(BaseModel):

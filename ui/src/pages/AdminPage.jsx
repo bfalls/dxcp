@@ -2,6 +2,27 @@ import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 
+function parseOwnerEmails(ownerValue) {
+  if (!ownerValue) return []
+  return String(ownerValue)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function summarizeOwners(ownerValue) {
+  const owners = parseOwnerEmails(ownerValue)
+  if (owners.length === 0) return 'Owners: 0'
+  if (owners.length <= 2) return `Owners: ${owners.join(', ')}`
+  return `Owners: ${owners[0]}, ${owners[1]} +${owners.length - 2}`
+}
+
+function normalizedOwnersPreview(ownerValue) {
+  const owners = parseOwnerEmails(ownerValue)
+  if (owners.length === 0) return ''
+  return owners.join(', ')
+}
+
 export default function AdminPage({
   adminReadOnly,
   adminTab,
@@ -227,7 +248,7 @@ export default function AdminPage({
                       <strong>{group.name}</strong>
                       <div className="helper">{group.id}</div>
                     </div>
-                    <div>{group.owner || 'Unassigned owner'}</div>
+                    <div>{summarizeOwners(group.owner)}</div>
                     <div>{Array.isArray(group.services) ? `${group.services.length} services` : '0 services'}</div>
                     <div>{summarizeGuardrails(group.guardrails)}</div>
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -262,8 +283,8 @@ export default function AdminPage({
                     <div>{activeAdminGroup.name}</div>
                   </div>
                   <div className="list-item admin-detail">
-                    <div>Owner</div>
-                    <div>{activeAdminGroup.owner || 'Unassigned'}</div>
+                    <div>Owner emails</div>
+                    <div>{normalizedOwnersPreview(activeAdminGroup.owner) || 'Unassigned'}</div>
                   </div>
                   <div className="list-item admin-detail">
                     <div>Description</div>
@@ -427,7 +448,7 @@ export default function AdminPage({
                   />
                 </div>
                 <div className="field">
-                  <label htmlFor="admin-group-owner">Owner</label>
+                  <label htmlFor="admin-group-owner">Owner emails (comma-separated)</label>
                   <input
                     id="admin-group-owner"
                     value={adminGroupDraft.owner}
@@ -435,6 +456,12 @@ export default function AdminPage({
                     onInput={(e) => handleAdminGroupDraftChange('owner', e.target.value)}
                     disabled={adminReadOnly}
                   />
+                  <div className="helper">
+                    Owner list is matched case-insensitively for Delivery Owner access.
+                  </div>
+                  {normalizedOwnersPreview(adminGroupDraft.owner) && (
+                    <div className="helper">Normalized: {normalizedOwnersPreview(adminGroupDraft.owner)}</div>
+                  )}
                 </div>
                 <div className="helper">Admin-only configuration. Affects Delivery Owners and Observers.</div>
                 <div className="helper space-12">Services</div>
