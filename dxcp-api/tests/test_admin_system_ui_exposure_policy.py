@@ -119,7 +119,7 @@ async def test_put_persists_valid_boolean(tmp_path: Path, monkeypatch):
         "policy": {"artifactRef": {"display": True}, "externalLinks": {"display": True}},
         "source": "ssm",
     }
-    assert json.loads(store["/dxcp/policy/ui/exposure"]) == {
+    assert json.loads(store["/dxcp/config/policy/ui/exposure"]) == {
         "artifactRef": {"display": True},
         "externalLinks": {"display": True},
     }
@@ -152,7 +152,7 @@ async def test_put_rejects_invalid_types(tmp_path: Path, monkeypatch, payload: d
 
 async def test_get_returns_persisted_policy(tmp_path: Path, monkeypatch):
     store = {
-        "/dxcp/policy/ui/exposure": json.dumps(
+        "/dxcp/config/policy/ui/exposure": json.dumps(
             {
                 "artifactRef": {"display": True},
                 "externalLinks": {"display": True},
@@ -173,7 +173,7 @@ async def test_get_returns_persisted_policy(tmp_path: Path, monkeypatch):
 
 
 async def test_ui_read_endpoint_allows_standard_roles(tmp_path: Path, monkeypatch):
-    store = {"/dxcp/policy/ui/exposure": json.dumps({"artifactRef": {"display": True}})}
+    store = {"/dxcp/config/policy/ui/exposure": json.dumps({"artifactRef": {"display": True}})}
     async with _client(tmp_path, monkeypatch, store=store) as client:
         response = await client.get(
             "/v1/ui/policy/ui-exposure",

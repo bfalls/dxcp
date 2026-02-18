@@ -41,6 +41,13 @@ logger = logging.getLogger("dxcp.api")
 UI_EXPOSURE_POLICY_KEY = "/dxcp/policy/ui/exposure"
 
 
+def _ui_exposure_policy_key() -> str:
+    prefix = (SETTINGS.ssm_prefix or "").strip().rstrip("/")
+    if prefix:
+        return f"{prefix}/policy/ui/exposure"
+    return UI_EXPOSURE_POLICY_KEY
+
+
 def _ssm_client():
     if not boto3:
         raise RuntimeError("boto3 is required for SSM operations")
@@ -118,7 +125,7 @@ def _parse_ui_exposure_policy(value: object) -> dict:
 
 def _read_ui_exposure_policy_from_ssm() -> dict:
     try:
-        raw = _ssm_get_parameter(UI_EXPOSURE_POLICY_KEY)
+        raw = _ssm_get_parameter(_ui_exposure_policy_key())
     except Exception:
         return {"policy": _default_ui_exposure_policy(), "source": "ssm"}
     policy = _parse_ui_exposure_policy(raw)
@@ -131,7 +138,7 @@ def read_ui_exposure_policy() -> dict:
 
 def _write_ui_exposure_policy_to_ssm(policy: dict) -> None:
     normalized = _parse_ui_exposure_policy(policy)
-    _ssm_put_parameter(UI_EXPOSURE_POLICY_KEY, json.dumps(normalized))
+    _ssm_put_parameter(_ui_exposure_policy_key(), json.dumps(normalized))
 
 
 def _parse_rpm_value(value: object, field: str, allow_string: bool = False) -> int:
