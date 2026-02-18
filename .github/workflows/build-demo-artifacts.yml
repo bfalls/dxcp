@@ -231,6 +231,7 @@ jobs:
             [[ -z "$service" || -z "$version" || -z "$artifact_ref" ]] && continue
             built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             idem_key="github-${{ github.run_id }}-${service}-${version}"
+            # TODO(dxcp-followup): add optional commit_url/run_url once BuildRegistration accepts them.
             payload="$(printf '{"service":"%s","version":"%s","artifactRef":"%s","git_sha":"%s","git_branch":"%s","ci_provider":"github","ci_run_id":"%s","built_at":"%s"}' \
               "$service" "$version" "$artifact_ref" "${{ github.sha }}" "${{ github.ref_name }}" "${{ github.run_id }}" "$built_at")"
             response="$(curl -sS --fail --show-error -X POST "${dxcp_base}/builds/register" \
@@ -238,7 +239,7 @@ jobs:
               -H "Content-Type: application/json" \
               -H "Idempotency-Key: ${idem_key}" \
               -d "${payload}")"
-            echo "Registered ${service}@${version}: ${response}"
+            echo "Registered build service=${service} version=${version} artifact=${artifact_ref} idempotency_key=${idem_key}"
             {
               echo "- registered: ${service}@${version}"
               echo "  artifact: ${artifact_ref}"
