@@ -88,6 +88,15 @@ export default function AdminPage({
   systemCiPublishersDirty,
   systemCiPublishersError,
   systemCiPublishersNote,
+  systemUiExposurePolicyDraft,
+  handleSystemUiExposurePolicyToggle,
+  saveSystemUiExposurePolicy,
+  loadSystemUiExposurePolicy,
+  systemUiExposurePolicyLoading,
+  systemUiExposurePolicySaving,
+  systemUiExposurePolicyDirty,
+  systemUiExposurePolicyError,
+  systemUiExposurePolicyNote,
   whoamiData,
   whoamiLoading,
   whoamiError,
@@ -137,6 +146,7 @@ export default function AdminPage({
                   onClick={() => {
                     loadSystemRateLimits({ force: true })
                     loadSystemCiPublishers({ force: true })
+                    loadSystemUiExposurePolicy({ force: true })
                     loadWhoAmI({ force: true })
                   }}
                   disabled={
@@ -144,10 +154,14 @@ export default function AdminPage({
                     systemRateLimitSaving ||
                     systemCiPublishersLoading ||
                     systemCiPublishersSaving ||
+                    systemUiExposurePolicyLoading ||
+                    systemUiExposurePolicySaving ||
                     whoamiLoading
                   }
                 >
-                  {systemRateLimitLoading || systemCiPublishersLoading || whoamiLoading ? 'Loading...' : 'Refresh'}
+                  {systemRateLimitLoading || systemCiPublishersLoading || systemUiExposurePolicyLoading || whoamiLoading
+                    ? 'Loading...'
+                    : 'Refresh'}
                 </button>
               )
           : null
@@ -1002,6 +1016,40 @@ export default function AdminPage({
               disabled={systemCiPublishersSaving || systemCiPublishersLoading || !systemCiPublishersDirty}
             >
               {systemCiPublishersSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+          <h2 className="space-12">Build Provenance Exposure</h2>
+          <div className="helper">Organization-wide controls for provenance visibility in DXCP.</div>
+          <div className="checklist space-12">
+            <label className="check-item">
+              <input
+                type="checkbox"
+                checked={systemUiExposurePolicyDraft.artifactRef.display === true}
+                onChange={(e) => handleSystemUiExposurePolicyToggle('artifactRef', e.target.checked)}
+                disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving}
+              />
+              <span>Show artifact references</span>
+            </label>
+            <label className="check-item">
+              <input
+                type="checkbox"
+                checked={systemUiExposurePolicyDraft.externalLinks.display === true}
+                onChange={(e) => handleSystemUiExposurePolicyToggle('externalLinks', e.target.checked)}
+                disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving}
+              />
+              <span>Show external links (commit and CI run)</span>
+            </label>
+          </div>
+          <div className="helper">Controls whether DXCP displays outbound links derived from build metadata.</div>
+          {systemUiExposurePolicyError && <div className="helper space-8">{systemUiExposurePolicyError}</div>}
+          {systemUiExposurePolicyNote && <div className="helper space-8">{systemUiExposurePolicyNote}</div>}
+          <div className="space-12">
+            <button
+              className="button"
+              onClick={saveSystemUiExposurePolicy}
+              disabled={systemUiExposurePolicySaving || systemUiExposurePolicyLoading || !systemUiExposurePolicyDirty}
+            >
+              {systemUiExposurePolicySaving ? 'Saving...' : 'Save exposure policy'}
             </button>
           </div>
           <h2 className="space-12">Who am I</h2>

@@ -36,7 +36,8 @@ const buildFetchMock = ({
   policySummaryResponse,
   versionsByService,
   environments,
-  uiExposureArtifactRefDisplay
+  uiExposureArtifactRefDisplay,
+  uiExposureExternalLinksDisplay
 }) => {
   let groups = deliveryGroups || [
     {
@@ -67,6 +68,10 @@ const buildFetchMock = ({
       delivery_group_id: group.id || 'default',
       is_enabled: true
     }))
+  let uiExposurePolicy = {
+    artifactRef: { display: uiExposureArtifactRefDisplay === true },
+    externalLinks: { display: uiExposureExternalLinksDisplay === true }
+  }
   return async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
@@ -186,11 +191,24 @@ const buildFetchMock = ({
     }
     if (pathname === '/v1/ui/policy/ui-exposure') {
       return ok({
-        policy: {
-          artifactRef: {
-            display: uiExposureArtifactRefDisplay === true
-          }
-        },
+        policy: uiExposurePolicy,
+        source: 'ssm'
+      })
+    }
+    if (pathname === '/v1/admin/system/ui-exposure-policy' && (!options.method || options.method === 'GET')) {
+      return ok({
+        policy: uiExposurePolicy,
+        source: 'ssm'
+      })
+    }
+    if (pathname === '/v1/admin/system/ui-exposure-policy' && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      uiExposurePolicy = {
+        artifactRef: { display: body?.artifactRef?.display === true },
+        externalLinks: { display: body?.externalLinks?.display === true }
+      }
+      return ok({
+        policy: uiExposurePolicy,
         source: 'ssm'
       })
     }
@@ -643,6 +661,40 @@ export async function runAllTests() {
     assert.ok(view.getByRole('link', { name: 'Insights' }))
     assert.ok(view.getByRole('link', { name: 'Settings' }))
     assert.ok(view.getByRole('link', { name: 'Admin' }))
+  })
+
+  await runTest('Admin system settings saves external links exposure toggle', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      uiExposureArtifactRefDisplay: false,
+      uiExposureExternalLinksDisplay: false
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'System Settings' }))
+    await view.findByText('Build Provenance Exposure')
+
+    const artifactToggle = view.getByLabelText('Show artifact references')
+    const externalToggle = view.getByLabelText('Show external links (commit and CI run)')
+    assert.equal(artifactToggle.checked, false)
+    assert.equal(externalToggle.checked, false)
+
+    fireEvent.click(externalToggle)
+    fireEvent.click(view.getByRole('button', { name: 'Save exposure policy' }))
+    await view.findByText('Build provenance exposure policy saved.')
+    assert.equal(view.getByLabelText('Show external links (commit and CI run)').checked, true)
   })
 
   await runTest('Settings page shows default refresh interval', async () => {

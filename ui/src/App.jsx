@@ -47,6 +47,9 @@ const DEFAULT_PUBLIC_SETTINGS = {
     uiExposure: {
       artifactRef: {
         display: false
+      },
+      externalLinks: {
+        display: false
       }
     }
   }
@@ -588,6 +591,15 @@ function formatCiPublishersJson(value) {
   return JSON.stringify(Array.isArray(value) ? value : [], null, 2)
 }
 
+function normalizeUiExposurePolicy(policy) {
+  const artifactRefDisplay = policy?.artifactRef?.display === true
+  const externalLinksDisplay = policy?.externalLinks?.display === true
+  return {
+    artifactRef: { display: artifactRefDisplay },
+    externalLinks: { display: externalLinksDisplay }
+  }
+}
+
 function formatApiError(result, fallbackMessage) {
   if (result && result.code) {
     const requestSuffix = result.request_id ? ` (request_id: ${result.request_id})` : ''
@@ -773,6 +785,16 @@ export default function App() {
   const [systemCiPublishersSaving, setSystemCiPublishersSaving] = useState(false)
   const [systemCiPublishersError, setSystemCiPublishersError] = useState('')
   const [systemCiPublishersNote, setSystemCiPublishersNote] = useState('')
+  const [systemUiExposurePolicyDraft, setSystemUiExposurePolicyDraft] = useState(
+    normalizeUiExposurePolicy(DEFAULT_PUBLIC_SETTINGS.policy.uiExposure)
+  )
+  const [systemUiExposurePolicyBaseline, setSystemUiExposurePolicyBaseline] = useState(
+    normalizeUiExposurePolicy(DEFAULT_PUBLIC_SETTINGS.policy.uiExposure)
+  )
+  const [systemUiExposurePolicyLoading, setSystemUiExposurePolicyLoading] = useState(false)
+  const [systemUiExposurePolicySaving, setSystemUiExposurePolicySaving] = useState(false)
+  const [systemUiExposurePolicyError, setSystemUiExposurePolicyError] = useState('')
+  const [systemUiExposurePolicyNote, setSystemUiExposurePolicyNote] = useState('')
   const [whoamiData, setWhoamiData] = useState(null)
   const [whoamiLoading, setWhoamiLoading] = useState(false)
   const [whoamiError, setWhoamiError] = useState('')
@@ -1539,17 +1561,13 @@ export default function App() {
         api.get('/ui/policy/ui-exposure')
       ])
       if (!data || data.code) return
-      const artifactRefDisplay = uiExposureData?.policy?.artifactRef?.display === true
+      const uiExposure = normalizeUiExposurePolicy(uiExposureData?.policy)
       setPublicSettings({
         default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
         min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
         max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600,
         policy: {
-          uiExposure: {
-            artifactRef: {
-              display: artifactRefDisplay
-            }
-          }
+          uiExposure
         }
       })
     } catch (err) {
@@ -1720,6 +1738,74 @@ export default function App() {
       setSystemCiPublishersSaving(false)
     }
   }, [api, isPlatformAdmin, systemCiPublishersDraft])
+
+  const loadSystemUiExposurePolicy = useCallback(
+    async (options = {}) => {
+      if (!isPlatformAdmin) return
+      setSystemUiExposurePolicyError('')
+      setSystemUiExposurePolicyNote('')
+      setSystemUiExposurePolicyLoading(true)
+      try {
+        const force = Boolean(options?.force)
+        const data = await api.get('/admin/system/ui-exposure-policy', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
+        if (data && data.code) {
+          setSystemUiExposurePolicyError(formatApiError(data, 'Failed to load build provenance exposure policy.'))
+          return
+        }
+        const next = normalizeUiExposurePolicy(data?.policy)
+        setSystemUiExposurePolicyDraft(next)
+        setSystemUiExposurePolicyBaseline(next)
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setSystemUiExposurePolicyError('Failed to load build provenance exposure policy.')
+      } finally {
+        setSystemUiExposurePolicyLoading(false)
+      }
+    },
+    [api, isPlatformAdmin]
+  )
+
+  function handleSystemUiExposurePolicyToggle(field, display) {
+    setSystemUiExposurePolicyDraft((prev) => ({
+      ...prev,
+      [field]: { display: Boolean(display) }
+    }))
+    setSystemUiExposurePolicyError('')
+    setSystemUiExposurePolicyNote('')
+  }
+
+  const saveSystemUiExposurePolicy = useCallback(async () => {
+    if (!isPlatformAdmin) {
+      setSystemUiExposurePolicyError('Only Platform Admins can modify this.')
+      return
+    }
+    setSystemUiExposurePolicyError('')
+    setSystemUiExposurePolicyNote('')
+    setSystemUiExposurePolicySaving(true)
+    try {
+      const payload = normalizeUiExposurePolicy(systemUiExposurePolicyDraft)
+      const result = await api.put('/admin/system/ui-exposure-policy', payload)
+      if (result && result.code) {
+        setSystemUiExposurePolicyError(formatApiError(result, 'Failed to save build provenance exposure policy.'))
+        return
+      }
+      const next = normalizeUiExposurePolicy(result?.policy ?? payload)
+      setSystemUiExposurePolicyDraft(next)
+      setSystemUiExposurePolicyBaseline(next)
+      setSystemUiExposurePolicyNote('Build provenance exposure policy saved.')
+      setPublicSettings((prev) => ({
+        ...(prev || DEFAULT_PUBLIC_SETTINGS),
+        policy: {
+          uiExposure: next
+        }
+      }))
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setSystemUiExposurePolicyError('Failed to save build provenance exposure policy.')
+    } finally {
+      setSystemUiExposurePolicySaving(false)
+    }
+  }, [api, isPlatformAdmin, systemUiExposurePolicyDraft])
 
   const loadWhoAmI = useCallback(
     async (options = {}) => {
@@ -2654,9 +2740,20 @@ export default function App() {
     if (view === 'admin' && adminTab === 'system-settings') {
       loadSystemRateLimits()
       loadSystemCiPublishers()
+      loadSystemUiExposurePolicy()
       loadWhoAmI()
     }
-  }, [authReady, isAuthenticated, isPlatformAdmin, view, adminTab, loadSystemRateLimits, loadSystemCiPublishers, loadWhoAmI])
+  }, [
+    authReady,
+    isAuthenticated,
+    isPlatformAdmin,
+    view,
+    adminTab,
+    loadSystemRateLimits,
+    loadSystemCiPublishers,
+    loadSystemUiExposurePolicy,
+    loadWhoAmI
+  ])
 
   useEffect(() => {
     if (!authReady || !isAuthenticated) return
@@ -2763,6 +2860,12 @@ export default function App() {
       setEnvironmentsError('')
       setSelectedEnvironment('')
       setPublicSettings(DEFAULT_PUBLIC_SETTINGS)
+      setSystemUiExposurePolicyDraft(normalizeUiExposurePolicy(DEFAULT_PUBLIC_SETTINGS.policy.uiExposure))
+      setSystemUiExposurePolicyBaseline(normalizeUiExposurePolicy(DEFAULT_PUBLIC_SETTINGS.policy.uiExposure))
+      setSystemUiExposurePolicyError('')
+      setSystemUiExposurePolicyNote('')
+      setSystemUiExposurePolicyLoading(false)
+      setSystemUiExposurePolicySaving(false)
       setAdminSettings(null)
       setUserSettingsKey('')
       setUserSettings(null)
@@ -3867,7 +3970,18 @@ export default function App() {
     whoamiLoading,
     whoamiError,
     loadWhoAmI,
-    copyAccessTokenToClipboard
+    copyAccessTokenToClipboard,
+    systemUiExposurePolicyDraft,
+    handleSystemUiExposurePolicyToggle,
+    saveSystemUiExposurePolicy,
+    loadSystemUiExposurePolicy,
+    systemUiExposurePolicyLoading,
+    systemUiExposurePolicySaving,
+    systemUiExposurePolicyDirty:
+      systemUiExposurePolicyDraft.artifactRef.display !== systemUiExposurePolicyBaseline.artifactRef.display ||
+      systemUiExposurePolicyDraft.externalLinks.display !== systemUiExposurePolicyBaseline.externalLinks.display,
+    systemUiExposurePolicyError,
+    systemUiExposurePolicyNote
   }
 
   const infoItems = []
