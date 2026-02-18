@@ -36,7 +36,7 @@ def handler(event, context):
     <meta charset="utf-8" />
     <title>{SERVICE_NAME}</title>
   </head>
-  <body style="font-family: Arial, sans-serif; padding: 40px; background-color: #F0F8FF; color: #000;">
+  <body style="font-family: Arial, sans-serif; padding: 40px; background-color: #F5FFFA; color: #000;">
     <h1>{SERVICE_NAME}</h1>
     <p>Version: <strong>{version}</strong></p>
     <p>Rendered at: <strong>{now}</strong></p>
