@@ -38,6 +38,7 @@ except Exception:  # pragma: no cover - optional dependency for local mode
 MIN_RPM = 1
 MAX_RPM = 5000
 logger = logging.getLogger("dxcp.api")
+UI_EXPOSURE_POLICY_KEY = "/dxcp/policy/ui/exposure"
 
 
 def _ssm_client():
@@ -70,6 +71,47 @@ def _ssm_get_parameter(name: str) -> str:
 
 def _ssm_put_parameter(name: str, value: str) -> None:
     _ssm_client().put_parameter(Name=name, Value=value, Type="String", Overwrite=True)
+
+
+def _default_ui_exposure_policy() -> dict:
+    return {
+        "artifactRef": {
+            "display": False,
+        }
+    }
+
+
+def _parse_ui_exposure_policy(value: object) -> dict:
+    parsed: object = value
+    if isinstance(value, str):
+        parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError("policy must be an object")
+    artifact_ref_value = parsed.get("artifactRef")
+    display = False
+    if isinstance(artifact_ref_value, dict):
+        if "display" in artifact_ref_value:
+            candidate = artifact_ref_value.get("display")
+            if not isinstance(candidate, bool):
+                raise ValueError("artifactRef.display must be a boolean")
+            display = candidate
+    elif artifact_ref_value is not None:
+        raise ValueError("artifactRef must be an object")
+    return {"artifactRef": {"display": display}}
+
+
+def _read_ui_exposure_policy_from_ssm() -> dict:
+    try:
+        raw = _ssm_get_parameter(UI_EXPOSURE_POLICY_KEY)
+    except Exception:
+        return {"policy": _default_ui_exposure_policy(), "source": "ssm"}
+    policy = _parse_ui_exposure_policy(raw)
+    return {"policy": policy, "source": "ssm"}
+
+
+def _write_ui_exposure_policy_to_ssm(policy: dict) -> None:
+    normalized = _parse_ui_exposure_policy(policy)
+    _ssm_put_parameter(UI_EXPOSURE_POLICY_KEY, json.dumps(normalized))
 
 
 def _parse_rpm_value(value: object, field: str, allow_string: bool = False) -> int:
@@ -206,6 +248,16 @@ def _validate_ci_publishers_payload(payload: object) -> tuple[Optional[list[CiPu
     return cleaned, None
 
 
+def _validate_ui_exposure_policy_payload(payload: object) -> tuple[Optional[dict], Optional[str]]:
+    if not isinstance(payload, dict):
+        return None, "Payload must be an object"
+    try:
+        normalized = _parse_ui_exposure_policy(payload)
+    except ValueError as exc:
+        return None, str(exc)
+    return normalized, None
+
+
 def register_admin_system_routes(
     app,
     *,
@@ -311,3 +363,50 @@ def register_admin_system_routes(
             return new_values
         except Exception:
             return error_response(500, "INTERNAL_ERROR", "Unable to update system CI publishers in SSM")
+
+    @app.get("/v1/admin/system/ui-exposure-policy")
+    def get_system_ui_exposure_policy(request: Request, authorization: Optional[str] = Header(None)):
+        actor = get_actor(authorization)
+        rate_limiter.check_read(actor.actor_id)
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view system UI exposure policy")
+        if role_error:
+            return role_error
+        try:
+            return _read_ui_exposure_policy_from_ssm()
+        except ValueError as exc:
+            return error_response(500, "INTERNAL_ERROR", str(exc))
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to read system UI exposure policy from SSM")
+
+    @app.put("/v1/admin/system/ui-exposure-policy")
+    def update_system_ui_exposure_policy(
+        payload: dict,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+    ):
+        actor = get_actor(authorization)
+        rate_limiter.check_mutate(actor.actor_id, "admin_system_ui_exposure_policy_update")
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system UI exposure policy")
+        if role_error:
+            return role_error
+        validated, validation_error = _validate_ui_exposure_policy_payload(payload)
+        if validation_error:
+            return error_response(400, "INVALID_REQUEST", validation_error)
+        try:
+            _write_ui_exposure_policy_to_ssm(validated)
+            return {"policy": validated, "source": "ssm"}
+        except ValueError as exc:
+            return error_response(500, "INTERNAL_ERROR", str(exc))
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to update system UI exposure policy in SSM")
+
+    @app.get("/v1/ui/policy/ui-exposure")
+    def get_ui_exposure_policy(request: Request, authorization: Optional[str] = Header(None)):
+        actor = get_actor(authorization)
+        rate_limiter.check_read(actor.actor_id)
+        try:
+            return _read_ui_exposure_policy_from_ssm()
+        except ValueError as exc:
+            return error_response(500, "INTERNAL_ERROR", str(exc))
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to read UI exposure policy from SSM")
