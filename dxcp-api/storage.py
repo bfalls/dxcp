@@ -168,6 +168,8 @@ class Storage:
         self._ensure_column(cur, "builds", "checksum_sha256", "TEXT")
         self._ensure_column(cur, "builds", "repo", "TEXT")
         self._ensure_column(cur, "builds", "actor", "TEXT")
+        self._ensure_column(cur, "builds", "commit_url", "TEXT")
+        self._ensure_column(cur, "builds", "run_url", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS services (
@@ -1277,8 +1279,8 @@ class Storage:
             """
             INSERT INTO builds (
                 id, service, version, artifact_ref, git_sha, git_branch, ci_publisher, ci_provider, ci_run_id, built_at,
-                sha256, size_bytes, content_type, checksum_sha256, repo, actor, registered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sha256, size_bytes, content_type, checksum_sha256, repo, actor, commit_url, run_url, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 build_id,
@@ -1297,6 +1299,8 @@ class Storage:
                 record.get("checksum_sha256"),
                 record.get("repo"),
                 record.get("actor"),
+                record.get("commit_url"),
+                record.get("run_url"),
                 record["registeredAt"],
             ),
         )
@@ -1338,6 +1342,8 @@ class Storage:
             "checksum_sha256": row["checksum_sha256"],
             "repo": row["repo"],
             "actor": row["actor"],
+            "commit_url": row["commit_url"],
+            "run_url": row["run_url"],
             "registeredAt": row["registered_at"],
         }
 
@@ -1372,6 +1378,8 @@ class Storage:
                 "checksum_sha256": row["checksum_sha256"],
                 "repo": row["repo"],
                 "actor": row["actor"],
+                "commit_url": row["commit_url"],
+                "run_url": row["run_url"],
                 "registeredAt": row["registered_at"],
             }
             for row in rows
@@ -2348,6 +2356,8 @@ class DynamoStorage:
             "checksum_sha256": record.get("checksum_sha256"),
             "repo": record.get("repo"),
             "actor": record.get("actor"),
+            "commit_url": record.get("commit_url"),
+            "run_url": record.get("run_url"),
             "registeredAt": record["registeredAt"],
         }
         self.table.put_item(Item=item)
@@ -2384,6 +2394,8 @@ class DynamoStorage:
             "checksum_sha256": item.get("checksum_sha256"),
             "repo": item.get("repo"),
             "actor": item.get("actor"),
+            "commit_url": item.get("commit_url"),
+            "run_url": item.get("run_url"),
             "registeredAt": item.get("registeredAt"),
         }
 
@@ -2412,6 +2424,8 @@ class DynamoStorage:
                 "checksum_sha256": item.get("checksum_sha256"),
                 "repo": item.get("repo"),
                 "actor": item.get("actor"),
+                "commit_url": item.get("commit_url"),
+                "run_url": item.get("run_url"),
                 "registeredAt": item.get("registeredAt"),
             }
             for item in items

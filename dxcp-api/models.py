@@ -262,6 +262,8 @@ class BuildRegistration(BaseModel):
     ci_provider: str
     ci_run_id: str
     built_at: str
+    commit_url: Optional[str] = None
+    run_url: Optional[str] = None
     sha256: str
     sizeBytes: int
     contentType: str
@@ -280,6 +282,8 @@ class BuildRegisterExistingRequest(BaseModel):
     ci_provider: str
     ci_run_id: str
     built_at: str
+    commit_url: Optional[str] = None
+    run_url: Optional[str] = None
     checksum_sha256: Optional[str] = None
     repo: Optional[str] = None
     actor: Optional[str] = None

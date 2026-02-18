@@ -77,7 +77,10 @@ def _default_ui_exposure_policy() -> dict:
     return {
         "artifactRef": {
             "display": False,
-        }
+        },
+        "externalLinks": {
+            "display": False,
+        },
     }
 
 
@@ -88,16 +91,29 @@ def _parse_ui_exposure_policy(value: object) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError("policy must be an object")
     artifact_ref_value = parsed.get("artifactRef")
-    display = False
+    artifact_ref_display = False
     if isinstance(artifact_ref_value, dict):
         if "display" in artifact_ref_value:
             candidate = artifact_ref_value.get("display")
             if not isinstance(candidate, bool):
                 raise ValueError("artifactRef.display must be a boolean")
-            display = candidate
+            artifact_ref_display = candidate
     elif artifact_ref_value is not None:
         raise ValueError("artifactRef must be an object")
-    return {"artifactRef": {"display": display}}
+    external_links_value = parsed.get("externalLinks")
+    external_links_display = False
+    if isinstance(external_links_value, dict):
+        if "display" in external_links_value:
+            candidate = external_links_value.get("display")
+            if not isinstance(candidate, bool):
+                raise ValueError("externalLinks.display must be a boolean")
+            external_links_display = candidate
+    elif external_links_value is not None:
+        raise ValueError("externalLinks must be an object")
+    return {
+        "artifactRef": {"display": artifact_ref_display},
+        "externalLinks": {"display": external_links_display},
+    }
 
 
 def _read_ui_exposure_policy_from_ssm() -> dict:
@@ -107,6 +123,10 @@ def _read_ui_exposure_policy_from_ssm() -> dict:
         return {"policy": _default_ui_exposure_policy(), "source": "ssm"}
     policy = _parse_ui_exposure_policy(raw)
     return {"policy": policy, "source": "ssm"}
+
+
+def read_ui_exposure_policy() -> dict:
+    return _read_ui_exposure_policy_from_ssm().get("policy", _default_ui_exposure_policy())
 
 
 def _write_ui_exposure_policy_to_ssm(policy: dict) -> None:

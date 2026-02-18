@@ -90,7 +90,10 @@ async def test_get_defaults_to_hidden_when_policy_missing(tmp_path: Path, monkey
             headers=auth_header(["dxcp-platform-admins"]),
         )
     assert response.status_code == 200
-    assert response.json() == {"policy": {"artifactRef": {"display": False}}, "source": "ssm"}
+    assert response.json() == {
+        "policy": {"artifactRef": {"display": False}, "externalLinks": {"display": False}},
+        "source": "ssm",
+    }
 
 
 async def test_put_requires_platform_admin(tmp_path: Path, monkeypatch):
@@ -109,11 +112,17 @@ async def test_put_persists_valid_boolean(tmp_path: Path, monkeypatch):
         response = await client.put(
             "/v1/admin/system/ui-exposure-policy",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"artifactRef": {"display": True}, "unknown": {"ignored": 1}},
+            json={"artifactRef": {"display": True}, "externalLinks": {"display": True}, "unknown": {"ignored": 1}},
         )
     assert response.status_code == 200
-    assert response.json() == {"policy": {"artifactRef": {"display": True}}, "source": "ssm"}
-    assert json.loads(store["/dxcp/policy/ui/exposure"]) == {"artifactRef": {"display": True}}
+    assert response.json() == {
+        "policy": {"artifactRef": {"display": True}, "externalLinks": {"display": True}},
+        "source": "ssm",
+    }
+    assert json.loads(store["/dxcp/policy/ui/exposure"]) == {
+        "artifactRef": {"display": True},
+        "externalLinks": {"display": True},
+    }
 
 
 @pytest.mark.parametrize(
@@ -124,6 +133,10 @@ async def test_put_persists_valid_boolean(tmp_path: Path, monkeypatch):
         {"artifactRef": {"display": None}},
         {"artifactRef": "invalid"},
         {"artifactRef": {"display": []}},
+        {"externalLinks": {"display": "yes"}},
+        {"externalLinks": {"display": 1}},
+        {"externalLinks": {"display": None}},
+        {"externalLinks": "invalid"},
     ],
 )
 async def test_put_rejects_invalid_types(tmp_path: Path, monkeypatch, payload: dict):
@@ -138,14 +151,25 @@ async def test_put_rejects_invalid_types(tmp_path: Path, monkeypatch, payload: d
 
 
 async def test_get_returns_persisted_policy(tmp_path: Path, monkeypatch):
-    store = {"/dxcp/policy/ui/exposure": json.dumps({"artifactRef": {"display": True}, "future": {"foo": "bar"}})}
+    store = {
+        "/dxcp/policy/ui/exposure": json.dumps(
+            {
+                "artifactRef": {"display": True},
+                "externalLinks": {"display": True},
+                "future": {"foo": "bar"},
+            }
+        )
+    }
     async with _client(tmp_path, monkeypatch, store=store) as client:
         response = await client.get(
             "/v1/admin/system/ui-exposure-policy",
             headers=auth_header(["dxcp-platform-admins"]),
         )
     assert response.status_code == 200
-    assert response.json() == {"policy": {"artifactRef": {"display": True}}, "source": "ssm"}
+    assert response.json() == {
+        "policy": {"artifactRef": {"display": True}, "externalLinks": {"display": True}},
+        "source": "ssm",
+    }
 
 
 async def test_ui_read_endpoint_allows_standard_roles(tmp_path: Path, monkeypatch):
@@ -156,4 +180,7 @@ async def test_ui_read_endpoint_allows_standard_roles(tmp_path: Path, monkeypatc
             headers=auth_header(["dxcp-observers"]),
         )
     assert response.status_code == 200
-    assert response.json() == {"policy": {"artifactRef": {"display": True}}, "source": "ssm"}
+    assert response.json() == {
+        "policy": {"artifactRef": {"display": True}, "externalLinks": {"display": False}},
+        "source": "ssm",
+    }

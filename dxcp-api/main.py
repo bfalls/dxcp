@@ -8,6 +8,7 @@ import types
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +66,7 @@ from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
 from storage import build_storage, utc_now
-from admin_system_routes import register_admin_system_routes
+from admin_system_routes import register_admin_system_routes, read_ui_exposure_policy
 
 
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -1514,6 +1515,43 @@ def _ui_refresh_settings() -> dict:
     }
 
 
+def _validate_optional_http_url(field_name: str, value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise PolicyError(400, "INVALID_URL", f"{field_name} must be an http:// or https:// URL")
+    normalized = value.strip()
+    if not normalized:
+        raise PolicyError(400, "INVALID_URL", f"{field_name} must be an http:// or https:// URL")
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise PolicyError(400, "INVALID_URL", f"{field_name} must be an http:// or https:// URL")
+    return normalized
+
+
+def _external_links_display_enabled() -> bool:
+    try:
+        policy = read_ui_exposure_policy()
+    except Exception:
+        return False
+    if not isinstance(policy, dict):
+        return False
+    external_links = policy.get("externalLinks")
+    if not isinstance(external_links, dict):
+        return False
+    return external_links.get("display") is True
+
+
+def _build_public_view(build: Optional[dict]) -> Optional[dict]:
+    if not isinstance(build, dict):
+        return build
+    payload = dict(build)
+    if not _external_links_display_enabled():
+        payload["commit_url"] = None
+        payload["run_url"] = None
+    return payload
+
+
 def _register_existing_build_internal(
     service_entry: dict,
     service: str,
@@ -1530,6 +1568,8 @@ def _register_existing_build_internal(
     repo: Optional[str],
     actor: Optional[str],
     ci_publisher: Optional[str],
+    commit_url: Optional[str],
+    run_url: Optional[str],
 ) -> dict:
     if not SETTINGS.runtime_artifact_bucket:
         raise ValueError("Runtime artifact bucket is not configured")
@@ -1599,6 +1639,8 @@ def _register_existing_build_internal(
         "repo": repo,
         "actor": actor,
         "ci_publisher": ci_publisher,
+        "commit_url": commit_url,
+        "run_url": run_url,
         "registeredAt": utc_now(),
     }
     record = storage.insert_build(record)
@@ -2882,7 +2924,7 @@ def get_build(
     build = storage.find_latest_build(service, version)
     if not build:
         return error_response(404, "NOT_FOUND", "Build not found")
-    return build
+    return _build_public_view(build)
 
 
 @app.post("/v1/builds", status_code=201)
@@ -2916,14 +2958,20 @@ def register_build(
         )
     guardrails.validate_artifact(reg.sizeBytes, reg.sha256, reg.contentType)
     guardrails.validate_artifact_source(reg.artifactRef, service_entry)
+    try:
+        commit_url = _validate_optional_http_url("commit_url", reg.commit_url)
+        run_url = _validate_optional_http_url("run_url", reg.run_url)
+    except PolicyError as exc:
+        return error_response(exc.status_code, exc.code, exc.message)
 
     existing = storage.find_latest_build(reg.service, reg.version)
     if existing:
         conflict = _build_registration_conflict(existing, reg.artifactRef, reg.git_sha)
         if conflict:
             return conflict
-        store_idempotency(request, idempotency_key, existing, 200)
-        return JSONResponse(status_code=200, content=existing)
+        response_payload = _build_public_view(existing)
+        store_idempotency(request, idempotency_key, response_payload, 200)
+        return JSONResponse(status_code=200, content=response_payload)
 
     cap = storage.find_upload_capability(
         reg.service,
@@ -2941,6 +2989,8 @@ def register_build(
 
     record = reg.dict()
     record["built_at"] = built_at
+    record["commit_url"] = commit_url
+    record["run_url"] = run_url
     record["ci_publisher"] = publisher_name
     record["registeredAt"] = utc_now()
     record = storage.insert_build(record)
@@ -2956,8 +3006,9 @@ def register_build(
         record.get("artifactRef"),
     )
     storage.delete_upload_capability(cap["id"])
-    store_idempotency(request, idempotency_key, record, 201)
-    return record
+    response_payload = _build_public_view(record)
+    store_idempotency(request, idempotency_key, response_payload, 201)
+    return response_payload
 
 
 @app.post("/v1/builds/register", status_code=201)
@@ -2990,14 +3041,20 @@ def register_existing_build(
             details={"invalid_fields": ["built_at"]},
         )
     guardrails.validate_artifact_source(req.artifactRef, service_entry)
+    try:
+        commit_url = _validate_optional_http_url("commit_url", req.commit_url)
+        run_url = _validate_optional_http_url("run_url", req.run_url)
+    except PolicyError as exc:
+        return error_response(exc.status_code, exc.code, exc.message)
 
     existing = storage.find_latest_build(req.service, req.version)
     if existing:
         conflict = _build_registration_conflict(existing, req.artifactRef, req.git_sha)
         if conflict:
             return conflict
-        store_idempotency(request, idempotency_key, existing, 200)
-        return JSONResponse(status_code=200, content=existing)
+        response_payload = _build_public_view(existing)
+        store_idempotency(request, idempotency_key, response_payload, 200)
+        return JSONResponse(status_code=200, content=response_payload)
 
     try:
         record = _register_existing_build_internal(
@@ -3016,6 +3073,8 @@ def register_existing_build(
             req.repo,
             req.actor,
             publisher_name,
+            commit_url,
+            run_url,
         )
     except ValueError as exc:
         return error_response(400, "INVALID_ARTIFACT", str(exc))
@@ -3033,5 +3092,6 @@ def register_existing_build(
         record.get("version"),
         record.get("artifactRef"),
     )
-    store_idempotency(request, idempotency_key, record, 201)
-    return record
+    response_payload = _build_public_view(record)
+    store_idempotency(request, idempotency_key, response_payload, 201)
+    return response_payload
