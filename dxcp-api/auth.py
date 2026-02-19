@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from typing import Any, Dict, Optional
 
@@ -12,6 +13,13 @@ from models import Actor, Role
 
 _JWKS_CACHE: Dict[str, Any] = {"url": None, "fetched_at": 0.0, "keys": {}}
 _JWKS_TTL_SECONDS = 300
+DEFAULT_ROLES_CLAIM = "https://dxcp.example/claims/roles"
+ROLE_PLATFORM_ADMINS = "dxcp-platform-admins"
+ROLE_DELIVERY_OWNERS = "dxcp-delivery-owners"
+ROLE_OBSERVERS = "dxcp-observers"
+ROLE_CI_PUBLISHERS = "dxcp-ci-publishers"
+ROLE_CI_PUBLISHER_LEGACY = "dxcp-ci-publisher"
+logger = logging.getLogger("dxcp.auth")
 
 
 def _auth_error(status_code: int, code: str, message: str) -> None:
@@ -50,7 +58,7 @@ def _decode_jwt(token: str) -> dict:
         _auth_error(500, "OIDC_CONFIG_MISSING", "DXCP_OIDC_ISSUER is required")
     if not SETTINGS.oidc_audience:
         _auth_error(500, "OIDC_CONFIG_MISSING", "DXCP_OIDC_AUDIENCE is required")
-    if not SETTINGS.oidc_roles_claim:
+    if not _roles_claim_key():
         _auth_error(500, "OIDC_CONFIG_MISSING", "DXCP_OIDC_ROLES_CLAIM is required")
     jwks_url = _jwks_url()
     if not jwks_url:
@@ -82,15 +90,25 @@ def _decode_jwt(token: str) -> dict:
     return {}
 
 
+def _roles_claim_key() -> str:
+    configured = (SETTINGS.oidc_roles_claim or "").strip()
+    return configured or DEFAULT_ROLES_CLAIM
+
+
 def _map_role(roles: list) -> Role:
-    if "dxcp-platform-admins" in roles:
+    if ROLE_PLATFORM_ADMINS in roles:
         return Role.PLATFORM_ADMIN
-    if "dxcp-delivery-owners" in roles:
+    if ROLE_DELIVERY_OWNERS in roles:
         return Role.DELIVERY_OWNER
-    if "dxcp-observers" in roles:
+    if ROLE_OBSERVERS in roles:
         return Role.OBSERVER
+    if ROLE_CI_PUBLISHERS in roles:
+        return Role.CI_PUBLISHER
+    if ROLE_CI_PUBLISHER_LEGACY in roles:
+        logger.warning("event=auth.role_legacy_alias_seen role=%s", ROLE_CI_PUBLISHER_LEGACY)
+        return Role.CI_PUBLISHER
     _auth_error(403, "AUTHZ_ROLE_REQUIRED", "No recognized DXCP role in token")
-    return Role.OBSERVER
+    raise AssertionError("unreachable")
 
 
 def _extract_actor_id(claims: dict) -> str:
@@ -112,8 +130,23 @@ def get_actor_and_claims(authorization: Optional[str]) -> tuple[Actor, dict]:
     if not token:
         _auth_error(401, "UNAUTHORIZED", "Authorization token missing")
     claims = _decode_jwt(token)
-    roles_value = claims.get(SETTINGS.oidc_roles_claim, [])
+    roles_claim_key = _roles_claim_key()
+    roles_claim_exists = roles_claim_key in claims
+    roles_value = claims.get(roles_claim_key, [])
+    extracted_roles = roles_value if isinstance(roles_value, list) else []
+    logger.info(
+        "event=auth.roles_claim evaluated claim_key=%s claim_present=%s extracted_roles=%s",
+        roles_claim_key,
+        roles_claim_exists,
+        extracted_roles,
+    )
     if not isinstance(roles_value, list):
+        logger.warning(
+            "event=auth.roles_claim invalid claim_key=%s claim_present=%s claim_type=%s",
+            roles_claim_key,
+            roles_claim_exists,
+            type(roles_value).__name__,
+        )
         _auth_error(403, "AUTHZ_ROLE_REQUIRED", "Roles claim missing or invalid")
     role = _map_role(roles_value)
     actor_id = _extract_actor_id(claims)

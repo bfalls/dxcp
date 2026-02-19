@@ -20,13 +20,42 @@ jobs:
 
       - name: Decide govtest mode
         id: mode
+        env:
+          GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
+          GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
+          GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
+          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+          GOV_ADMIN_CLIENT_ID: ${{ secrets.GOV_ADMIN_CLIENT_ID }}
+          GOV_ADMIN_CLIENT_SECRET: ${{ secrets.GOV_ADMIN_CLIENT_SECRET }}
+          GOV_OWNER_CLIENT_ID: ${{ secrets.GOV_OWNER_CLIENT_ID }}
+          GOV_OWNER_CLIENT_SECRET: ${{ secrets.GOV_OWNER_CLIENT_SECRET }}
+          GOV_OBSERVER_CLIENT_ID: ${{ secrets.GOV_OBSERVER_CLIENT_ID }}
+          GOV_OBSERVER_CLIENT_SECRET: ${{ secrets.GOV_OBSERVER_CLIENT_SECRET }}
+          GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
+          GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${GOV_DXCP_API_BASE:-}" || -z "${GOV_DXCP_UI_BASE:-}" || -z "${GOV_AWS_REGION:-}" || -z "${GOV_CI_CLIENT_SECRET:-}" ]]; then
+          missing=()
+          for key in \
+            GOV_DXCP_UI_BASE GOV_DXCP_API_BASE GOV_AWS_REGION \
+            GOV_AUTH0_DOMAIN GOV_AUTH0_AUDIENCE \
+            GOV_ADMIN_CLIENT_ID GOV_ADMIN_CLIENT_SECRET \
+            GOV_OWNER_CLIENT_ID GOV_OWNER_CLIENT_SECRET \
+            GOV_OBSERVER_CLIENT_ID GOV_OBSERVER_CLIENT_SECRET \
+            GOV_CI_CLIENT_ID GOV_CI_CLIENT_SECRET; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf 'missing_keys=%s\n' "${missing[*]}" >> "$GITHUB_OUTPUT"
             echo "args=--dry-run" >> "$GITHUB_OUTPUT"
             echo "mode=DRY_RUN" >> "$GITHUB_OUTPUT"
           else
+            echo "missing_keys=" >> "$GITHUB_OUTPUT"
             echo "args=" >> "$GITHUB_OUTPUT"
             echo "mode=FULL" >> "$GITHUB_OUTPUT"
           fi
@@ -51,3 +80,6 @@ jobs:
       - name: Summary
         run: |
           echo "Governance harness mode: ${{ steps.mode.outputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "${{ steps.mode.outputs.missing_keys }}" ]]; then
+            echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}" >> "$GITHUB_STEP_SUMMARY"
+          fi

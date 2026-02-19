@@ -77,3 +77,42 @@ async def test_whoami_requires_authorization_header(tmp_path: Path, monkeypatch)
         response = await client.get("/v1/whoami")
     assert response.status_code == 401
     assert response.json()["code"] == "UNAUTHORIZED"
+
+
+async def test_whoami_accepts_ci_publisher_role(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    token = build_token(["dxcp-ci-publishers"], subject="auth0|ci-bot-1")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["actor_id"] == "auth0|ci-bot-1"
+
+
+async def test_whoami_rejects_missing_roles_claim(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    token = build_token(["dxcp-platform-admins"], include_roles=False)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "AUTHZ_ROLE_REQUIRED"
+
+
+async def test_whoami_rejects_unknown_role(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    token = build_token(["dxcp-unknown-role"])
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "AUTHZ_ROLE_REQUIRED"

@@ -189,7 +189,7 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
     async with _client(tmp_path, monkeypatch, store) as (client, _):
         before = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-before", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "cap-before", **auth_header(["dxcp-ci-publishers"])},
             json=payload,
         )
         update = await client.put(
@@ -199,7 +199,7 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
         )
         after = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-after", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "cap-after", **auth_header(["dxcp-ci-publishers"])},
             json=payload,
         )
     assert before.status_code == 403

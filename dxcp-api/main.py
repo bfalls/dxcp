@@ -316,6 +316,16 @@ def require_ci_publisher(claims: dict, action: str) -> tuple[Optional[str], Opti
     return None, error_response(403, "CI_ONLY", f"Only CI publisher identities can {action}")
 
 
+def require_ci_role_and_publisher(
+    actor: Actor,
+    claims: dict,
+    action: str,
+) -> tuple[Optional[str], Optional[JSONResponse]]:
+    if actor.role != Role.CI_PUBLISHER:
+        return None, error_response(403, "CI_ONLY", f"Only CI publisher identities can {action}")
+    return require_ci_publisher(claims, action)
+
+
 def can_deploy(actor: Actor) -> bool:
     return actor.role in {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}
 
@@ -3088,7 +3098,7 @@ def create_upload_capability(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
-    _, ci_error = require_ci_publisher(claims, "request build upload capability")
+    _, ci_error = require_ci_role_and_publisher(actor, claims, "request build upload capability")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()
@@ -3148,7 +3158,7 @@ def register_build(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
-    publisher_name, ci_error = require_ci_publisher(claims, "register builds")
+    publisher_name, ci_error = require_ci_role_and_publisher(actor, claims, "register builds")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()
@@ -3232,7 +3242,7 @@ def register_existing_build(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
-    publisher_name, ci_error = require_ci_publisher(claims, "register builds")
+    publisher_name, ci_error = require_ci_role_and_publisher(actor, claims, "register builds")
     if ci_error:
         return ci_error
     guardrails.require_mutations_enabled()

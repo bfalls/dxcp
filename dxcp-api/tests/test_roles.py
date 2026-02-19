@@ -302,12 +302,12 @@ async def test_ci_publisher_can_register_build_without_admin_role(tmp_path: Path
         }
         cap_response = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-ci-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            headers={"Idempotency-Key": "cap-ci-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=cap_request,
         )
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-ci-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            headers={"Idempotency-Key": "build-ci-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=_build_payload("1.0.1"),
         )
     assert cap_response.status_code == 201
@@ -335,14 +335,43 @@ async def test_ci_publisher_object_rules_match_subject(tmp_path: Path, monkeypat
         }
         allowed = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-ci-obj-1", **auth_header_for_subject(["dxcp-observers"], "repo-ci-bot")},
+            headers={"Idempotency-Key": "cap-ci-obj-1", **auth_header_for_subject(["dxcp-ci-publishers"], "repo-ci-bot")},
             json=cap_request,
         )
         denied = await client.post(
             "/v1/builds/upload-capability",
-            headers={"Idempotency-Key": "cap-ci-obj-2", **auth_header_for_subject(["dxcp-observers"], "someone-else")},
+            headers={"Idempotency-Key": "cap-ci-obj-2", **auth_header_for_subject(["dxcp-ci-publishers"], "someone-else")},
             json=cap_request,
         )
     assert allowed.status_code == 201
     assert denied.status_code == 403
     assert denied.json()["code"] == "CI_ONLY"
+
+
+async def test_ci_role_without_allowlist_match_denied(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        cap_request = {
+            "service": "demo-service",
+            "version": "1.0.3",
+            "expectedSizeBytes": 1024,
+            "expectedSha256": "a" * 64,
+            "contentType": "application/zip",
+        }
+        response = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ci-obj-3", **auth_header_for_subject(["dxcp-ci-publishers"], "not-allowlisted")},
+            json=cap_request,
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "CI_ONLY"
+
+
+async def test_ci_role_without_allowlist_match_denied_for_build_register(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-existing-ci-allowlist-miss", **auth_header_for_subject(["dxcp-ci-publishers"], "not-allowlisted")},
+            json=_build_register_existing_payload(),
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "CI_ONLY"

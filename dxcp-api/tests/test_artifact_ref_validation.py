@@ -106,7 +106,7 @@ async def test_s3_artifact_ref_accepted(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-1", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            headers={"Idempotency-Key": "build-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     assert response.status_code == 201
@@ -117,7 +117,7 @@ async def test_non_s3_artifact_ref_rejected(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-2", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            headers={"Idempotency-Key": "build-2", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=_build_payload("gcs://dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     body = response.json()
@@ -129,7 +129,7 @@ async def test_malformed_artifact_ref_rejected(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/builds",
-            headers={"Idempotency-Key": "build-3", **auth_header_for_subject(["dxcp-observers"], "ci-publisher-1")},
+            headers={"Idempotency-Key": "build-3", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=_build_payload("s3:/dxcp-test-bucket/demo-service-1.0.0.zip"),
         )
     body = response.json()

@@ -1,6 +1,7 @@
 name: Build Demo Artifacts
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -182,15 +183,13 @@ jobs:
         if: steps.changed.outputs.services != ''
         env:
           DXCP_API_BASE: ${{ vars.DXCP_API_BASE }}
-          DXCP_API_TOKEN: ${{ secrets.DXCP_API_TOKEN }}
+          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+          GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
+          GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ -z "${DXCP_API_TOKEN:-}" ]]; then
-            echo "DXCP_API_TOKEN secret is required for build registration." >&2
-            exit 1
-          fi
 
           dxcp_base="${DXCP_API_BASE:-}"
           if [[ -z "$dxcp_base" ]]; then
@@ -208,18 +207,22 @@ jobs:
             exit 0
           fi
 
-          whoami="$(curl -sS --fail --show-error \
-            -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
-            "${dxcp_base}/whoami")"
-          echo "DXCP caller identity: ${whoami}"
-          python3 - <<'PY' "${whoami}"
-          import json
-          import sys
+          for key in GOV_AUTH0_DOMAIN GOV_AUTH0_AUDIENCE GOV_CI_CLIENT_ID GOV_CI_CLIENT_SECRET; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required CI identity setting: ${key}" >&2
+              exit 1
+            fi
+          done
 
-          identity = json.loads(sys.argv[1])
-          if not (identity.get("azp") or identity.get("sub") or identity.get("email")):
-              raise SystemExit("DXCP /whoami returned no azp/sub/email; configure a CI Publisher rule that matches your token claims.")
-          PY
+          token_response="$(curl -sS --fail --show-error -X POST "https://${GOV_AUTH0_DOMAIN}/oauth/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"grant_type\":\"client_credentials\",\"audience\":\"${GOV_AUTH0_AUDIENCE}\",\"client_id\":\"${GOV_CI_CLIENT_ID}\",\"client_secret\":\"${GOV_CI_CLIENT_SECRET}\"}")"
+          DXCP_API_TOKEN="$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); t=p.get("access_token", ""); assert t, "missing access_token"; print(t)' "${token_response}")"
+
+          whoami="$(curl -sS --fail --show-error -H "Authorization: Bearer ${DXCP_API_TOKEN}" "${dxcp_base}/whoami")"
+          echo "DXCP caller identity: ${whoami}"
+          python3 -c 'import json,sys; i=json.loads(sys.argv[1]); cid=sys.argv[2]; aud=sys.argv[3]; dom=sys.argv[4]; iss=str(i.get("iss") or ""); azp=str(i.get("azp") or ""); sub=str(i.get("sub") or ""); av=i.get("aud"); exp=f"https://{dom.rstrip(\"/\")}/"; ok=(aud in av) if isinstance(av,list) else (str(av)==aud); exp_sub=f"{cid}@clients"; assert iss==exp, f"Unexpected issuer {iss!r} != {exp!r}"; assert ok, f"Expected audience {aud!r}, got {av!r}"; assert azp==cid, f"Expected azp {cid!r}, got {azp!r}"; assert exp_sub in sub, f"Expected sub to contain {exp_sub!r}, got {sub!r}"' "${whoami}" "${GOV_CI_CLIENT_ID}" "${GOV_AUTH0_AUDIENCE}" "${GOV_AUTH0_DOMAIN}"
+
           {
             echo "### DXCP CI identity"
             echo '```json'
@@ -235,15 +238,30 @@ jobs:
             run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             payload="$(printf '{"service":"%s","version":"%s","artifactRef":"%s","git_sha":"%s","git_branch":"%s","ci_provider":"github","ci_run_id":"%s","built_at":"%s","commit_url":"%s","run_url":"%s"}' \
               "$service" "$version" "$artifact_ref" "${{ github.sha }}" "${{ github.ref_name }}" "${{ github.run_id }}" "$built_at" "$commit_url" "$run_url")"
-            curl -sS --fail --show-error -X POST "${dxcp_base}/builds/register" \
+            body_file="${RUNNER_TEMP}/register-${service}-${version}.json"
+            headers_file="${RUNNER_TEMP}/register-${service}-${version}.headers"
+            status="$(curl -sS --show-error -X POST "${dxcp_base}/builds/register" \
               -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
               -H "Content-Type: application/json" \
               -H "Idempotency-Key: ${idem_key}" \
-              -d "${payload}" >/dev/null
-            echo "Registered build service=${service} version=${version} artifact=${artifact_ref} idempotency_key=${idem_key}"
+              -d "${payload}" \
+              -D "${headers_file}" \
+              -o "${body_file}" \
+              -w "%{http_code}")"
+            if [[ "${status}" != "201" && "${status}" != "200" ]]; then
+              echo "Build registration failed status=${status}" >&2
+              cat "${body_file}" >&2
+              exit 1
+            fi
+            ci_publisher="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], "r", encoding="utf-8")); cp=p.get("ci_publisher"); assert cp, "missing ci_publisher"; print(cp)' "${body_file}")"
+            replayed="$(awk -F': ' 'tolower($1)=="idempotency-replayed" {print $2}' "${headers_file}" | tr -d '\r' | tail -n1)"
+            replayed="${replayed:-missing}"
+            echo "Registered build service=${service} version=${version} artifact=${artifact_ref} idempotency_key=${idem_key} ci_publisher=${ci_publisher} idempotency_replayed=${replayed}"
             {
               echo "- registered: ${service}@${version}"
               echo "  artifact: ${artifact_ref}"
+              echo "  ci_publisher: ${ci_publisher}"
+              echo "  idempotency_replayed: ${replayed}"
               echo "  idempotency_key: ${idem_key}"
               echo "  commit_url: [Open commit](${commit_url})"
               echo "  run_url: [Open run](${run_url})"

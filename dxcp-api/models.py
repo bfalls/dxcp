@@ -7,6 +7,7 @@ class Role(str, Enum):
     PLATFORM_ADMIN = "PLATFORM_ADMIN"
     DELIVERY_OWNER = "DELIVERY_OWNER"
     OBSERVER = "OBSERVER"
+    CI_PUBLISHER = "CI_PUBLISHER"
 
 
 class CiPublisherProvider(str, Enum):

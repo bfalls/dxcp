@@ -48,7 +48,12 @@ class Settings:
         self.oidc_issuer = self._get("oidc/issuer", "DXCP_OIDC_ISSUER", "", str)
         self.oidc_audience = self._get("oidc/audience", "DXCP_OIDC_AUDIENCE", "", str)
         self.oidc_jwks_url = self._get("oidc/jwks_url", "DXCP_OIDC_JWKS_URL", "", str)
-        self.oidc_roles_claim = self._get("oidc/roles_claim", "DXCP_OIDC_ROLES_CLAIM", "", str)
+        self.oidc_roles_claim = self._get(
+            "oidc/roles_claim",
+            "DXCP_OIDC_ROLES_CLAIM",
+            "https://dxcp.example/claims/roles",
+            str,
+        )
         ci_publishers = self._get("ci_publishers", "DXCP_CI_PUBLISHERS", "", str)
         self.ci_publishers = self._parse_ci_publishers(ci_publishers)
         cors = os.getenv("DXCP_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
