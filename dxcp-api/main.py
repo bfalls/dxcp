@@ -1538,7 +1538,9 @@ def _reap_stale_group_locks(group_id: str, environment: Optional[str]) -> None:
     now = datetime.now(timezone.utc)
     for deployment in _active_deployments_for_group(group_id, environment):
         refreshed = refresh_from_spinnaker(deployment)
-        if refreshed.get("state") not in {"ACTIVE", "IN_PROGRESS"}:
+        # Only reap stale in-progress locks. Active deployments can be legitimately long-running
+        # and should continue to enforce concurrency limits.
+        if refreshed.get("state") != "IN_PROGRESS":
             continue
         reference_time = _parse_iso(refreshed.get("updatedAt")) or _parse_iso(refreshed.get("createdAt"))
         if not reference_time:
