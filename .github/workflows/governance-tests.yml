@@ -51,13 +51,17 @@ jobs:
           done
 
           if [[ "${#missing[@]}" -gt 0 ]]; then
-            printf 'missing_keys=%s\n' "${missing[*]}" >> "$GITHUB_OUTPUT"
-            echo "args=--dry-run" >> "$GITHUB_OUTPUT"
-            echo "mode=DRY_RUN" >> "$GITHUB_OUTPUT"
+            {
+              printf 'missing_keys=%s\n' "${missing[*]}"
+              echo "args=--dry-run"
+              echo "mode=DRY_RUN"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "missing_keys=" >> "$GITHUB_OUTPUT"
-            echo "args=" >> "$GITHUB_OUTPUT"
-            echo "mode=FULL" >> "$GITHUB_OUTPUT"
+            {
+              echo "missing_keys="
+              echo "args="
+              echo "mode=FULL"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run governance harness
@@ -79,7 +83,9 @@ jobs:
 
       - name: Summary
         run: |
-          echo "Governance harness mode: ${{ steps.mode.outputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -n "${{ steps.mode.outputs.missing_keys }}" ]]; then
-            echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "Governance harness mode: ${{ steps.mode.outputs.mode }}"
+            if [[ -n "${{ steps.mode.outputs.missing_keys }}" ]]; then
+              echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
