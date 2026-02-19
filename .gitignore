@@ -28,6 +28,10 @@ cdk/cdk.context.json
 *.pem
 *.pub
 ui/.env.local
+ui/playwright/.auth/
+ui/test-results/
+ui/playwright-report/
+ui/blob-report/
 .env.govtest
 dxcp-api/.env
 dxcp-api/data/*.db

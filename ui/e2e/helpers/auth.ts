@@ -78,7 +78,7 @@ async function completeAuth0Login(page: Page, username: string, password: string
   await page.getByRole("button", { name: "Logout" }).waitFor({ state: "visible", timeout: 60000 });
 }
 
-export async function loginViaUiAndCaptureToken(page: Page, username: string, password: string): Promise<string> {
+export async function ensureLoggedInViaUi(page: Page, username: string, password: string): Promise<void> {
   await page.goto("/");
   const loginButton = page.getByRole("button", { name: "Login" });
   if (await loginButton.isVisible().catch(() => false)) {
@@ -87,7 +87,9 @@ export async function loginViaUiAndCaptureToken(page: Page, username: string, pa
   } else {
     await page.getByRole("button", { name: "Logout" }).waitFor({ state: "visible", timeout: 15000 });
   }
+}
 
+export async function captureAccessTokenFromSpaCache(page: Page): Promise<string> {
   const token = await page.evaluate(() => {
     const stores: Storage[] = [];
     if (typeof window !== "undefined") {
@@ -124,6 +126,11 @@ export async function loginViaUiAndCaptureToken(page: Page, username: string, pa
     throw new Error("Unable to capture Auth0 access token from SPA cache after login.");
   }
   return token;
+}
+
+export async function loginViaUiAndCaptureToken(page: Page, username: string, password: string): Promise<string> {
+  await ensureLoggedInViaUi(page, username, password);
+  return captureAccessTokenFromSpaCache(page);
 }
 
 async function apiJson(method: "GET" | "POST" | "PUT", path: string, token: string, body?: unknown): Promise<any> {
@@ -260,5 +267,12 @@ export function adminCredentialsFromEnv(): { username: string; password: string 
   return {
     username: requiredEnv("GOV_ADMIN_USERNAME"),
     password: requiredEnv("GOV_ADMIN_PASSWORD"),
+  };
+}
+
+export function observerCredentialsFromEnv(): { username: string; password: string } {
+  return {
+    username: requiredEnv("GOV_OBSERVER_USERNAME"),
+    password: requiredEnv("GOV_OBSERVER_PASSWORD"),
   };
 }

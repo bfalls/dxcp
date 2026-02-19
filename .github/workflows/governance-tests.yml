@@ -113,6 +113,22 @@ jobs:
     runs-on: ubuntu-latest
     needs: govtest
     if: ${{ needs.govtest.outputs.mode == 'FULL' }}
+    env:
+      GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
+      GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
+      GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
+      GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+      GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+      GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
+      GOV_DXCP_UI_CLIENT_SECRET: ${{ secrets.GOV_DXCP_UI_CLIENT_SECRET }}
+      GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
+      GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
+      GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
+      GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
+      GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
+      GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
+      GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
+      GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -123,22 +139,13 @@ jobs:
           node-version: "24"
 
       - name: Install UI dependencies
-        working-directory: ui
-        run: npm install --no-audit --no-fund
+        run: cd ui && npm install --no-audit --no-fund
 
       - name: Install Playwright browser (Chromium)
-        working-directory: ui
-        run: npx playwright install --with-deps chromium
+        run: cd ui && npx playwright install --with-deps chromium
 
       - name: Run govtest Playwright smoke
-        working-directory: ui
         env:
-          GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
-          GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
-          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
-          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_OWNER_CLIENT_ID: ${{ secrets.GOV_OWNER_CLIENT_ID }}
-          GOV_OWNER_CLIENT_SECRET: ${{ secrets.GOV_OWNER_CLIENT_SECRET }}
-          GOV_OWNER_TOKEN: ${{ secrets.GOV_OWNER_TOKEN }}
+          CI: "true"
           GOV_RUN_VERSION: ${{ needs.govtest.outputs.run_version }}
-        run: npx playwright test e2e/govtest.spec.ts --project=chromium
+        run: cd ui && npx playwright test e2e/govtest.spec.ts --project=chromium --reporter=line
