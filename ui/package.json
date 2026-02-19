@@ -10,7 +10,7 @@
     "preview:e2e": "serve -s dist -l 5173",
     "postinstall": "playwright install",
     "e2e": "playwright test",
-    "e2e-gov": "playwright test e2e/govtest.spec.ts --project=chromium --reporter=line",
+    "e2e-gov": "node -e \"console.log('\\x1b[1;36mRunning E2E Governance test (Playwright)\\x1b[0m'); console.log('Usage: npm run e2e-gov -- [options]'); console.log('Supported options:'); console.log('  --ui         Open Playwright UI mode'); console.log('  --headed     Run with visible browser'); console.log('  --retries    Set retry count (example: --retries=2)'); console.log('  --debug      Run with Playwright debug mode'); console.log('  --video      Control video capture (example: --video=on)'); console.log('  --screnshot  Capture screenshots (example: --screenshot=only-on-failure)');\" && playwright test e2e/govtest.spec.ts --project=chromium --reporter=line",
     "lint": "eslint .",
     "test": "node --import ./register-loader.mjs ./test-runner.mjs",
     "test:run": "node --import ./register-loader.mjs ./test-runner.mjs"

@@ -38,6 +38,20 @@ function isTransientHttpStatus(status: number): boolean {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
+function parseRetryAfterSeconds(value: string | null): number | null {
+  if (!value) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    return numeric;
+  }
+  const at = Date.parse(value);
+  if (!Number.isNaN(at)) {
+    const seconds = Math.ceil((at - Date.now()) / 1000);
+    return seconds > 0 ? seconds : 0;
+  }
+  return null;
+}
+
 async function visibleFirst(page: Page, selectors: string[]): Promise<string | null> {
   for (const selector of selectors) {
     const loc = page.locator(selector).first();
@@ -135,8 +149,8 @@ export async function loginViaUiAndCaptureToken(page: Page, username: string, pa
 
 async function apiJson(method: "GET" | "POST" | "PUT", path: string, token: string, body?: unknown): Promise<any> {
   const apiBase = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
-  const maxAttempts = method === "GET" ? 3 : 1;
-  const backoffMs = [250, 750, 1500];
+  const maxAttempts = method === "GET" ? 5 : 1;
+  const baseBackoffMs = [250, 750, 1500, 2500, 4000];
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -149,10 +163,20 @@ async function apiJson(method: "GET" | "POST" | "PUT", path: string, token: stri
         },
         ...(typeof body === "undefined" ? {} : { body: JSON.stringify(body) }),
       });
-      const payload = await response.json();
+      const raw = await response.text();
+      let payload: any = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = raw || null;
+      }
       if (response.ok) return payload;
       if (attempt < maxAttempts && isTransientHttpStatus(response.status)) {
-        await delay(backoffMs[attempt - 1] ?? 1500);
+        const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+        const retryAfterMs = retryAfterSeconds !== null ? retryAfterSeconds * 1000 : 0;
+        const jitterMs = Math.floor(Math.random() * 150);
+        const waitMs = Math.max(baseBackoffMs[attempt - 1] ?? 4000, retryAfterMs) + jitterMs;
+        await delay(waitMs);
         continue;
       }
       throw new Error(`${method} ${path} failed (${response.status}): ${JSON.stringify(payload)}`);
@@ -161,9 +185,11 @@ async function apiJson(method: "GET" | "POST" | "PUT", path: string, token: stri
       const networkTransient =
         message.includes("fetch failed") ||
         message.includes("ECONNRESET") ||
-        message.includes("ETIMEDOUT");
+        message.includes("ETIMEDOUT") ||
+        message.includes("socket hang up");
       if (attempt < maxAttempts && networkTransient) {
-        await delay(backoffMs[attempt - 1] ?? 1500);
+        const jitterMs = Math.floor(Math.random() * 150);
+        await delay((baseBackoffMs[attempt - 1] ?? 4000) + jitterMs);
         continue;
       }
       lastError = err instanceof Error ? err : new Error(message);
