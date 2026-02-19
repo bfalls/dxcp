@@ -27,6 +27,8 @@ from auth0 import Auth0Error, decodeJwtClaims, getClientCredentialsToken
 
 
 VERSION_RE = re.compile(r"^0\.(\d+)\.(\d+)$")
+SEMVER_IN_TEXT_RE = re.compile(r"(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)")
+TARGET_MINOR = 1
 DOTENV_PATH = ".env.govtest"
 SERVICE_NAME = "demo-service"
 
@@ -73,7 +75,7 @@ class RunContext:
     dry_run: bool
     version_endpoint: str
     source_count: int
-    max_minor: int
+    max_patch: int
     gov_run_version: str
     token_sources: Mapping[str, str]
 
@@ -121,25 +123,60 @@ def _redact_token(token: str) -> str:
 
 
 def _compute_run_version(versions: Sequence[str]) -> RunContext:
-    parsed_minors: List[int] = []
-    for value in versions:
-        match = VERSION_RE.match(str(value).strip())
+    parsed_patches: List[int] = []
+    normalized = _normalize_version_values(versions)
+    for value in normalized:
+        match = VERSION_RE.match(value)
         if not match:
             continue
-        parsed_minors.append(int(match.group(1)))
+        minor = int(match.group(1))
+        patch = int(match.group(2))
+        if minor == TARGET_MINOR:
+            parsed_patches.append(patch)
 
-    max_minor = max(parsed_minors) if parsed_minors else 0
-    gov_run_version = f"0.{max_minor + 1}.1"
+    max_patch = max(parsed_patches) if parsed_patches else 0
+    gov_run_version = f"0.{TARGET_MINOR}.{max_patch + 1}"
     api_base = os.getenv("GOV_DXCP_API_BASE", "").rstrip("/")
     endpoint = f"{api_base}/v1/services/{SERVICE_NAME}/versions"
     return RunContext(
         dry_run=False,
         version_endpoint=endpoint,
         source_count=len(versions),
-        max_minor=max_minor,
+        max_patch=max_patch,
         gov_run_version=gov_run_version,
         token_sources={},
     )
+
+
+def _extract_version_candidate(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if VERSION_RE.match(text):
+            return text
+        found = SEMVER_IN_TEXT_RE.search(text)
+        return found.group(1) if found else None
+
+    if isinstance(value, dict):
+        for key in ("version", "name", "artifactRef", "artifact_ref", "key"):
+            candidate = value.get(key)
+            if isinstance(candidate, str):
+                normalized = _extract_version_candidate(candidate)
+                if normalized:
+                    return normalized
+        return None
+
+    return _extract_version_candidate(str(value))
+
+
+def _normalize_version_values(values: Sequence[Any]) -> List[str]:
+    normalized: List[str] = []
+    for raw in values:
+        candidate = _extract_version_candidate(raw)
+        if candidate:
+            normalized.append(candidate)
+    return normalized
 
 
 def _fetch_versions(endpoint: str, token: str) -> List[str]:
@@ -248,7 +285,8 @@ def _print_plan(context: RunContext) -> None:
     print(f"  service: {SERVICE_NAME}")
     print(f"  versions_endpoint: {context.version_endpoint}")
     print(f"  discovered_versions: {context.source_count}")
-    print(f"  max_minor: {context.max_minor}")
+    print(f"  target_minor: {TARGET_MINOR}")
+    print(f"  max_patch: {context.max_patch}")
     print(f"  GOV_RUN_VERSION: {context.gov_run_version}")
     print("  token_usage:")
     print(f"    - ui_read: {context.token_sources.get('ui_read', 'n/a')}")
@@ -320,7 +358,7 @@ def main() -> int:
         dry_run=dry_run,
         version_endpoint=context.version_endpoint,
         source_count=context.source_count,
-        max_minor=context.max_minor,
+        max_patch=context.max_patch,
         gov_run_version=context.gov_run_version,
         token_sources=token_sources,
     )

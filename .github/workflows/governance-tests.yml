@@ -6,6 +6,10 @@ on:
 jobs:
   govtest:
     runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      missing_keys: ${{ steps.mode.outputs.missing_keys }}
+      run_version: ${{ steps.extract.outputs.run_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -13,7 +17,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -65,6 +69,7 @@ jobs:
           fi
 
       - name: Run governance harness
+        id: run_harness
         env:
           GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
           GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
@@ -79,13 +84,61 @@ jobs:
           GOV_OBSERVER_CLIENT_SECRET: ${{ secrets.GOV_OBSERVER_CLIENT_SECRET }}
           GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
-        run: npm run govtest -- ${{ steps.mode.outputs.args }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run govtest -- ${{ steps.mode.outputs.args }} | tee govtest-output.log
+
+      - name: Extract run version
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_version="$(grep -E '^runVersion=' govtest-output.log | tail -n1 | cut -d'=' -f2- || true)"
+          echo "run_version=${run_version}" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         run: |
           {
             echo "Governance harness mode: ${{ steps.mode.outputs.mode }}"
+            if [[ -n "${{ steps.extract.outputs.run_version }}" ]]; then
+              echo "GOV_RUN_VERSION: ${{ steps.extract.outputs.run_version }}"
+            fi
             if [[ -n "${{ steps.mode.outputs.missing_keys }}" ]]; then
               echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  govtest_e2e:
+    runs-on: ubuntu-latest
+    needs: govtest
+    if: ${{ needs.govtest.outputs.mode == 'FULL' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright browser (Chromium)
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Run govtest Playwright smoke
+        working-directory: ui
+        env:
+          GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
+          GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
+          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+          GOV_OWNER_CLIENT_ID: ${{ secrets.GOV_OWNER_CLIENT_ID }}
+          GOV_OWNER_CLIENT_SECRET: ${{ secrets.GOV_OWNER_CLIENT_SECRET }}
+          GOV_OWNER_TOKEN: ${{ secrets.GOV_OWNER_TOKEN }}
+          GOV_RUN_VERSION: ${{ needs.govtest.outputs.run_version }}
+        run: npx playwright test e2e/govtest.spec.ts --project=chromium

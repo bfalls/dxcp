@@ -1,6 +1,30 @@
 /// <reference types="node" />
 
 import { defineConfig, devices } from '@playwright/test';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+function loadGovtestEnvForConfig() {
+  const candidates = [
+    join(process.cwd(), '.env.govtest'),
+    join(process.cwd(), '..', '.env.govtest'),
+  ];
+  const envPath = candidates.find((p) => existsSync(p));
+  if (!envPath) return;
+
+  const text = readFileSync(envPath, 'utf8');
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const idx = line.indexOf('=');
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!key || process.env[key]) continue;
+    process.env[key] = value;
+  }
+}
+
+loadGovtestEnvForConfig();
 
 /**
  * Read environment variables from file.
@@ -28,7 +52,7 @@ export default defineConfig({
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.GOV_DXCP_UI_BASE || 'http://localhost:5173',
     headless: true,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
@@ -39,7 +63,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        screenshot: "only-on-failure",
+      },
     },
 
     {
@@ -74,11 +101,12 @@ export default defineConfig({
   ],
 
   /* Run your local dev server before starting the tests */
-  webServer: {
-    command: "npm run build && npm run preview:e2e",
-    url: 'http://localhost:5173',
-    reuseExistingServer: false,
-    // reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: process.env.GOV_DXCP_UI_BASE
+    ? undefined
+    : {
+        command: "npm run build && npm run preview:e2e",
+        url: "http://localhost:5173",
+        reuseExistingServer: false,
+        timeout: 120_000,
+      },
 });

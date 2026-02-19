@@ -2,8 +2,8 @@
   "name": "dxcp",
   "private": true,
   "scripts": {
-    "govtest:dry": "python scripts/govtest/run.py --dry-run",
-    "govtest": "python scripts/govtest/run.py",
+    "govtest:dry": "node --experimental-strip-types scripts/govtest/run.ts --dry-run",
+    "govtest": "node --experimental-strip-types scripts/govtest/run.ts",
     "api-dev": "bash -lc 'cd dxcp-api && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000'",
     "api-test": "node scripts/api_test.js",
     "api-test-verbose": "node scripts/api_test.js --verbose",
