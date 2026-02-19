@@ -28,6 +28,7 @@ cdk/cdk.context.json
 *.pem
 *.pub
 ui/.env.local
+.env.govtest
 dxcp-api/.env
 dxcp-api/data/*.db
 integrations/backstage/packages/dxcp-plugin/dist/
