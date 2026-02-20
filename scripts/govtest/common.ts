@@ -286,6 +286,7 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
   const seedArtifactRef = seedVersion ? await fetchSeedArtifactRef(tokens.owner, service, seedVersion) : undefined;
 
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const guardrailsMode = optionalEnv("GOV_GUARDRAILS_MODE")?.toLowerCase() === "active" ? "active" : "safe";
 
   return {
     runId,
@@ -318,6 +319,10 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
     identity: {},
     deployment: {},
     rollback: {},
+    guardrails: {
+      mode: guardrailsMode,
+      checks: [],
+    },
   };
 }
 

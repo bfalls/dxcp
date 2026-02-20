@@ -63,4 +63,12 @@ export type RunContext = {
     finalState?: string;
     finalOutcome?: string | null;
   };
+  guardrails: {
+    mode: "safe" | "active";
+    checks: Array<{
+      id: string;
+      status: "PASSED" | "FAILED" | "SKIPPED";
+      detail: string;
+    }>;
+  };
 };

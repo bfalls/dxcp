@@ -23,6 +23,7 @@ import { stepD_conflictDifferentGitShaSameIdempotencyKey } from "./steps/stepD_c
 import { stepE_deployEnforcementUnregisteredVersion } from "./steps/stepE_deploy_enforcement.ts";
 import { stepF_deployHappyPath } from "./steps/stepF_deploy_happy.ts";
 import { stepG_rollbackAfterDeploy } from "./steps/rollback.ts";
+import { stepH_guardrailSpotChecks } from "./steps/guardrails.ts";
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
 const ANSI = {
@@ -152,6 +153,11 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
     rollbackDeploymentId: context.rollback.deploymentId ?? null,
     rollbackFinalState: context.rollback.finalState ?? null,
     rollbackFinalOutcome: context.rollback.finalOutcome ?? null,
+    guardrailsMode: context.guardrails.mode,
+    guardrailChecks: context.guardrails.checks,
+    guardrailPassed: context.guardrails.checks.filter((c) => c.status === "PASSED").length,
+    guardrailFailed: context.guardrails.checks.filter((c) => c.status === "FAILED").length,
+    guardrailSkipped: context.guardrails.checks.filter((c) => c.status === "SKIPPED").length,
     dryRun,
     writtenAt: new Date().toISOString(),
   };
@@ -223,6 +229,12 @@ function printSummary(context: RunContext): void {
     context.rollback.finalOutcome ?? "n/a",
   );
 
+  printSummaryField("information", "guardrailsMode", context.guardrails.mode);
+  for (const check of context.guardrails.checks) {
+    const kind = check.status === "PASSED" ? "success" : check.status === "FAILED" ? "failure" : "information";
+    printEvaluatedLine(kind, `guardrail ${check.status} ${check.id}`);
+  }
+
   const timingResult = evaluateTimingsResult(context);
   printEvaluatedLine(timingResult.kind, timingResult.message);
 }
@@ -281,8 +293,11 @@ async function main(): Promise<number> {
   await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner);
   await stepF_deployHappyPath(context, tokens.owner);
   await stepG_rollbackAfterDeploy(context, tokens.owner);
+  await stepH_guardrailSpotChecks(context, tokens.owner);
 
-  assert(Object.keys(context.timings.stepStart).length === 7, "Expected 7 steps to run");
+  const failedGuardrails = context.guardrails.checks.filter((c) => c.status === "FAILED");
+  assert(failedGuardrails.length === 0, `Guardrail checks failed: ${failedGuardrails.map((c) => c.id).join(", ")}`);
+  assert(Object.keys(context.timings.stepStart).length === 8, "Expected 8 steps to run");
   printSummary(context);
   writeRunArtifact(context, false);
   return 0;

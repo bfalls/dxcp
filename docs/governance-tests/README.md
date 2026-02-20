@@ -83,6 +83,14 @@ Optional run overrides:
 - `GOV_RECIPE_ID` (default: `default`)
 - `GOV_DEPLOY_TIMEOUT_SECONDS` (default: `300`)
 - `GOV_DEPLOY_POLL_SECONDS` (default: `5`)
+- `GOV_GUARDRAILS_MODE` (default: `safe`, options: `safe` or `active`)
+
+Guardrails mode behavior:
+
+- `safe` (default): non-destructive quota/concurrency spot checks only; no limit-pushing submissions.
+- `active`: bounded guardrail probes are enabled:
+  - quota: attempts N+1 validation only when validation itself decrements quota and remaining budget is small.
+  - concurrency: starts one deploy and probes a second deploy for `CONCURRENCY_LIMIT_REACHED`, then waits for terminal cleanup.
 
 ## Run Locally
 
@@ -121,6 +129,12 @@ The full run executes the following invariant checks in order:
    - Validate rollback using rollback-specific validation endpoint if available; otherwise validate the target version with `POST /v1/deployments/validate`.
    - Submit rollback using `POST /v1/deployments/{deploymentId}/rollback` when supported, otherwise submit a redeploy intent for the discovered target version.
    - Poll rollback deployment to terminal state and require terminal success.
+8. Guardrail spot checks (12 compact checks; sequential execution):
+   - Quota safe checks: policy endpoint availability, quota policy shape, validate quota shape.
+   - Quota active checks: active mode gate, validate quota-enforcement detection, bounded N+1 verification.
+   - Concurrency safe checks: policy endpoint availability, concurrency policy shape, validate concurrency shape.
+   - Concurrency active checks: active mode gate, second-deploy concurrency block probe, cleanup confirmation.
+   - Each check reports `PASSED`, `FAILED`, or `SKIPPED` in the run summary.
 
 Rollback is intentionally skipped (not failed) when no prior successful deployment target exists for the same service/environment with a version different from `GOV_RUN_VERSION`.
 
