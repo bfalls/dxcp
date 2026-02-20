@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from auth_utils import auth_header, auth_header_for_subject, configure_auth_env, mock_jwks
+from auth_utils import auth_header, auth_header_for_subject, build_token, configure_auth_env, mock_jwks
 
 
 from test_helpers import seed_defaults
@@ -168,11 +168,26 @@ def _build_register_existing_payload() -> dict:
     }
 
 
+def _auth_header_for_email(roles: list[str], email: str, subject: str = "user-1") -> dict:
+    return {"Authorization": f"Bearer {build_token(roles, subject=subject, email=email)}"}
+
+
 async def test_observer_denied_deploy(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-1", **auth_header(["dxcp-observers"])},
+            json=_deployment_payload(),
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+async def test_observer_denied_deploy_validate(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-observers"]),
             json=_deployment_payload(),
         )
     assert response.status_code == 403
@@ -187,6 +202,16 @@ async def test_observer_denied_rollback(tmp_path: Path, monkeypatch):
             "/v1/deployments/dep-b/rollback",
             headers={"Idempotency-Key": "rollback-1", **auth_header(["dxcp-observers"])},
             json={},
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+async def test_observer_denied_admin_endpoint(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.get(
+            "/v1/admin/system/ci-publishers",
+            headers=auth_header(["dxcp-observers"]),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
@@ -257,6 +282,101 @@ async def test_platform_admin_allowed_rollback(tmp_path: Path, monkeypatch):
             json={},
         )
     assert response.status_code == 201
+
+
+async def test_non_member_owner_denied_get_deployment_status(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        default = main.storage.get_delivery_group("default")
+        assert default is not None
+        default["owner"] = "owner@example.com"
+        main.storage.update_delivery_group(default)
+
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+
+        non_member = await client.get(
+            "/v1/deployments/dep-a",
+            headers=_auth_header_for_email(["dxcp-delivery-owners"], "nonmember@example.com"),
+        )
+        member = await client.get(
+            "/v1/deployments/dep-a",
+            headers=_auth_header_for_email(["dxcp-delivery-owners"], "owner@example.com"),
+        )
+        admin = await client.get("/v1/deployments/dep-a", headers=auth_header(["dxcp-platform-admins"]))
+
+    assert non_member.status_code == 403
+    assert non_member.json()["code"] == "DELIVERY_GROUP_SCOPE_REQUIRED"
+    assert member.status_code == 200
+    assert admin.status_code == 200
+
+
+async def test_owner_in_scope_allowed_get_deployment_status(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        default = main.storage.get_delivery_group("default")
+        assert default is not None
+        default["owner"] = "owner@example.com"
+        main.storage.update_delivery_group(default)
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+
+        owner = await client.get(
+            "/v1/deployments/dep-a",
+            headers=_auth_header_for_email(["dxcp-delivery-owners"], "owner@example.com"),
+        )
+
+    assert owner.status_code == 200
+
+
+async def test_observer_allowed_get_deployment_status(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        default = main.storage.get_delivery_group("default")
+        assert default is not None
+        default["owner"] = "owner@example.com"
+        main.storage.update_delivery_group(default)
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+
+        observer = await client.get("/v1/deployments/dep-a", headers=auth_header(["dxcp-observers"]))
+
+    assert observer.status_code == 200
+
+
+async def test_observer_allowed_read_only_endpoints(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        default = main.storage.get_delivery_group("default")
+        assert default is not None
+        default["owner"] = "owner@example.com"
+        main.storage.update_delivery_group(default)
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+
+        deployments = await client.get("/v1/deployments", headers=auth_header(["dxcp-observers"]))
+        delivery_status = await client.get(
+            "/v1/services/demo-service/delivery-status?environment=sandbox",
+            headers=auth_header(["dxcp-observers"]),
+        )
+
+    assert deployments.status_code == 200
+    assert delivery_status.status_code == 200
+
+
+async def test_non_member_owner_denied_get_deployment_details_endpoints(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        default = main.storage.get_delivery_group("default")
+        assert default is not None
+        default["owner"] = "owner@example.com"
+        main.storage.update_delivery_group(default)
+        _insert_deployment(main.storage, "dep-a", "1.0.0", "2024-01-01T00:00:00Z")
+
+        failures = await client.get(
+            "/v1/deployments/dep-a/failures",
+            headers=_auth_header_for_email(["dxcp-delivery-owners"], "nonmember@example.com"),
+        )
+        timeline = await client.get(
+            "/v1/deployments/dep-a/timeline",
+            headers=_auth_header_for_email(["dxcp-delivery-owners"], "nonmember@example.com"),
+        )
+
+    assert failures.status_code == 403
+    assert failures.json()["code"] == "DELIVERY_GROUP_SCOPE_REQUIRED"
+    assert timeline.status_code == 403
+    assert timeline.json()["code"] == "DELIVERY_GROUP_SCOPE_REQUIRED"
 
 
 async def test_platform_admin_denied_build_register_when_not_ci(tmp_path: Path, monkeypatch):

@@ -779,6 +779,29 @@ def _delivery_groups_for_actor(actor: Actor) -> list[dict]:
     return [group for group in storage.list_delivery_groups() if actor_email in _owner_emails(group.get("owner"))]
 
 
+def _actor_can_read_deployment(actor: Actor, deployment: dict) -> bool:
+    if actor.role == Role.PLATFORM_ADMIN:
+        return True
+    if actor.role == Role.OBSERVER:
+        return True
+    if actor.role != Role.DELIVERY_OWNER:
+        return False
+    actor_email = (actor.email or "").strip().lower()
+    if not actor_email:
+        return False
+    delivery_group_id = deployment.get("deliveryGroupId")
+    group: Optional[dict] = None
+    if isinstance(delivery_group_id, str) and delivery_group_id:
+        group = storage.get_delivery_group(delivery_group_id)
+    if not group:
+        service_name = deployment.get("service")
+        if isinstance(service_name, str) and service_name:
+            group = storage.get_delivery_group_for_service(service_name)
+    if not group:
+        return False
+    return actor_email in _owner_emails(group.get("owner"))
+
+
 def _owner_emails(owner_value: Any) -> list[str]:
     values: list[str] = []
     if isinstance(owner_value, str):
@@ -2705,6 +2728,12 @@ def get_deployment(
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
+    if not _actor_can_read_deployment(actor, deployment):
+        return error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "Deployment not in actor delivery group scope",
+        )
     deployment = refresh_from_spinnaker(deployment)
     deployments = storage.list_deployments(deployment.get("service"), None, deployment.get("environment"))
     latest_success_by_scope = _latest_success_by_scope(deployments)
@@ -2722,6 +2751,12 @@ def get_deployment_failures(
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
+    if not _actor_can_read_deployment(actor, deployment):
+        return error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "Deployment not in actor delivery group scope",
+        )
     deployment = refresh_from_spinnaker(deployment)
     return deployment.get("failures", [])
 
@@ -2737,6 +2772,12 @@ def get_deployment_timeline(
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
         return error_response(404, "NOT_FOUND", "Deployment not found")
+    if not _actor_can_read_deployment(actor, deployment):
+        return error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "Deployment not in actor delivery group scope",
+        )
     deployment = refresh_from_spinnaker(deployment)
     return derive_timeline(deployment)
 

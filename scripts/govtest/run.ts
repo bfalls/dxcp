@@ -9,13 +9,14 @@ import {
   decodeJwtClaims,
   ensureCiToken,
   loadLocalDotenv,
+  optionalEnv,
   printIdentity,
   printRunPlan,
   requiredEnv,
   whoAmI,
 } from "./common.ts";
 import type { RunContext } from "./types.ts";
-import { getUserAccessTokenViaPlaywright } from "./ui_auth.ts";
+import { getUserAccessTokenViaCustomCredentials, getUserAccessTokenViaPlaywright } from "./ui_auth.ts";
 import { stepA_proveCiGateNegative } from "./steps/stepA_gate_negative.ts";
 import { stepB_configureCiPublishersAllowlist } from "./steps/stepB_configure_ci_publishers.ts";
 import { stepC_registerBuildHappyPath } from "./steps/stepC_register_build.ts";
@@ -269,6 +270,23 @@ async function main(): Promise<number> {
     observer: await getUserAccessTokenViaPlaywright("observer"),
   };
 
+  let nonMemberOwnerToken: string | undefined;
+  let nonMemberOwnerClaims: ReturnType<typeof decodeJwtClaims> | undefined;
+  const nonMemberOwnerUsername = optionalEnv("GOV_NON_MEMBER_OWNER_USERNAME");
+  const nonMemberOwnerPassword = optionalEnv("GOV_NON_MEMBER_OWNER_PASSWORD");
+  if (nonMemberOwnerUsername && nonMemberOwnerPassword) {
+    nonMemberOwnerToken = await getUserAccessTokenViaCustomCredentials(
+      "non-member-owner",
+      nonMemberOwnerUsername,
+      nonMemberOwnerPassword,
+    );
+    nonMemberOwnerClaims = decodeJwtClaims(nonMemberOwnerToken);
+  } else {
+    console.log(
+      "[INFO] Non-member owner deployment status probe skipped: GOV_NON_MEMBER_OWNER_USERNAME/PASSWORD not configured.",
+    );
+  }
+
   const claimsByRole = {
     admin: decodeJwtClaims(tokens.admin),
     owner: decodeJwtClaims(tokens.owner),
@@ -280,6 +298,11 @@ async function main(): Promise<number> {
     const claims = claimsByRole[role];
     const me = await whoAmI(tokens[role]);
     printIdentity(role, tokens[role], claims, me);
+  }
+
+  if (nonMemberOwnerToken && nonMemberOwnerClaims) {
+    const me = await whoAmI(nonMemberOwnerToken);
+    printIdentity("non-member-owner", nonMemberOwnerToken, nonMemberOwnerClaims, me);
   }
 
   const context = await buildRunContext(tokens);
@@ -300,7 +323,7 @@ async function main(): Promise<number> {
   await stepC_registerBuildHappyPath(context, tokens.ci);
   await stepD_conflictDifferentGitShaSameIdempotencyKey(context, tokens.ci);
   await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
-  await stepF_deployHappyPath(context, tokens.owner);
+  await stepF_deployHappyPath(context, tokens.owner, tokens.observer, nonMemberOwnerToken);
   await stepG_rollbackAfterDeploy(context, tokens.owner);
   await stepH_guardrailSpotChecks(context, tokens.owner);
 

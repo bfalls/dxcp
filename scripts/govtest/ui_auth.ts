@@ -43,24 +43,47 @@ async function importPlaywright(): Promise<{ chromium: ChromiumApi }> {
 
 export async function getUserAccessTokenViaPlaywright(role: RoleName): Promise<string> {
   loadGovtestEnv();
-  const baseURL = requiredEnv("GOV_DXCP_UI_BASE");
+  requiredEnv("GOV_DXCP_UI_BASE");
   requiredEnv("GOV_AUTH0_DOMAIN");
   requiredEnv("GOV_DXCP_UI_CLIENT_ID");
 
   const { chromium } = await importPlaywright();
   const creds = getRoleCredentials(role);
+  return getUserAccessTokenViaCredentials(role, creds.username, creds.password, chromium);
+}
+
+export async function getUserAccessTokenViaCustomCredentials(
+  label: string,
+  username: string,
+  password: string,
+): Promise<string> {
+  loadGovtestEnv();
+  requiredEnv("GOV_DXCP_UI_BASE");
+  requiredEnv("GOV_AUTH0_DOMAIN");
+  requiredEnv("GOV_DXCP_UI_CLIENT_ID");
+  const { chromium } = await importPlaywright();
+  return getUserAccessTokenViaCredentials(label, username, password, chromium);
+}
+
+async function getUserAccessTokenViaCredentials(
+  label: string,
+  username: string,
+  password: string,
+  chromium: ChromiumApi,
+): Promise<string> {
+  const baseURL = requiredEnv("GOV_DXCP_UI_BASE");
   const browser = await launchBrowser(chromium);
   const context = await browser.newContext({ baseURL });
   const page = (await context.newPage()) as Page;
 
   try {
-    console.log(`[INFO] Acquiring ${role} user token via headless SPA login`);
-    await ensureLoggedInViaUi(page, creds.username, creds.password);
+    console.log(`[INFO] Acquiring ${label} user token via headless SPA login`);
+    await ensureLoggedInViaUi(page, username, password);
     const token = await captureAccessTokenFromSpaCache(page);
     if (!token) {
-      throw new Error(`Captured empty token for role=${role}`);
+      throw new Error(`Captured empty token for role=${label}`);
     }
-    console.log(`[INFO] Acquired ${role} user token`);
+    console.log(`[INFO] Acquired ${label} user token`);
     return token;
   } finally {
     await context.close();
