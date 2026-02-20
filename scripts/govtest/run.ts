@@ -299,7 +299,7 @@ async function main(): Promise<number> {
   await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
   await stepC_registerBuildHappyPath(context, tokens.ci);
   await stepD_conflictDifferentGitShaSameIdempotencyKey(context, tokens.ci);
-  await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner);
+  await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
   await stepF_deployHappyPath(context, tokens.owner);
   await stepG_rollbackAfterDeploy(context, tokens.owner);
   await stepH_guardrailSpotChecks(context, tokens.owner);

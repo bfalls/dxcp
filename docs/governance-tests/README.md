@@ -130,7 +130,9 @@ The full run executes the following invariant checks in order:
 3. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using admin user token, with matcher fields populated from `GET /v1/whoami` using CI M2M token (`iss`, `aud`, `azp`, `sub`).
 4. Build registration happy path: `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
 5. Build conflict: same idempotency key with different `git_sha` returns `409 BUILD_REGISTRATION_CONFLICT`.
-6. Deploy-side enforcement for unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.
+6. Deploy enforcement invariants:
+   - Unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.
+   - Decision 7 ordering: a compatibility-only mismatch returns `400 RECIPE_INCOMPATIBLE`, and the same mismatching intent returns `403 RECIPE_NOT_ALLOWED` once DeliveryGroup policy denies the recipe (policy check before compatibility check).
 7. Deploy happy path for registered version: validate succeeds, deploy is accepted, and deployment status is polled until terminal state or timeout.
 8. Rollback governance check after successful deploy:
    - Discover rollback target from deployment history (`GET /v1/deployments`) for the same service/environment by selecting the most recent `SUCCEEDED` deployment whose `version != GOV_RUN_VERSION`.
