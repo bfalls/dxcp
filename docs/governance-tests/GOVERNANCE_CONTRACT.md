@@ -235,7 +235,28 @@ These are correctness tests, not load tests.
 
 ---------------------------------------------------------------------
 
-10. Change Control
+10. Conformance Profiles
+
+The harness supports two conformance profiles:
+
+- `strict`
+- `diagnostic`
+
+`strict` is the contract conformance mode.
+Contract invariants MUST NOT be skipped.
+If a required prerequisite for a contract invariant is missing,
+the run must fail with a clear message.
+
+`diagnostic` is a best-effort operational mode.
+Diagnostic checks may be skipped for environment limitations.
+Contract checks still run, but prerequisite-driven skips are tolerated.
+
+This profile model removes ambiguity between local health probing
+and contract conformance verification.
+
+---------------------------------------------------------------------
+
+11. Change Control
 
 If implementation and tests disagree:
 

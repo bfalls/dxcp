@@ -16,9 +16,13 @@ export type WhoAmI = {
   roles?: string[];
 };
 
+export type ConformanceProfile = "strict" | "diagnostic";
+export type GuardrailCheckClassification = "CONTRACT" | "DIAGNOSTIC";
+
 export type RunContext = {
   runId: string;
   startedAtIso: string;
+  conformanceProfile: ConformanceProfile;
   service: string;
   environment: string;
   recipeId: string;
@@ -68,6 +72,7 @@ export type RunContext = {
     checks: Array<{
       id: string;
       status: "PASSED" | "FAILED" | "SKIPPED";
+      classification: GuardrailCheckClassification;
       detail: string;
     }>;
   };

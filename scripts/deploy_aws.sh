@@ -72,6 +72,19 @@ copy_dir_contents() {
   fi
 }
 
+trim() {
+  echo "$1" | xargs
+}
+
+stack_output() {
+  local stack_name="$1"
+  local output_key="$2"
+  aws cloudformation describe-stacks \
+    --stack-name "$stack_name" \
+    --query "Stacks[0].Outputs[?OutputKey=='${output_key}'].OutputValue | [0]" \
+    --output text
+}
+
 ensure_ssm_auth_config() {
   local issuer_key="${DXCP_CONFIG_PREFIX}/oidc/issuer"
   local audience_key="${DXCP_CONFIG_PREFIX}/oidc/audience"
@@ -268,49 +281,47 @@ set +e
 npx cdk acknowledge 34892 >/dev/null 2>&1
 npx cdk acknowledge 32775 >/dev/null 2>&1
 set -e
-CDK_DISABLE_NOTICES=1 npx cdk deploy --all --require-approval never --outputs-file cdk-outputs.json
+set +e
+CDK_DEPLOY_OUTPUT="$(CDK_DISABLE_NOTICES=1 npx cdk deploy --all --require-approval never 2>&1)"
+CDK_DEPLOY_STATUS=$?
+set -e
+printf "%s\n" "$CDK_DEPLOY_OUTPUT"
+if [[ "$CDK_DEPLOY_STATUS" -ne 0 ]]; then
+  if grep -Fq "Cannot read properties of undefined (reading 'endsWith')" <<<"$CDK_DEPLOY_OUTPUT"; then
+    echo "WARNING: CDK CLI reported a post-deploy endsWith crash. Verifying stack outputs directly via CloudFormation..."
+  else
+    echo "CDK deploy failed." >&2
+    exit "$CDK_DEPLOY_STATUS"
+  fi
+fi
 set +e
 npx cdk acknowledge 34892 >/dev/null 2>&1
 npx cdk acknowledge 32775 >/dev/null 2>&1
 set -e
-OUTPUTS_JSON=$(cat cdk-outputs.json)
-export OUTPUTS_JSON
 popd >/dev/null
 
-API_BASE=$(python - <<'PY'
-import json, os
-outputs = json.loads(os.environ['OUTPUTS_JSON'])
-print(outputs['DxcpApiStack']['ApiBaseUrl'])
-PY
-)
+API_BASE="$(trim "$(stack_output "DxcpApiStack" "ApiBaseUrl")")"
+UI_BUCKET="$(trim "$(stack_output "DxcpUiStack" "UiBucketName")")"
+UI_DIST_ID="$(trim "$(stack_output "DxcpUiStack" "UiDistributionId")")"
+UI_URL="$(trim "$(stack_output "DxcpUiStack" "UiUrl")")"
+DDB_TABLE="$(trim "$(stack_output "DxcpDataStack" "DxcpTableName")")"
 
-UI_BUCKET=$(python - <<'PY'
-import json, os
-outputs = json.loads(os.environ['OUTPUTS_JSON'])
-print(outputs['DxcpUiStack']['UiBucketName'])
-PY
-)
-
-UI_DIST_ID=$(python - <<'PY'
-import json, os
-outputs = json.loads(os.environ['OUTPUTS_JSON'])
-print(outputs['DxcpUiStack']['UiDistributionId'])
-PY
-)
-
-UI_URL=$(python - <<'PY'
-import json, os
-outputs = json.loads(os.environ['OUTPUTS_JSON'])
-print(outputs['DxcpUiStack']['UiUrl'])
-PY
-)
-
-DDB_TABLE=$(python - <<'PY'
-import json, os
-outputs = json.loads(os.environ['OUTPUTS_JSON'])
-print(outputs['DxcpDataStack']['DxcpTableName'])
-PY
-)
+if [[ -z "$API_BASE" || "$API_BASE" == "None" ]]; then
+  echo "Could not resolve DxcpApiStack.ApiBaseUrl after deploy." >&2
+  exit 1
+fi
+if [[ -z "$UI_BUCKET" || "$UI_BUCKET" == "None" ]]; then
+  echo "Could not resolve DxcpUiStack.UiBucketName after deploy." >&2
+  exit 1
+fi
+if [[ -z "$UI_DIST_ID" || "$UI_DIST_ID" == "None" ]]; then
+  echo "Could not resolve DxcpUiStack.UiDistributionId after deploy." >&2
+  exit 1
+fi
+if [[ -z "$DDB_TABLE" || "$DDB_TABLE" == "None" ]]; then
+  echo "Could not resolve DxcpDataStack.DxcpTableName after deploy." >&2
+  exit 1
+fi
 
 echo "Building UI..."
 pushd "$ROOT_DIR/ui" >/dev/null

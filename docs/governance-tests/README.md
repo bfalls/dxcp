@@ -50,6 +50,11 @@ Full mode:
 
     npm run govtest
 
+Conformance profile:
+
+- `GOV_CONFORMANCE_PROFILE=diagnostic` (default for local runs)
+- `GOV_CONFORMANCE_PROFILE=strict` (default in GitHub Actions / CI)
+
 See SETUP_AND_OPERATIONS.md for configuration details.
 
 ---------------------------------------------------------------------

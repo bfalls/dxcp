@@ -5,10 +5,12 @@ import {
   assertStatus,
   buildDeploymentIntent,
   decodeJson,
+  isStrictConformance,
   markStepEnd,
   markStepStart,
   optionalEnv,
 } from "../common.ts";
+import type { GuardrailCheckClassification } from "../types.ts";
 
 type CheckStatus = "PASSED" | "FAILED" | "SKIPPED";
 
@@ -25,8 +27,14 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function record(context: RunContext, id: string, status: CheckStatus, detail: string): void {
-  context.guardrails.checks.push({ id, status, detail });
+function record(
+  context: RunContext,
+  id: string,
+  status: CheckStatus,
+  detail: string,
+  classification: GuardrailCheckClassification = "CONTRACT",
+): void {
+  context.guardrails.checks.push({ id, status, classification, detail });
 }
 
 async function policySummary(context: RunContext, ownerToken: string): Promise<{ supported: boolean; payload?: any }> {
@@ -104,6 +112,27 @@ async function waitForActiveOrTerminal(ownerToken: string, deploymentId: string)
 export async function checkQuotaSafe(context: RunContext, ownerToken: string): Promise<void> {
   const summary = await policySummary(context, ownerToken);
   if (!summary.supported) {
+    if (isStrictConformance(context)) {
+      record(
+        context,
+        "quota.safe.policy_summary_available",
+        "FAILED",
+        "POST /v1/policy/summary is required for contract checks in strict conformance mode",
+      );
+      record(
+        context,
+        "quota.safe.policy_quota_shape",
+        "FAILED",
+        "Quota shape check failed because policy summary endpoint is unavailable in strict conformance mode",
+      );
+      record(
+        context,
+        "quota.safe.validate_quota_shape",
+        "FAILED",
+        "Validate quota shape check failed because policy summary endpoint is unavailable in strict conformance mode",
+      );
+      return;
+    }
     record(context, "quota.safe.policy_summary_available", "SKIPPED", "POST /v1/policy/summary is not supported");
     record(context, "quota.safe.policy_quota_shape", "SKIPPED", "Quota shape check skipped without policy endpoint");
     record(context, "quota.safe.validate_quota_shape", "SKIPPED", "Validate quota check skipped without policy endpoint");
@@ -161,24 +190,36 @@ export async function checkQuotaSafe(context: RunContext, ownerToken: string): P
 
 export async function checkQuotaActive(context: RunContext, ownerToken: string): Promise<void> {
   if (context.guardrails.mode !== "active") {
-    record(context, "quota.active.mode", "SKIPPED", "GOV_GUARDRAILS_MODE is not active");
-    record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Active quota probing disabled in safe mode");
-    record(context, "quota.active.n_plus_one", "SKIPPED", "Active quota probing disabled in safe mode");
+    record(context, "quota.active.mode", "SKIPPED", "GOV_GUARDRAILS_MODE is not active", "DIAGNOSTIC");
+    record(
+      context,
+      "quota.active.validate_enforces_quota",
+      "SKIPPED",
+      "Active quota probing disabled in safe mode",
+      "DIAGNOSTIC",
+    );
+    record(context, "quota.active.n_plus_one", "SKIPPED", "Active quota probing disabled in safe mode", "DIAGNOSTIC");
     return;
   }
-  record(context, "quota.active.mode", "PASSED", "GOV_GUARDRAILS_MODE=active");
+  record(context, "quota.active.mode", "PASSED", "GOV_GUARDRAILS_MODE=active", "DIAGNOSTIC");
 
   const first = await validateIntent(context, ownerToken, context.runVersion);
   const firstPayload = await decodeJson(first);
   if (first.status !== 200) {
     if (first.status === 409 && firstPayload?.code === "CONCURRENCY_LIMIT_REACHED") {
-      record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Initial validate blocked by active deployment concurrency");
-      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because concurrency is currently saturated");
+      record(
+        context,
+        "quota.active.validate_enforces_quota",
+        "SKIPPED",
+        "Initial validate blocked by active deployment concurrency",
+        "DIAGNOSTIC",
+      );
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because concurrency is currently saturated", "DIAGNOSTIC");
       return;
     }
     if (first.status === 429 && firstPayload?.code === "QUOTA_EXCEEDED") {
-      record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Initial validate blocked by exhausted deploy quota");
-      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota is already exhausted");
+      record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Initial validate blocked by exhausted deploy quota", "DIAGNOSTIC");
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota is already exhausted", "DIAGNOSTIC");
       return;
     }
     record(
@@ -186,8 +227,9 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
       "quota.active.validate_enforces_quota",
       "FAILED",
       `initial validate expected 200, got ${first.status}; body=${JSON.stringify(firstPayload)}`,
+      "DIAGNOSTIC",
     );
-    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because initial validate failed");
+    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because initial validate failed", "DIAGNOSTIC");
     return;
   }
   const firstRemaining = firstPayload?.policy?.deployments_remaining;
@@ -196,13 +238,25 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
   const secondPayload = await decodeJson(second);
   if (second.status !== 200) {
     if (second.status === 409 && secondPayload?.code === "CONCURRENCY_LIMIT_REACHED") {
-      record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Second validate blocked by active deployment concurrency");
-      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because concurrency is currently saturated");
+      record(
+        context,
+        "quota.active.validate_enforces_quota",
+        "SKIPPED",
+        "Second validate blocked by active deployment concurrency",
+        "DIAGNOSTIC",
+      );
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because concurrency is currently saturated", "DIAGNOSTIC");
       return;
     }
     if (second.status === 429 && secondPayload?.code === "QUOTA_EXCEEDED") {
-      record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Second validate blocked by exhausted deploy quota");
-      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota exhausted before probe");
+      record(
+        context,
+        "quota.active.validate_enforces_quota",
+        "SKIPPED",
+        "Second validate blocked by exhausted deploy quota",
+        "DIAGNOSTIC",
+      );
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota exhausted before probe", "DIAGNOSTIC");
       return;
     }
     record(
@@ -210,26 +264,27 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
       "quota.active.validate_enforces_quota",
       "FAILED",
       `second validate expected 200, got ${second.status}; body=${JSON.stringify(secondPayload)}`,
+      "DIAGNOSTIC",
     );
-    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because second validate failed");
+    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because second validate failed", "DIAGNOSTIC");
     return;
   }
   const secondRemaining = secondPayload?.policy?.deployments_remaining;
   if (typeof firstRemaining !== "number" || typeof secondRemaining !== "number") {
-    record(context, "quota.active.validate_enforces_quota", "FAILED", "Validate response missing deployments_remaining");
-    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because remaining quota is unavailable");
+    record(context, "quota.active.validate_enforces_quota", "FAILED", "Validate response missing deployments_remaining", "DIAGNOSTIC");
+    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because remaining quota is unavailable", "DIAGNOSTIC");
     return;
   }
 
   if (secondRemaining >= firstRemaining) {
-    record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Validate does not consume quota on this deployment API");
-    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because validate quota is not decrementing");
+    record(context, "quota.active.validate_enforces_quota", "SKIPPED", "Validate does not consume quota on this deployment API", "DIAGNOSTIC");
+    record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because validate quota is not decrementing", "DIAGNOSTIC");
     return;
   }
 
-  record(context, "quota.active.validate_enforces_quota", "PASSED", "Validate decremented deployments_remaining");
+  record(context, "quota.active.validate_enforces_quota", "PASSED", "Validate decremented deployments_remaining", "DIAGNOSTIC");
   if (secondRemaining > 3) {
-    record(context, "quota.active.n_plus_one", "SKIPPED", `Remaining quota is ${secondRemaining}; bounded run avoids exhausting it`);
+    record(context, "quota.active.n_plus_one", "SKIPPED", `Remaining quota is ${secondRemaining}; bounded run avoids exhausting it`, "DIAGNOSTIC");
     return;
   }
 
@@ -239,11 +294,11 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
     const response = await validateIntent(context, ownerToken, context.runVersion);
     const payload = await decodeJson(response);
     if (response.status === 429 && payload?.code === "QUOTA_EXCEEDED") {
-      record(context, "quota.active.n_plus_one", "PASSED", `Hit QUOTA_EXCEEDED after ${attempts + 1} additional validate calls`);
+      record(context, "quota.active.n_plus_one", "PASSED", `Hit QUOTA_EXCEEDED after ${attempts + 1} additional validate calls`, "DIAGNOSTIC");
       return;
     }
     if (response.status === 409 && payload?.code === "CONCURRENCY_LIMIT_REACHED") {
-      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 probe interrupted by concurrency saturation");
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 probe interrupted by concurrency saturation", "DIAGNOSTIC");
       return;
     }
     if (response.status !== 200) {
@@ -252,16 +307,38 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
         "quota.active.n_plus_one",
         "FAILED",
         `expected 200/429 QUOTA_EXCEEDED, got ${response.status}; body=${JSON.stringify(payload)}`,
+        "DIAGNOSTIC",
       );
       return;
     }
   }
-  record(context, "quota.active.n_plus_one", "FAILED", `Did not reach QUOTA_EXCEEDED within ${maxAttempts} additional validate calls`);
+  record(context, "quota.active.n_plus_one", "FAILED", `Did not reach QUOTA_EXCEEDED within ${maxAttempts} additional validate calls`, "DIAGNOSTIC");
 }
 
 export async function checkConcurrencySafe(context: RunContext, ownerToken: string): Promise<void> {
   const summary = await policySummary(context, ownerToken);
   if (!summary.supported) {
+    if (isStrictConformance(context)) {
+      record(
+        context,
+        "concurrency.safe.policy_summary_available",
+        "FAILED",
+        "POST /v1/policy/summary is required for contract checks in strict conformance mode",
+      );
+      record(
+        context,
+        "concurrency.safe.policy_shape",
+        "FAILED",
+        "Concurrency shape check failed because policy summary endpoint is unavailable in strict conformance mode",
+      );
+      record(
+        context,
+        "concurrency.safe.validate_shape",
+        "FAILED",
+        "Validate concurrency shape check failed because policy summary endpoint is unavailable in strict conformance mode",
+      );
+      return;
+    }
     record(context, "concurrency.safe.policy_summary_available", "SKIPPED", "POST /v1/policy/summary is not supported");
     record(context, "concurrency.safe.policy_shape", "SKIPPED", "Concurrency shape check skipped without policy endpoint");
     record(context, "concurrency.safe.validate_shape", "SKIPPED", "Validate concurrency check skipped without policy endpoint");
@@ -303,12 +380,18 @@ export async function checkConcurrencySafe(context: RunContext, ownerToken: stri
 
 export async function checkConcurrencyActive(context: RunContext, ownerToken: string): Promise<void> {
   if (context.guardrails.mode !== "active") {
-    record(context, "concurrency.active.mode", "SKIPPED", "GOV_GUARDRAILS_MODE is not active");
-    record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Active concurrency probing disabled in safe mode");
-    record(context, "concurrency.active.cleanup", "SKIPPED", "Active concurrency probing disabled in safe mode");
+    record(context, "concurrency.active.mode", "SKIPPED", "GOV_GUARDRAILS_MODE is not active", "DIAGNOSTIC");
+    record(
+      context,
+      "concurrency.active.second_deploy_blocked",
+      "SKIPPED",
+      "Active concurrency probing disabled in safe mode",
+      "DIAGNOSTIC",
+    );
+    record(context, "concurrency.active.cleanup", "SKIPPED", "Active concurrency probing disabled in safe mode", "DIAGNOSTIC");
     return;
   }
-  record(context, "concurrency.active.mode", "PASSED", "GOV_GUARDRAILS_MODE=active");
+  record(context, "concurrency.active.mode", "PASSED", "GOV_GUARDRAILS_MODE=active", "DIAGNOSTIC");
 
   const intent = buildDeploymentIntent(context, context.runVersion);
   const keyBase = `govtest-${context.runId}-guardrails-concurrency`;
@@ -319,13 +402,13 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
   });
   const firstPayload = await decodeJson(first);
   if (first.status === 409 && firstPayload?.code === "CONCURRENCY_LIMIT_REACHED") {
-    record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Environment already has an active deployment; probe not started");
-    record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up");
+    record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Environment already has an active deployment; probe not started", "DIAGNOSTIC");
+    record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up", "DIAGNOSTIC");
     return;
   }
   if (first.status === 429 && firstPayload?.code === "QUOTA_EXCEEDED") {
-    record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Quota already exhausted; concurrency probe skipped");
-    record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up");
+    record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Quota already exhausted; concurrency probe skipped", "DIAGNOSTIC");
+    record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up", "DIAGNOSTIC");
     return;
   }
   if (first.status !== 201) {
@@ -334,14 +417,15 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
       "concurrency.active.second_deploy_blocked",
       "FAILED",
       `first deploy expected 201, got ${first.status}; body=${JSON.stringify(firstPayload)}`,
+      "DIAGNOSTIC",
     );
-    record(context, "concurrency.active.cleanup", "SKIPPED", "Cleanup skipped because first deploy was not created");
+    record(context, "concurrency.active.cleanup", "SKIPPED", "Cleanup skipped because first deploy was not created", "DIAGNOSTIC");
     return;
   }
   const firstId = firstPayload?.id;
   if (typeof firstId !== "string" || !firstId) {
-    record(context, "concurrency.active.second_deploy_blocked", "FAILED", "First deploy response missing id");
-    record(context, "concurrency.active.cleanup", "SKIPPED", "Cleanup skipped because first deploy id is missing");
+    record(context, "concurrency.active.second_deploy_blocked", "FAILED", "First deploy response missing id", "DIAGNOSTIC");
+    record(context, "concurrency.active.cleanup", "SKIPPED", "Cleanup skipped because first deploy id is missing", "DIAGNOSTIC");
     return;
   }
 
@@ -353,6 +437,7 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
       "concurrency.active.second_deploy_blocked",
       "SKIPPED",
       `First deploy reached terminal state=${firstState.state} before concurrency probe`,
+      "DIAGNOSTIC",
     );
   } else {
     const second = await apiRequest("POST", "/v1/deployments", ownerToken, {
@@ -361,18 +446,19 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
     });
     const secondPayload = await decodeJson(second);
     if (second.status === 409 && secondPayload?.code === "CONCURRENCY_LIMIT_REACHED") {
-      record(context, "concurrency.active.second_deploy_blocked", "PASSED", "Second deploy was blocked by CONCURRENCY_LIMIT_REACHED");
+      record(context, "concurrency.active.second_deploy_blocked", "PASSED", "Second deploy was blocked by CONCURRENCY_LIMIT_REACHED", "DIAGNOSTIC");
     } else if (second.status === 429 && secondPayload?.code === "QUOTA_EXCEEDED") {
-      record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Second deploy was blocked by quota before concurrency");
+      record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Second deploy was blocked by quota before concurrency", "DIAGNOSTIC");
     } else if (second.status === 201) {
       secondCreatedId = typeof secondPayload?.id === "string" ? secondPayload.id : undefined;
-      record(context, "concurrency.active.second_deploy_blocked", "FAILED", "Second deploy was accepted; concurrency limit was not enforced");
+      record(context, "concurrency.active.second_deploy_blocked", "FAILED", "Second deploy was accepted; concurrency limit was not enforced", "DIAGNOSTIC");
     } else {
       record(
         context,
         "concurrency.active.second_deploy_blocked",
         "FAILED",
         `second deploy expected 409 CONCURRENCY_LIMIT_REACHED, got ${second.status}; body=${JSON.stringify(secondPayload)}`,
+        "DIAGNOSTIC",
       );
     }
   }
@@ -382,17 +468,17 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
     if (secondCreatedId) {
       await pollDeploymentTerminal(context, ownerToken, secondCreatedId);
     }
-    record(context, "concurrency.active.cleanup", "PASSED", "Probe deployment cleanup completed (terminal state reached)");
+    record(context, "concurrency.active.cleanup", "PASSED", "Probe deployment cleanup completed (terminal state reached)", "DIAGNOSTIC");
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    record(context, "concurrency.active.cleanup", "FAILED", detail);
+    record(context, "concurrency.active.cleanup", "FAILED", detail, "DIAGNOSTIC");
   }
 }
 
 function printGuardrailSummary(context: RunContext): void {
   console.log(`[INFO] Guardrails mode=${context.guardrails.mode}`);
   for (const check of context.guardrails.checks) {
-    console.log(`[GUARDRAIL] ${check.status} ${check.id} :: ${check.detail}`);
+    console.log(`[GUARDRAIL] ${check.status} ${check.classification} ${check.id} :: ${check.detail}`);
   }
 }
 

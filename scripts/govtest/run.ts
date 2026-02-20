@@ -8,6 +8,8 @@ import {
   buildRunContext,
   decodeJwtClaims,
   ensureCiToken,
+  fail,
+  isStrictConformance,
   loadLocalDotenv,
   optionalEnv,
   printIdentity,
@@ -137,6 +139,7 @@ function evaluateRollbackField(
 function writeRunArtifact(context: RunContext, dryRun: boolean): void {
   const payload = {
     runId: context.runId,
+    conformanceProfile: context.conformanceProfile,
     runVersion: context.runVersion,
     conflictVersion: context.conflictVersion,
     unregisteredVersion: context.unregisteredVersion,
@@ -160,6 +163,9 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
     guardrailPassed: context.guardrails.checks.filter((c) => c.status === "PASSED").length,
     guardrailFailed: context.guardrails.checks.filter((c) => c.status === "FAILED").length,
     guardrailSkipped: context.guardrails.checks.filter((c) => c.status === "SKIPPED").length,
+    guardrailContractSkipped: context.guardrails.checks.filter(
+      (c) => c.classification === "CONTRACT" && c.status === "SKIPPED",
+    ).length,
     dryRun,
     writtenAt: new Date().toISOString(),
   };
@@ -170,6 +176,7 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
 function printSummary(context: RunContext): void {
   console.log("\n[SUMMARY] Governance API run complete");
   printSummaryField("information", "runId", context.runId);
+  printSummaryField("information", "conformanceProfile", context.conformanceProfile);
   printSummaryField("information", "runVersion", context.runVersion);
   printSummaryField("information", "conflictVersion", context.conflictVersion);
   printSummaryField("information", "unregisteredVersion", context.unregisteredVersion);
@@ -234,7 +241,7 @@ function printSummary(context: RunContext): void {
   printSummaryField("information", "guardrailsMode", context.guardrails.mode);
   for (const check of context.guardrails.checks) {
     const kind = check.status === "PASSED" ? "success" : check.status === "FAILED" ? "failure" : "information";
-    printEvaluatedLine(kind, `guardrail ${check.status} ${check.id}`);
+    printEvaluatedLine(kind, `guardrail ${check.status} ${check.classification} ${check.id}`);
   }
 
   const timingResult = evaluateTimingsResult(context);
@@ -269,11 +276,18 @@ async function main(): Promise<number> {
     owner: await getUserAccessTokenViaPlaywright("owner"),
     observer: await getUserAccessTokenViaPlaywright("observer"),
   };
+  const context = await buildRunContext(tokens);
+  const strictConformance = isStrictConformance(context);
 
   let nonMemberOwnerToken: string | undefined;
   let nonMemberOwnerClaims: ReturnType<typeof decodeJwtClaims> | undefined;
   const nonMemberOwnerUsername = optionalEnv("GOV_NON_MEMBER_OWNER_USERNAME");
   const nonMemberOwnerPassword = optionalEnv("GOV_NON_MEMBER_OWNER_PASSWORD");
+  if (!dryRun && strictConformance && (!nonMemberOwnerUsername || !nonMemberOwnerPassword)) {
+    fail(
+      "Strict conformance requires non-member owner scope probe credentials. Set GOV_NON_MEMBER_OWNER_USERNAME and GOV_NON_MEMBER_OWNER_PASSWORD.",
+    );
+  }
   if (nonMemberOwnerUsername && nonMemberOwnerPassword) {
     nonMemberOwnerToken = await getUserAccessTokenViaCustomCredentials(
       "non-member-owner",
@@ -305,7 +319,6 @@ async function main(): Promise<number> {
     printIdentity("non-member-owner", nonMemberOwnerToken, nonMemberOwnerClaims, me);
   }
 
-  const context = await buildRunContext(tokens);
   printRunPlan(context);
 
   if (dryRun) {
@@ -328,6 +341,15 @@ async function main(): Promise<number> {
   await stepH_guardrailSpotChecks(context, tokens.owner);
 
   const failedGuardrails = context.guardrails.checks.filter((c) => c.status === "FAILED");
+  const skippedContractGuardrails = context.guardrails.checks.filter(
+    (c) => c.classification === "CONTRACT" && c.status === "SKIPPED",
+  );
+  if (strictConformance) {
+    assert(
+      skippedContractGuardrails.length === 0,
+      `Contract guardrail checks were skipped in strict mode: ${skippedContractGuardrails.map((c) => c.id).join(", ")}`,
+    );
+  }
   assert(failedGuardrails.length === 0, `Guardrail checks failed: ${failedGuardrails.map((c) => c.id).join(", ")}`);
   assert(Object.keys(context.timings.stepStart).length === 9, "Expected 9 steps to run");
   printSummary(context);

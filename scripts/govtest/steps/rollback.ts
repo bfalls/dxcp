@@ -6,6 +6,7 @@ import {
   assertStatus,
   buildDeploymentIntent,
   decodeJson,
+  isStrictConformance,
   markStepEnd,
   markStepStart,
   optionalEnv,
@@ -179,8 +180,14 @@ export async function stepG_rollbackAfterDeploy(context: RunContext, ownerToken:
 
   const target = await discoverRollbackTarget(context, ownerToken);
   if (!target) {
+    const reason = `No prior SUCCEEDED deployment with version != ${context.runVersion} for ${context.service}/${context.environment}`;
+    if (isStrictConformance(context)) {
+      throw new Error(
+        `G: rollback contract invariant requires an eligible prior deployment target in strict conformance mode. ${reason}`,
+      );
+    }
     context.rollback.skipped = true;
-    context.rollback.skipReason = `No prior SUCCEEDED deployment with version != ${context.runVersion} for ${context.service}/${context.environment}`;
+    context.rollback.skipReason = reason;
     console.log(`[INFO] Rollback skipped: ${context.rollback.skipReason}`);
     markStepEnd(context, step);
     return;

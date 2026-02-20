@@ -50,6 +50,12 @@ Required keys:
 - GOV_CI_CLIENT_ID
 - GOV_CI_CLIENT_SECRET
 
+Optional key:
+
+- GOV_CONFORMANCE_PROFILE
+  - `diagnostic` (default for local/non-CI runs)
+  - `strict` (default in GitHub Actions / CI)
+
 ---------------------------------------------------------------------
 
 ## Auth0 Setup
@@ -83,6 +89,11 @@ Full mode:
     npm run govtest
 
 Full mode executes all invariants defined in GOVERNANCE_CONTRACT.md.
+
+Conformance behavior:
+
+- `strict`: contract invariants cannot be skipped. Missing contract prerequisites fail the run.
+- `diagnostic`: environment-limited checks may be skipped for operational diagnostics.
 
 ---------------------------------------------------------------------
 

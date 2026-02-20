@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { RunContext, JwtClaims, WhoAmI } from "./types.ts";
+import type { RunContext, JwtClaims, WhoAmI, ConformanceProfile } from "./types.ts";
 
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
@@ -125,6 +125,21 @@ export function requiredEnv(name: string): string {
 export function optionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value || undefined;
+}
+
+export function resolveConformanceProfile(): ConformanceProfile {
+  const raw = optionalEnv("GOV_CONFORMANCE_PROFILE")?.toLowerCase();
+  if (!raw) {
+    return process.env.GITHUB_ACTIONS === "true" ? "strict" : "diagnostic";
+  }
+  if (raw === "strict" || raw === "diagnostic") {
+    return raw;
+  }
+  fail(`Invalid GOV_CONFORMANCE_PROFILE=${raw}. Expected one of: strict, diagnostic.`);
+}
+
+export function isStrictConformance(context: Pick<RunContext, "conformanceProfile">): boolean {
+  return context.conformanceProfile === "strict";
 }
 
 function b64UrlDecode(input: string): string {
@@ -277,6 +292,7 @@ function nextPatchVersion(version: string): string {
 }
 
 export async function buildRunContext(tokens: Record<RoleName, string>): Promise<RunContext> {
+  const conformanceProfile = resolveConformanceProfile();
   const service = optionalEnv("GOV_SERVICE") ?? "demo-service";
   const environment = optionalEnv("GOV_ENVIRONMENT") ?? "sandbox";
   const recipeId = optionalEnv("GOV_RECIPE_ID") ?? "default";
@@ -292,6 +308,7 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
   return {
     runId,
     startedAtIso: nowIso(),
+    conformanceProfile,
     service,
     environment,
     recipeId,
@@ -376,6 +393,7 @@ export function markStepEnd(context: RunContext, stepName: string): void {
 export function printRunPlan(context: RunContext): void {
   logInfo("Run Plan");
   console.log(`  runId: ${context.runId}`);
+  console.log(`  conformance_profile: ${context.conformanceProfile}`);
   console.log(`  service: ${context.service}`);
   console.log(`  environment: ${context.environment}`);
   console.log(`  recipeId: ${context.recipeId}`);
