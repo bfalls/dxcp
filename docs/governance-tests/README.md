@@ -9,6 +9,7 @@ Authentication model used by this harness:
 
 - `admin`, `owner`, and `observer` tokens are obtained automatically via headless Playwright login against the real DXCP SPA/Auth0 PKCE flow.
 - `ci` token is minted with Auth0 `client_credentials` (M2M).
+- The demo artifact publisher workflow (`.github/workflows/build-demo-artifacts.yml`) follows the same CI publisher pattern with stable idempotency (`github-<run_id>-<service>-<version>`) and commit/run metadata when supported by the API.
 
 ## Prerequisites
 

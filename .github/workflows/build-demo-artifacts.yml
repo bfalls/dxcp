@@ -234,20 +234,37 @@ jobs:
             [[ -z "$service" || -z "$version" || -z "$artifact_ref" ]] && continue
             built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             idem_key="github-${{ github.run_id }}-${service}-${version}"
-            commit_url="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
-            run_url="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            payload="$(printf '{"service":"%s","version":"%s","artifactRef":"%s","git_sha":"%s","git_branch":"%s","ci_provider":"github","ci_run_id":"%s","built_at":"%s","commit_url":"%s","run_url":"%s"}' \
+            commit_url="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+            run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            payload_with_metadata="$(printf '{"service":"%s","version":"%s","artifactRef":"%s","git_sha":"%s","git_branch":"%s","ci_provider":"github","ci_run_id":"%s","built_at":"%s","commit_url":"%s","run_url":"%s"}' \
               "$service" "$version" "$artifact_ref" "${{ github.sha }}" "${{ github.ref_name }}" "${{ github.run_id }}" "$built_at" "$commit_url" "$run_url")"
+            payload_without_metadata="$(printf '{"service":"%s","version":"%s","artifactRef":"%s","git_sha":"%s","git_branch":"%s","ci_provider":"github","ci_run_id":"%s","built_at":"%s"}' \
+              "$service" "$version" "$artifact_ref" "${{ github.sha }}" "${{ github.ref_name }}" "${{ github.run_id }}" "$built_at")"
             body_file="${RUNNER_TEMP}/register-${service}-${version}.json"
             headers_file="${RUNNER_TEMP}/register-${service}-${version}.headers"
             status="$(curl -sS --show-error -X POST "${dxcp_base}/builds/register" \
               -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
               -H "Content-Type: application/json" \
               -H "Idempotency-Key: ${idem_key}" \
-              -d "${payload}" \
+              -d "${payload_with_metadata}" \
               -D "${headers_file}" \
               -o "${body_file}" \
               -w "%{http_code}")"
+            metadata_mode="with_metadata"
+            if [[ "${status}" == "400" ]]; then
+              code="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], "r", encoding="utf-8")); print(p.get("code",""))' "${body_file}" 2>/dev/null || true)"
+              if [[ "${code}" == "INVALID_REQUEST" ]]; then
+                status="$(curl -sS --show-error -X POST "${dxcp_base}/builds/register" \
+                  -H "Authorization: Bearer ${DXCP_API_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -H "Idempotency-Key: ${idem_key}" \
+                  -d "${payload_without_metadata}" \
+                  -D "${headers_file}" \
+                  -o "${body_file}" \
+                  -w "%{http_code}")"
+                metadata_mode="without_metadata"
+              fi
+            fi
             if [[ "${status}" != "201" && "${status}" != "200" ]]; then
               echo "Build registration failed status=${status}" >&2
               cat "${body_file}" >&2
@@ -256,14 +273,17 @@ jobs:
             ci_publisher="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1], "r", encoding="utf-8")); cp=p.get("ci_publisher"); assert cp, "missing ci_publisher"; print(cp)' "${body_file}")"
             replayed="$(awk -F': ' 'tolower($1)=="idempotency-replayed" {print $2}' "${headers_file}" | tr -d '\r' | tail -n1)"
             replayed="${replayed:-missing}"
-            echo "Registered build service=${service} version=${version} artifact=${artifact_ref} idempotency_key=${idem_key} ci_publisher=${ci_publisher} idempotency_replayed=${replayed}"
+            echo "Registered build service=${service} version=${version} artifact=${artifact_ref} idempotency_key=${idem_key} ci_publisher=${ci_publisher} idempotency_replayed=${replayed} metadata_mode=${metadata_mode}"
             {
               echo "- registered: ${service}@${version}"
               echo "  artifact: ${artifact_ref}"
               echo "  ci_publisher: ${ci_publisher}"
               echo "  idempotency_replayed: ${replayed}"
               echo "  idempotency_key: ${idem_key}"
-              echo "  commit_url: [Open commit](${commit_url})"
-              echo "  run_url: [Open run](${run_url})"
+              echo "  metadata_mode: ${metadata_mode}"
+              if [[ "${metadata_mode}" == "with_metadata" ]]; then
+                echo "  commit_url: [Open commit](${commit_url})"
+                echo "  run_url: [Open run](${run_url})"
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           done < "$manifest_path"
