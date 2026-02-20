@@ -22,6 +22,12 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Install UI dependencies
+        run: cd ui && npm install --no-audit --no-fund
+
+      - name: Install Playwright browser (Chromium)
+        run: cd ui && npx playwright install --with-deps chromium
+
       - name: Decide govtest mode
         id: mode
         env:
@@ -30,12 +36,13 @@ jobs:
           GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
           GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
           GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_ADMIN_CLIENT_ID: ${{ secrets.GOV_ADMIN_CLIENT_ID }}
-          GOV_ADMIN_CLIENT_SECRET: ${{ secrets.GOV_ADMIN_CLIENT_SECRET }}
-          GOV_OWNER_CLIENT_ID: ${{ secrets.GOV_OWNER_CLIENT_ID }}
-          GOV_OWNER_CLIENT_SECRET: ${{ secrets.GOV_OWNER_CLIENT_SECRET }}
-          GOV_OBSERVER_CLIENT_ID: ${{ secrets.GOV_OBSERVER_CLIENT_ID }}
-          GOV_OBSERVER_CLIENT_SECRET: ${{ secrets.GOV_OBSERVER_CLIENT_SECRET }}
+          GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
+          GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
+          GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
+          GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
+          GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
+          GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
+          GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
           GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
         shell: bash
@@ -45,9 +52,10 @@ jobs:
           for key in \
             GOV_DXCP_UI_BASE GOV_DXCP_API_BASE GOV_AWS_REGION \
             GOV_AUTH0_DOMAIN GOV_AUTH0_AUDIENCE \
-            GOV_ADMIN_CLIENT_ID GOV_ADMIN_CLIENT_SECRET \
-            GOV_OWNER_CLIENT_ID GOV_OWNER_CLIENT_SECRET \
-            GOV_OBSERVER_CLIENT_ID GOV_OBSERVER_CLIENT_SECRET \
+            GOV_DXCP_UI_CLIENT_ID \
+            GOV_ADMIN_USERNAME GOV_ADMIN_PASSWORD \
+            GOV_OWNER_USERNAME GOV_OWNER_PASSWORD \
+            GOV_OBSERVER_USERNAME GOV_OBSERVER_PASSWORD \
             GOV_CI_CLIENT_ID GOV_CI_CLIENT_SECRET; do
             if [[ -z "${!key:-}" ]]; then
               missing+=("$key")
@@ -76,14 +84,16 @@ jobs:
           GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
           GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
           GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_ADMIN_CLIENT_ID: ${{ secrets.GOV_ADMIN_CLIENT_ID }}
-          GOV_ADMIN_CLIENT_SECRET: ${{ secrets.GOV_ADMIN_CLIENT_SECRET }}
-          GOV_OWNER_CLIENT_ID: ${{ secrets.GOV_OWNER_CLIENT_ID }}
-          GOV_OWNER_CLIENT_SECRET: ${{ secrets.GOV_OWNER_CLIENT_SECRET }}
-          GOV_OBSERVER_CLIENT_ID: ${{ secrets.GOV_OBSERVER_CLIENT_ID }}
-          GOV_OBSERVER_CLIENT_SECRET: ${{ secrets.GOV_OBSERVER_CLIENT_SECRET }}
+          GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
+          GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
+          GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
+          GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
+          GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
+          GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
+          GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
           GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
+          CI: "true"
         shell: bash
         run: |
           set -euo pipefail
@@ -108,44 +118,3 @@ jobs:
               echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-  govtest_e2e:
-    runs-on: ubuntu-latest
-    needs: govtest
-    if: ${{ needs.govtest.outputs.mode == 'FULL' }}
-    env:
-      GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
-      GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
-      GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
-      GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
-      GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-      GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
-      GOV_DXCP_UI_CLIENT_SECRET: ${{ secrets.GOV_DXCP_UI_CLIENT_SECRET }}
-      GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
-      GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
-      GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
-      GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
-      GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
-      GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
-      GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
-      GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Install UI dependencies
-        run: cd ui && npm install --no-audit --no-fund
-
-      - name: Install Playwright browser (Chromium)
-        run: cd ui && npx playwright install --with-deps chromium
-
-      - name: Run govtest Playwright smoke
-        env:
-          CI: "true"
-          GOV_RUN_VERSION: ${{ needs.govtest.outputs.run_version }}
-        run: cd ui && npx playwright test e2e/govtest.spec.ts --project=chromium --reporter=line

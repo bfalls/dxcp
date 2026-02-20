@@ -4,12 +4,52 @@ import {
   apiRequest,
   assert,
   assertStatus,
+  decodeJson,
   decodeJwtClaims,
   markStepEnd,
   markStepStart,
+  optionalEnv,
   printIdentity,
   whoAmI,
 } from "../common.ts";
+
+const STALE_GOVTEST_ENTRY_RE = /^govtest-\d+-[a-f0-9]+-ci$/;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function putCiPublishersWithRetry(adminToken: string, updated: any[]): Promise<any> {
+  const maxAttempts = 3;
+  let lastPayload: any = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const put = await apiRequest("PUT", "/v1/admin/system/ci-publishers", adminToken, {
+      body: { publishers: updated },
+    });
+
+    if (put.status === 200) {
+      return assertStatus(put, 200, "B: PUT /v1/admin/system/ci-publishers");
+    }
+
+    lastPayload = await decodeJson(put);
+    const isRetriableSsmWriteError =
+      put.status === 500 &&
+      lastPayload?.code === "INTERNAL_ERROR" &&
+      typeof lastPayload?.message === "string" &&
+      lastPayload.message.includes("Unable to update system CI publishers in SSM");
+
+    if (!isRetriableSsmWriteError || attempt === maxAttempts) {
+      throw new Error(
+        `B: PUT /v1/admin/system/ci-publishers failed: expected HTTP 200, got ${put.status}; body=${JSON.stringify(lastPayload)}`,
+      );
+    }
+
+    await sleep(500 * attempt);
+  }
+
+  throw new Error(`B: PUT /v1/admin/system/ci-publishers failed after retries; body=${JSON.stringify(lastPayload)}`);
+}
 
 export async function stepB_configureCiPublishersAllowlist(context: RunContext, adminToken: string, ciToken: string): Promise<void> {
   const step = "B";
@@ -32,8 +72,14 @@ export async function stepB_configureCiPublishersAllowlist(context: RunContext, 
   const currentPayload = await assertStatus(current, 200, "B: GET /v1/admin/system/ci-publishers");
   const existing = Array.isArray(currentPayload?.publishers) ? currentPayload.publishers : [];
 
-  const entryName = `govtest-${context.runId}-ci`;
-  const updated = existing.filter((p: any) => p?.name !== entryName);
+  const entryName = optionalEnv("GOV_CI_PUBLISHER_ENTRY_NAME") ?? "govtest-ci";
+  const updated = existing.filter((p: any) => {
+    const name = typeof p?.name === "string" ? p.name : "";
+    if (!name) return true;
+    if (name === entryName) return false;
+    if (STALE_GOVTEST_ENTRY_RE.test(name)) return false;
+    return true;
+  });
   updated.push({
     name: entryName,
     provider: "custom",
@@ -44,10 +90,7 @@ export async function stepB_configureCiPublishersAllowlist(context: RunContext, 
     description: `govtest run ${context.runId}`,
   });
 
-  const put = await apiRequest("PUT", "/v1/admin/system/ci-publishers", adminToken, {
-    body: { publishers: updated },
-  });
-  const putPayload = await assertStatus(put, 200, "B: PUT /v1/admin/system/ci-publishers");
+  const putPayload = await putCiPublishersWithRetry(adminToken, updated);
 
   const found = Array.isArray(putPayload?.publishers) && putPayload.publishers.some((p: any) => p?.name === entryName);
   assert(found, "B: Updated CI publishers response did not include govtest publisher entry.");

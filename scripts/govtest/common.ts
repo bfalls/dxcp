@@ -174,56 +174,28 @@ async function getClientCredentialsToken(params: {
 
 type RoleName = "admin" | "owner" | "observer" | "ci";
 
-const TOKEN_ENV_BY_ROLE: Record<RoleName, string> = {
-  admin: "GOV_ADMIN_TOKEN",
-  owner: "GOV_OWNER_TOKEN",
-  observer: "GOV_OBSERVER_TOKEN",
-  ci: "GOV_CI_TOKEN",
-};
-
-export async function ensureTokens(): Promise<Record<RoleName, string>> {
-  const existing: Partial<Record<RoleName, string>> = {};
-  for (const role of Object.keys(TOKEN_ENV_BY_ROLE) as RoleName[]) {
-    const maybe = optionalEnv(TOKEN_ENV_BY_ROLE[role]);
-    if (maybe) {
-      existing[role] = maybe;
-    }
-  }
-
-  const haveAll = (Object.keys(TOKEN_ENV_BY_ROLE) as RoleName[]).every((r) => existing[r]);
-  if (haveAll) {
-    logInfo("Using GOV_*_TOKEN values from environment.");
-    return existing as Record<RoleName, string>;
+export async function ensureCiToken(): Promise<string> {
+  const existing = optionalEnv("GOV_CI_TOKEN");
+  if (existing) {
+    logInfo("Using GOV_CI_TOKEN from environment.");
+    return existing;
   }
 
   const domain = requiredEnv("GOV_AUTH0_DOMAIN");
   const audience = requiredEnv("GOV_AUTH0_AUDIENCE");
+  const clientId = requiredEnv("GOV_CI_CLIENT_ID");
+  const clientSecret = requiredEnv("GOV_CI_CLIENT_SECRET");
 
-  const credentials: Array<{ role: RoleName; id: string; secret: string }> = [
-    { role: "admin", id: requiredEnv("GOV_ADMIN_CLIENT_ID"), secret: requiredEnv("GOV_ADMIN_CLIENT_SECRET") },
-    { role: "owner", id: requiredEnv("GOV_OWNER_CLIENT_ID"), secret: requiredEnv("GOV_OWNER_CLIENT_SECRET") },
-    { role: "observer", id: requiredEnv("GOV_OBSERVER_CLIENT_ID"), secret: requiredEnv("GOV_OBSERVER_CLIENT_SECRET") },
-    { role: "ci", id: requiredEnv("GOV_CI_CLIENT_ID"), secret: requiredEnv("GOV_CI_CLIENT_SECRET") },
-  ];
-
-  const tokens: Partial<Record<RoleName, string>> = { ...existing };
-  for (const creds of credentials) {
-    if (tokens[creds.role]) {
-      continue;
-    }
-    logInfo(`Minting Auth0 token for role=${creds.role}`);
-    const token = await getClientCredentialsToken({
-      domain,
-      audience,
-      clientId: creds.id,
-      clientSecret: creds.secret,
-    });
-    tokens[creds.role] = token;
-    process.env[TOKEN_ENV_BY_ROLE[creds.role]] = token;
-    logInfo(`Minted role=${creds.role} token=${redactToken(token)}`);
-  }
-
-  return tokens as Record<RoleName, string>;
+  logInfo("Minting Auth0 token for role=ci");
+  const token = await getClientCredentialsToken({
+    domain,
+    audience,
+    clientId,
+    clientSecret,
+  });
+  process.env.GOV_CI_TOKEN = token;
+  logInfo(`Minted role=ci token=${redactToken(token)}`);
+  return token;
 }
 
 function extractVersionCandidate(raw: any): string | undefined {
@@ -331,6 +303,7 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
       ciConflict: `govtest-${runId}-ci-conflict`,
       deployUnregistered: `govtest-${runId}-deploy-unregistered`,
       deployRegistered: `govtest-${runId}-deploy-registered`,
+      rollbackSubmit: `govtest-${runId}-rollback-submit`,
     },
     timings: {
       stepStart: {},
@@ -344,6 +317,7 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
     },
     identity: {},
     deployment: {},
+    rollback: {},
   };
 }
 
@@ -411,7 +385,10 @@ export function announceStep(label: string): void {
 }
 
 export function printIdentity(role: string, token: string, claims: JwtClaims, whoamiPayload: WhoAmI): void {
+  const roles = Array.isArray(whoamiPayload.roles) ? whoamiPayload.roles : [];
   logInfo(
-    `Identity role=${role} actor_id=${whoamiPayload.actor_id ?? ""} sub=${claims.sub ?? ""} azp=${claims.azp ?? ""} aud=${JSON.stringify(claims.aud ?? "")} iss=${claims.iss ?? ""} token=${redactToken(token)}`,
+    `Identity role=${role} email=${whoamiPayload.email ?? claims.email ?? ""} sub=${whoamiPayload.sub ?? claims.sub ?? ""} azp=${whoamiPayload.azp ?? claims.azp ?? ""} aud=${JSON.stringify(
+      whoamiPayload.aud ?? claims.aud ?? "",
+    )} iss=${whoamiPayload.iss ?? claims.iss ?? ""} roles=${JSON.stringify(roles)} token=${redactToken(token)}`,
   );
 }

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "govtest:dry": "node --experimental-strip-types scripts/govtest/run.ts --dry-run",
-    "govtest": "node --experimental-strip-types scripts/govtest/run.ts",
+    "govtest": "node -e \"console.log('\\x1b[1;36mRunning Governance API Test Harness\\x1b[0m')\" && node --experimental-strip-types scripts/govtest/run.ts",
     "api-dev": "bash -lc 'cd dxcp-api && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000'",
     "api-test": "node scripts/api_test.js",
     "api-test-verbose": "node scripts/api_test.js --verbose",

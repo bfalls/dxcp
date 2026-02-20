@@ -13,6 +13,7 @@ export type WhoAmI = {
   iss?: string;
   aud?: string | string[];
   azp?: string;
+  roles?: string[];
 };
 
 export type RunContext = {
@@ -31,6 +32,7 @@ export type RunContext = {
     ciConflict: string;
     deployUnregistered: string;
     deployRegistered: string;
+    rollbackSubmit: string;
   };
   timings: {
     stepStart: Record<string, string>;
@@ -47,6 +49,17 @@ export type RunContext = {
   };
   deployment: {
     id?: string;
+    finalState?: string;
+    finalOutcome?: string | null;
+  };
+  rollback: {
+    skipped?: boolean;
+    skipReason?: string;
+    targetVersion?: string;
+    targetDeploymentId?: string;
+    validationMode?: "rollback-endpoint" | "deployment-validate";
+    submissionMode?: "rollback-endpoint" | "redeploy";
+    deploymentId?: string;
     finalState?: string;
     finalOutcome?: string | null;
   };

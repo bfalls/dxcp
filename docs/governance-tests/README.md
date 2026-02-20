@@ -3,9 +3,12 @@
 ## Purpose
 
 This harness establishes a deterministic, fail-fast governance test entrypoint for DXCP.
-Phase 3 converts manual governance curl checks into automated API assertions (no browser/UI).
+Phase 3 converts manual governance curl checks into automated API assertions.
 
-No Playwright/browser automation is implemented in this phase.
+Authentication model used by this harness:
+
+- `admin`, `owner`, and `observer` tokens are obtained automatically via headless Playwright login against the real DXCP SPA/Auth0 PKCE flow.
+- `ci` token is minted with Auth0 `client_credentials` (M2M).
 
 ## Prerequisites
 
@@ -20,40 +23,58 @@ No Playwright/browser automation is implemented in this phase.
 1. Copy `.env.govtest.example` to `.env.govtest`.
 2. Fill in real values for all `GOV_` keys.
 3. Keep `.env.govtest` local only (gitignored).
+4. Ensure Playwright Chromium is installed (`cd ui && npx playwright install chromium`) if not already present.
+
+Required keys for full mode:
+
+- `GOV_DXCP_UI_BASE`
+- `GOV_DXCP_API_BASE`
+- `GOV_AWS_REGION`
+- `GOV_AUTH0_DOMAIN`
+- `GOV_AUTH0_AUDIENCE`
+- `GOV_DXCP_UI_CLIENT_ID`
+- `GOV_ADMIN_USERNAME`
+- `GOV_ADMIN_PASSWORD`
+- `GOV_OWNER_USERNAME`
+- `GOV_OWNER_PASSWORD`
+- `GOV_OBSERVER_USERNAME`
+- `GOV_OBSERVER_PASSWORD`
+- `GOV_CI_CLIENT_ID`
+- `GOV_CI_CLIENT_SECRET`
 
 ### Auth0 M2M Setup
 
-Create four Auth0 Machine-to-Machine applications (or equivalent confidential clients), one for each role:
+Create one Auth0 Machine-to-Machine application for CI publishing:
 
-- admin
-- owner
-- observer
-- ci
+- `ci`
 
-For each app:
+For that app:
 
 1. Authorize it for the DXCP API (`GOV_AUTH0_AUDIENCE`).
-2. Grant role-specific permissions/claims expected by DXCP governance policies.
+2. Grant CI publisher permissions/claims expected by DXCP governance policies.
 3. Record `client_id` and `client_secret`.
+
+Create/use three real Auth0 users for:
+
+- `admin`
+- `owner`
+- `observer`
+
+Store those users' credentials for automated login (`GOV_*_USERNAME`, `GOV_*_PASSWORD`).
 
 Store values as:
 
 - Local: `.env.govtest` (`GOV_*`)
 - GitHub Actions: repository variables/secrets (`GOV_*`)
 
-Tokens can be provided directly or minted at runtime:
-
-- `GOV_ADMIN_TOKEN`
-- `GOV_OWNER_TOKEN`
-- `GOV_OBSERVER_TOKEN`
-- `GOV_CI_TOKEN`
-
-If those token env vars are not present, the harness mints tokens using:
+`GOV_CI_TOKEN` can be provided directly, but if absent, CI token is minted at runtime using:
 
 - `GOV_AUTH0_DOMAIN`
 - `GOV_AUTH0_AUDIENCE`
-- `GOV_*_CLIENT_ID`
-- `GOV_*_CLIENT_SECRET`
+- `GOV_CI_CLIENT_ID`
+- `GOV_CI_CLIENT_SECRET`
+
+User tokens (`admin`/`owner`/`observer`) are always obtained by browser login and token capture from SPA cache; no manual token copy/paste is required.
 
 Optional run overrides:
 
@@ -80,6 +101,7 @@ npm run govtest
 Notes:
 
 - The runner auto-loads `.env.govtest` for local runs.
+- The runner uses Playwright headless to obtain user tokens via SPA login.
 - In dry-run mode, it validates identity wiring and run planning only.
 - In full mode, it runs all Phase 3 governance assertions.
 - Any failed assertion stops the run immediately (fail fast).
@@ -88,12 +110,19 @@ Notes:
 
 The full run executes the following invariant checks in order:
 
-1. Gate negative: non-CI identity (`GOV_OWNER_TOKEN`) cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
-2. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using `GOV_ADMIN_TOKEN`, with matcher fields populated from `GET /v1/whoami` using `GOV_CI_TOKEN` (`iss`, `aud`, `azp`, `sub`).
+1. Gate negative: non-CI owner identity cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
+2. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using admin user token, with matcher fields populated from `GET /v1/whoami` using CI M2M token (`iss`, `aud`, `azp`, `sub`).
 3. Build registration happy path: `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
 4. Build conflict: same idempotency key with different `git_sha` returns `409 BUILD_REGISTRATION_CONFLICT`.
 5. Deploy-side enforcement for unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.
 6. Deploy happy path for registered version: validate succeeds, deploy is accepted, and deployment status is polled until terminal state or timeout.
+7. Rollback governance check after successful deploy:
+   - Discover rollback target from deployment history (`GET /v1/deployments`) for the same service/environment by selecting the most recent `SUCCEEDED` deployment whose `version != GOV_RUN_VERSION`.
+   - Validate rollback using rollback-specific validation endpoint if available; otherwise validate the target version with `POST /v1/deployments/validate`.
+   - Submit rollback using `POST /v1/deployments/{deploymentId}/rollback` when supported, otherwise submit a redeploy intent for the discovered target version.
+   - Poll rollback deployment to terminal state and require terminal success.
+
+Rollback is intentionally skipped (not failed) when no prior successful deployment target exists for the same service/environment with a version different from `GOV_RUN_VERSION`.
 
 ## Run In GitHub Actions
 
