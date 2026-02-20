@@ -587,6 +587,7 @@ components:
             - daily_deploy_quota
             - deployments_used
             - deployments_remaining
+            - daily_quota_build_register
           properties:
             max_concurrent_deployments:
               type: integer
@@ -598,6 +599,10 @@ components:
               type: integer
             deployments_remaining:
               type: integer
+            daily_quota_build_register:
+              type: integer
+              minimum: 0
+              maximum: 5000
         validatedAt:
           type: string
           format: date-time
@@ -640,6 +645,7 @@ components:
             - daily_deploy_quota
             - deployments_used
             - deployments_remaining
+            - daily_quota_build_register
           properties:
             max_concurrent_deployments:
               type: integer
@@ -651,6 +657,10 @@ components:
               type: integer
             deployments_remaining:
               type: integer
+            daily_quota_build_register:
+              type: integer
+              minimum: 0
+              maximum: 5000
         generatedAt:
           type: string
           format: date-time
@@ -680,7 +690,7 @@ components:
           type: integer
     AdminSystemRateLimits:
       type: object
-      required: [read_rpm, mutate_rpm, source]
+      required: [read_rpm, mutate_rpm, daily_quota_build_register, source]
       properties:
         read_rpm:
           type: integer
@@ -689,13 +699,17 @@ components:
         mutate_rpm:
           type: integer
           minimum: 1
+          maximum: 5000
+        daily_quota_build_register:
+          type: integer
+          minimum: 0
           maximum: 5000
         source:
           type: string
           enum: [ssm]
     AdminSystemRateLimitsUpdateRequest:
       type: object
-      required: [read_rpm, mutate_rpm]
+      required: [read_rpm, mutate_rpm, daily_quota_build_register]
       properties:
         read_rpm:
           type: integer
@@ -704,6 +718,10 @@ components:
         mutate_rpm:
           type: integer
           minimum: 1
+          maximum: 5000
+        daily_quota_build_register:
+          type: integer
+          minimum: 0
           maximum: 5000
     AdminSystemCiPublishers:
       type: object

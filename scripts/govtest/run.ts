@@ -24,6 +24,7 @@ import { stepE_deployEnforcementUnregisteredVersion } from "./steps/stepE_deploy
 import { stepF_deployHappyPath } from "./steps/stepF_deploy_happy.ts";
 import { stepG_rollbackAfterDeploy } from "./steps/rollback.ts";
 import { stepH_guardrailSpotChecks } from "./steps/guardrails.ts";
+import { stepR_roleAuthorizationChecks } from "./steps/stepRole_authorization.ts";
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
 const ANSI = {
@@ -268,8 +269,15 @@ async function main(): Promise<number> {
     observer: await getUserAccessTokenViaPlaywright("observer"),
   };
 
+  const claimsByRole = {
+    admin: decodeJwtClaims(tokens.admin),
+    owner: decodeJwtClaims(tokens.owner),
+    observer: decodeJwtClaims(tokens.observer),
+    ci: decodeJwtClaims(tokens.ci),
+  };
+
   for (const role of ["admin", "owner", "observer", "ci"] as const) {
-    const claims = decodeJwtClaims(tokens[role]);
+    const claims = claimsByRole[role];
     const me = await whoAmI(tokens[role]);
     printIdentity(role, tokens[role], claims, me);
   }
@@ -286,6 +294,7 @@ async function main(): Promise<number> {
 
   announceStep("Executing Phase 3 governance API assertions (fail-fast)");
 
+  await stepR_roleAuthorizationChecks(context, tokens, claimsByRole);
   await stepA_proveCiGateNegative(context, tokens.owner);
   await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
   await stepC_registerBuildHappyPath(context, tokens.ci);
@@ -297,7 +306,7 @@ async function main(): Promise<number> {
 
   const failedGuardrails = context.guardrails.checks.filter((c) => c.status === "FAILED");
   assert(failedGuardrails.length === 0, `Guardrail checks failed: ${failedGuardrails.map((c) => c.id).join(", ")}`);
-  assert(Object.keys(context.timings.stepStart).length === 8, "Expected 8 steps to run");
+  assert(Object.keys(context.timings.stepStart).length === 9, "Expected 9 steps to run");
   printSummary(context);
   writeRunArtifact(context, false);
   return 0;

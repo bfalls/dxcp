@@ -108,18 +108,22 @@ Purpose:
 Fields:
 - read_rpm
 - mutate_rpm
+- daily_quota_build_register
 
 Validation:
 - Integers only.
-- Minimum: 1.
+- Minimum: 1 for RPM values, 0 for daily build registration quota.
 - Maximum: 5000.
-- Zero, negative, and fractional values are rejected.
+- Negative and fractional values are rejected.
 
 Storage and source of truth:
 - Values are persisted in SSM and read from `DXCP_SSM_PREFIX`.
 - Expected keys:
   - `/dxcp/config/read_rpm`
   - `/dxcp/config/mutate_rpm`
+  - `/dxcp/config/daily_quota_build_register`
+- If `daily_quota_build_register` is unset in SSM, runtime falls back to
+  `DXCP_DAILY_QUOTA_BUILD_REGISTER`, then default `50`.
 
 Operator notes:
 - Changes typically propagate to enforcement within about 60 seconds.
@@ -175,7 +179,7 @@ Current:
 - Admin CRUD endpoints exist for DeliveryGroup create and update.
 - Admin UI supports Recipe create, edit, and deprecation.
 - Admin CRUD endpoints exist for Recipe create and update.
-- Admin UI supports System Settings for global read/mutate RPM.
+- Admin UI supports System Settings for global read/mutate RPM and daily build registration quota.
 - Admin API supports GET and PUT for system rate limits.
 - Admin API supports GET and PUT for CI publisher allowlist.
 - Recipes and delivery groups are seeded in storage by the platform.

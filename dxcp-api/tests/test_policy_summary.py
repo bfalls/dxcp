@@ -131,4 +131,5 @@ async def test_policy_summary_returns_policy_snapshot(tmp_path: Path, monkeypatc
     assert policy["daily_deploy_quota"] == 5
     assert policy["deployments_used"] == 0
     assert policy["deployments_remaining"] == 5
+    assert policy["daily_quota_build_register"] == 50
     assert body["generatedAt"]

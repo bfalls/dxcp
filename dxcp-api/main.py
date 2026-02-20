@@ -466,6 +466,11 @@ def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -
     env_name = environment.get("name") if environment else None
     max_concurrent = _environment_guardrail_value(group, environment, "max_concurrent_deployments", 1)
     daily_deploy_quota = _environment_guardrail_value(group, environment, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    throttling = (
+        rate_limiter.get_live_throttling_settings()
+        if hasattr(rate_limiter, "get_live_throttling_settings")
+        else {"daily_quota_build_register": SETTINGS.daily_quota_build_register}
+    )
     active = storage.count_active_deployments_for_group(group["id"], env_name)
     quota = rate_limiter.get_daily_remaining(_quota_scope(group["id"], env_name), "deploy", daily_deploy_quota)
     return {
@@ -474,6 +479,9 @@ def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -
         "daily_deploy_quota": daily_deploy_quota,
         "deployments_used": quota["used"],
         "deployments_remaining": quota["remaining"],
+        "daily_quota_build_register": int(
+            throttling.get("daily_quota_build_register", SETTINGS.daily_quota_build_register)
+        ),
     }
 
 

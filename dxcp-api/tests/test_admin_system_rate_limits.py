@@ -70,6 +70,7 @@ async def _client(tmp_path: Path, monkeypatch, store: dict[str, str] | None = No
     main.SETTINGS.ssm_prefix = "/dxcp/config"
     main.SETTINGS.read_rpm = 60
     main.SETTINGS.mutate_rpm = 10
+    main.SETTINGS.daily_quota_build_register = 50
     if store is not None:
         import admin_system_routes
         import rate_limit
@@ -90,6 +91,7 @@ async def test_get_system_rate_limits_admin_only(tmp_path: Path, monkeypatch):
     store = {
         "/dxcp/config/read_rpm": "77",
         "/dxcp/config/mutate_rpm": "12",
+        "/dxcp/config/daily_quota_build_register": "33",
     }
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
         admin = await client.get(
@@ -102,7 +104,7 @@ async def test_get_system_rate_limits_admin_only(tmp_path: Path, monkeypatch):
         )
 
     assert admin.status_code == 200
-    assert admin.json() == {"read_rpm": 77, "mutate_rpm": 12, "source": "ssm"}
+    assert admin.json() == {"read_rpm": 77, "mutate_rpm": 12, "daily_quota_build_register": 33, "source": "ssm"}
     assert observer.status_code == 403
 
 
@@ -116,12 +118,18 @@ async def test_get_system_rate_limits_admin_only(tmp_path: Path, monkeypatch):
         {"read_rpm": "10", "mutate_rpm": 10},
         {"read_rpm": 10.5, "mutate_rpm": 10},
         {"read_rpm": True, "mutate_rpm": 10},
+        {"read_rpm": 10, "mutate_rpm": 10},
+        {"read_rpm": 10, "mutate_rpm": 10, "daily_quota_build_register": -1},
+        {"read_rpm": 10, "mutate_rpm": 10, "daily_quota_build_register": 5001},
+        {"read_rpm": 10, "mutate_rpm": 10, "daily_quota_build_register": 10.5},
+        {"read_rpm": 10, "mutate_rpm": 10, "daily_quota_build_register": True},
     ],
 )
 async def test_put_system_rate_limits_validation_bounds(tmp_path: Path, monkeypatch, payload: dict):
     store = {
         "/dxcp/config/read_rpm": "60",
         "/dxcp/config/mutate_rpm": "10",
+        "/dxcp/config/daily_quota_build_register": "50",
     }
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
         response = await client.put(
@@ -140,6 +148,7 @@ async def test_put_system_rate_limits_writes_ssm_and_logs(tmp_path: Path, monkey
     store = {
         "/dxcp/config/read_rpm": "60",
         "/dxcp/config/mutate_rpm": "10",
+        "/dxcp/config/daily_quota_build_register": "50",
     }
     captured = {}
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
@@ -153,26 +162,30 @@ async def test_put_system_rate_limits_writes_ssm_and_logs(tmp_path: Path, monkey
         response = await client.put(
             "/v1/admin/system/rate-limits",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"read_rpm": 123, "mutate_rpm": 45},
+            json={"read_rpm": 123, "mutate_rpm": 45, "daily_quota_build_register": 88},
         )
 
     assert response.status_code == 200
-    assert response.json() == {"read_rpm": 123, "mutate_rpm": 45, "source": "ssm"}
+    assert response.json() == {"read_rpm": 123, "mutate_rpm": 45, "daily_quota_build_register": 88, "source": "ssm"}
     assert store["/dxcp/config/read_rpm"] == "123"
     assert store["/dxcp/config/mutate_rpm"] == "45"
+    assert store["/dxcp/config/daily_quota_build_register"] == "88"
     line = captured["line"]
     assert "event=admin.system_rate_limits.updated" in line
     assert "actor_id=user-1" in line
     assert "old_read_rpm=60" in line
     assert "old_mutate_rpm=10" in line
+    assert "old_daily_quota_build_register=50" in line
     assert "new_read_rpm=123" in line
     assert "new_mutate_rpm=45" in line
+    assert "new_daily_quota_build_register=88" in line
 
 
 async def test_put_updates_live_read_limit_enforcement(tmp_path: Path, monkeypatch):
     store = {
         "/dxcp/config/read_rpm": "5",
         "/dxcp/config/mutate_rpm": "10",
+        "/dxcp/config/daily_quota_build_register": "50",
     }
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
         for _ in range(2):
@@ -182,7 +195,7 @@ async def test_put_updates_live_read_limit_enforcement(tmp_path: Path, monkeypat
         update = await client.put(
             "/v1/admin/system/rate-limits",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"read_rpm": 1, "mutate_rpm": 10},
+            json={"read_rpm": 1, "mutate_rpm": 10, "daily_quota_build_register": 50},
         )
         assert update.status_code == 200
 
@@ -198,15 +211,35 @@ async def test_put_recovers_from_invalid_existing_ssm_values(tmp_path: Path, mon
     store = {
         "/dxcp/config/read_rpm": "60",
         "/dxcp/config/mutate_rpm": "0",
+        "/dxcp/config/daily_quota_build_register": "not-a-number",
     }
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
         response = await client.put(
             "/v1/admin/system/rate-limits",
             headers=auth_header(["dxcp-platform-admins"]),
-            json={"read_rpm": 100, "mutate_rpm": 20},
+            json={"read_rpm": 100, "mutate_rpm": 20, "daily_quota_build_register": 40},
         )
 
     assert response.status_code == 200
-    assert response.json() == {"read_rpm": 100, "mutate_rpm": 20, "source": "ssm"}
+    assert response.json() == {"read_rpm": 100, "mutate_rpm": 20, "daily_quota_build_register": 40, "source": "ssm"}
     assert store["/dxcp/config/read_rpm"] == "100"
     assert store["/dxcp/config/mutate_rpm"] == "20"
+    assert store["/dxcp/config/daily_quota_build_register"] == "40"
+
+
+async def test_get_system_rate_limits_falls_back_for_missing_build_register_quota(tmp_path: Path, monkeypatch):
+    store = {
+        "/dxcp/config/read_rpm": "77",
+        "/dxcp/config/mutate_rpm": "12",
+    }
+    async with _client(tmp_path, monkeypatch, store=store) as (client, _):
+        response = await client.get(
+            "/v1/admin/system/rate-limits",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["read_rpm"] == 77
+    assert body["mutate_rpm"] == 12
+    assert body["daily_quota_build_register"] == 50

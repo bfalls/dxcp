@@ -119,18 +119,25 @@ Notes:
 
 The full run executes the following invariant checks in order:
 
-1. Gate negative: non-CI owner identity cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
-2. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using admin user token, with matcher fields populated from `GET /v1/whoami` using CI M2M token (`iss`, `aud`, `azp`, `sub`).
-3. Build registration happy path: `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
-4. Build conflict: same idempotency key with different `git_sha` returns `409 BUILD_REGISTRATION_CONFLICT`.
-5. Deploy-side enforcement for unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.
-6. Deploy happy path for registered version: validate succeeds, deploy is accepted, and deployment status is polled until terminal state or timeout.
-7. Rollback governance check after successful deploy:
+1. Role and claims sanity checks:
+   - admin token can call admin endpoint `GET /v1/admin/system/ci-publishers` (`200`).
+   - owner and observer are denied for `PUT /v1/admin/system/ci-publishers` (`403 ROLE_FORBIDDEN`).
+   - observer is denied for `POST /v1/deployments/validate` and `POST /v1/deployments` (`403 ROLE_FORBIDDEN`).
+   - owner can call deploy endpoints in scope (permission sanity check uses unregistered version and expects `400 VERSION_NOT_FOUND`, not role denial).
+   - observer can call read-only APIs (`GET /v1/services/{service}/versions`, `GET /v1/deployments`, and deployment status when available).
+   - claims sanity requires expected role values via `whoami.roles` when present, or equivalent JWT roles claim.
+2. Gate negative: non-CI owner identity cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
+3. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using admin user token, with matcher fields populated from `GET /v1/whoami` using CI M2M token (`iss`, `aud`, `azp`, `sub`).
+4. Build registration happy path: `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
+5. Build conflict: same idempotency key with different `git_sha` returns `409 BUILD_REGISTRATION_CONFLICT`.
+6. Deploy-side enforcement for unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.
+7. Deploy happy path for registered version: validate succeeds, deploy is accepted, and deployment status is polled until terminal state or timeout.
+8. Rollback governance check after successful deploy:
    - Discover rollback target from deployment history (`GET /v1/deployments`) for the same service/environment by selecting the most recent `SUCCEEDED` deployment whose `version != GOV_RUN_VERSION`.
    - Validate rollback using rollback-specific validation endpoint if available; otherwise validate the target version with `POST /v1/deployments/validate`.
    - Submit rollback using `POST /v1/deployments/{deploymentId}/rollback` when supported, otherwise submit a redeploy intent for the discovered target version.
    - Poll rollback deployment to terminal state and require terminal success.
-8. Guardrail spot checks (12 compact checks; sequential execution):
+9. Guardrail spot checks (12 compact checks; sequential execution):
    - Quota safe checks: policy endpoint availability, quota policy shape, validate quota shape.
    - Quota active checks: active mode gate, validate quota-enforcement detection, bounded N+1 verification.
    - Concurrency safe checks: policy endpoint availability, concurrency policy shape, validate concurrency shape.

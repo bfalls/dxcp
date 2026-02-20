@@ -44,9 +44,11 @@ Rate limits and quotas (defaults):
 - Read requests: 60 requests per minute per client
 - Mutating requests: 10 requests per minute per client
 - Global governance policy:
-  - read_rpm and mutate_rpm are platform-level limits managed by PLATFORM_ADMIN in Admin UI -> System Settings.
-  - Values are persisted in SSM under `DXCP_SSM_PREFIX` (for example `/dxcp/config/read_rpm` and `/dxcp/config/mutate_rpm`).
+  - read_rpm, mutate_rpm, and daily_quota_build_register are platform-level throttling settings managed by PLATFORM_ADMIN in Admin UI -> System Settings.
+  - Values are persisted in SSM under `DXCP_SSM_PREFIX` (for example `/dxcp/config/read_rpm`, `/dxcp/config/mutate_rpm`, and `/dxcp/config/daily_quota_build_register`).
   - Allowed bounds are integer `1..5000` (no zero, no negatives, no fractional values).
+  - daily_quota_build_register allows integer `0..5000`.
+  - If SSM does not contain daily_quota_build_register, runtime falls back to `DXCP_DAILY_QUOTA_BUILD_REGISTER`, then `50`.
   - Enforcement refreshes from config on a short window; operator expectation is propagation in about 60 seconds.
   - Higher values increase abuse and cost risk; raise only with deliberate platform review.
 - Daily quotas per delivery group:

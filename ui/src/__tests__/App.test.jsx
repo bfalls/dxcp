@@ -233,11 +233,16 @@ const buildFetchMock = ({
       )
     }
     if (pathname === '/v1/admin/system/rate-limits' && (!options.method || options.method === 'GET')) {
-      return ok({ read_rpm: 60, mutate_rpm: 10, source: 'ssm' })
+      return ok({ read_rpm: 60, mutate_rpm: 10, daily_quota_build_register: 50, source: 'ssm' })
     }
     if (pathname === '/v1/admin/system/rate-limits' && options.method === 'PUT') {
       const body = JSON.parse(options.body || '{}')
-      return ok({ read_rpm: body.read_rpm ?? 60, mutate_rpm: body.mutate_rpm ?? 10, source: 'ssm' })
+      return ok({
+        read_rpm: body.read_rpm ?? 60,
+        mutate_rpm: body.mutate_rpm ?? 10,
+        daily_quota_build_register: body.daily_quota_build_register ?? 50,
+        source: 'ssm'
+      })
     }
     if (pathname === '/v1/insights/failures') {
       const service = parsed.searchParams.get('service') || ''

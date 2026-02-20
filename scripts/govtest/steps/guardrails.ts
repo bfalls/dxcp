@@ -55,7 +55,14 @@ async function validateIntent(context: RunContext, ownerToken: string, version: 
 
 function hasNumericPolicyFields(
   payload: any,
-  fields: Array<"daily_deploy_quota" | "deployments_used" | "deployments_remaining" | "max_concurrent_deployments" | "current_concurrent_deployments">,
+  fields: Array<
+    | "daily_deploy_quota"
+    | "deployments_used"
+    | "deployments_remaining"
+    | "max_concurrent_deployments"
+    | "current_concurrent_deployments"
+    | "daily_quota_build_register"
+  >,
 ): boolean {
   const policy = payload?.policy;
   return fields.every((field) => typeof policy?.[field] === "number");
@@ -108,6 +115,21 @@ export async function checkQuotaSafe(context: RunContext, ownerToken: string): P
     record(context, "quota.safe.policy_quota_shape", "PASSED", "Policy summary includes quota fields");
   } else {
     record(context, "quota.safe.policy_quota_shape", "FAILED", "Policy summary missing quota fields");
+  }
+  if (hasNumericPolicyFields(summary.payload, ["daily_quota_build_register"])) {
+    record(
+      context,
+      "quota.safe.policy_daily_build_register_shape",
+      "PASSED",
+      "Policy summary includes daily_quota_build_register as a number",
+    );
+  } else {
+    record(
+      context,
+      "quota.safe.policy_daily_build_register_shape",
+      "FAILED",
+      "Policy summary missing daily_quota_build_register",
+    );
   }
 
   const validate = await validateIntent(context, ownerToken, context.runVersion);

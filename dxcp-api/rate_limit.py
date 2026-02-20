@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from collections import defaultdict
 from decimal import Decimal
 
@@ -18,8 +19,13 @@ except Exception:  # pragma: no cover - optional dependency for local mode
 
 class RateLimiter:
     RATE_LIMIT_EXCEEDED_MESSAGE = "Rate limit exceeded. Try again shortly or contact a platform admin."
+    MIN_RPM_LIMIT = 1
+    MAX_RPM_LIMIT = 5000
+    MIN_DAILY_QUOTA = 0
+    MAX_DAILY_QUOTA = 5000
 
     def __init__(self) -> None:
+        self._logger = logging.getLogger("dxcp.api")
         self._table_name = os.getenv("DXCP_DDB_TABLE", "")
         self._refresh_seconds = int(os.getenv("DXCP_RATE_LIMIT_REFRESH_SECONDS", "30"))
         live_refresh_env = os.getenv("DXCP_RATE_LIMIT_LIVE_SSM")
@@ -31,8 +37,10 @@ class RateLimiter:
         self._live_limits = {
             "read_rpm": int(SETTINGS.read_rpm),
             "mutate_rpm": int(SETTINGS.mutate_rpm),
+            "daily_quota_build_register": int(SETTINGS.daily_quota_build_register),
         }
         self._live_limits_refreshed_at = 0.0
+        self._log_live_limits("startup", "runtime_defaults")
         if self._table_name:
             if not boto3:
                 raise RuntimeError("boto3 is required for DynamoDB rate limiting")
@@ -41,6 +49,30 @@ class RateLimiter:
             self._ddb = None
             self._minute_counters = defaultdict(lambda: {"start": 0.0, "count": 0, "limit": 0})
             self._daily_counts = defaultdict(lambda: defaultdict(int))
+
+    def _fallback_build_register_quota(self) -> int:
+        raw = os.getenv("DXCP_DAILY_QUOTA_BUILD_REGISTER")
+        if raw is None:
+            return 50
+        try:
+            parsed = int(str(raw).strip())
+        except Exception:
+            return 50
+        if parsed < self.MIN_DAILY_QUOTA or parsed > self.MAX_DAILY_QUOTA:
+            return 50
+        return parsed
+
+    def _log_live_limits(self, event: str, source: str) -> None:
+        self._logger.info(
+            "event=rate_limit.limits.%s source=%s read_rpm=%s mutate_rpm=%s daily_quota_build_register=%s live_refresh_enabled=%s refresh_seconds=%s",
+            event,
+            source,
+            self._live_limits.get("read_rpm"),
+            self._live_limits.get("mutate_rpm"),
+            self._live_limits.get("daily_quota_build_register"),
+            self._live_refresh_enabled,
+            self._refresh_seconds,
+        )
 
     def _ssm_client(self):
         if not boto3:
@@ -69,8 +101,9 @@ class RateLimiter:
             self._live_limits_refreshed_at = now
             return
         try:
+            previous = dict(self._live_limits)
             response = client.get_parameters(
-                Names=[f"{prefix}/read_rpm", f"{prefix}/mutate_rpm"],
+                Names=[f"{prefix}/read_rpm", f"{prefix}/mutate_rpm", f"{prefix}/daily_quota_build_register"],
                 WithDecryption=True,
             )
             found = {item.get("Name"): item.get("Value") for item in response.get("Parameters", [])}
@@ -79,8 +112,18 @@ class RateLimiter:
                 if raw is None:
                     continue
                 parsed = int(raw)
-                if 1 <= parsed <= 5000:
+                if self.MIN_RPM_LIMIT <= parsed <= self.MAX_RPM_LIMIT:
                     self._live_limits[key] = parsed
+            daily_key = f"{prefix}/daily_quota_build_register"
+            daily_raw = found.get(daily_key)
+            if daily_raw is None:
+                self._live_limits["daily_quota_build_register"] = self._fallback_build_register_quota()
+            else:
+                parsed_daily = int(daily_raw)
+                if self.MIN_DAILY_QUOTA <= parsed_daily <= self.MAX_DAILY_QUOTA:
+                    self._live_limits["daily_quota_build_register"] = parsed_daily
+            if self._live_limits != previous:
+                self._log_live_limits("refresh", "ssm")
         except Exception:
             pass
         self._live_limits_refreshed_at = now
@@ -103,6 +146,33 @@ class RateLimiter:
         self._live_limits["read_rpm"] = int(read_rpm)
         self._live_limits["mutate_rpm"] = int(mutate_rpm)
         self._live_limits_refreshed_at = time.time()
+
+    def set_runtime_build_register_quota(self, daily_quota_build_register: int) -> None:
+        self._runtime_limit_overrides["daily_quota_build_register"] = int(daily_quota_build_register)
+        self._live_limits["daily_quota_build_register"] = int(daily_quota_build_register)
+        self._live_limits_refreshed_at = time.time()
+
+    def _get_live_daily_limit(self, key: str, fallback: int) -> int:
+        if key in self._runtime_limit_overrides:
+            return int(self._runtime_limit_overrides[key])
+        if not self._live_refresh_enabled:
+            return int(fallback)
+        self._refresh_live_limits_if_due()
+        value = self._live_limits.get(key, fallback)
+        try:
+            return int(value)
+        except Exception:
+            return int(fallback)
+
+    def get_live_throttling_settings(self) -> dict:
+        return {
+            "read_rpm": self._get_live_minute_limit("read_rpm", SETTINGS.read_rpm),
+            "mutate_rpm": self._get_live_minute_limit("mutate_rpm", SETTINGS.mutate_rpm),
+            "daily_quota_build_register": self._get_live_daily_limit(
+                "daily_quota_build_register",
+                SETTINGS.daily_quota_build_register,
+            ),
+        }
 
     def _check_minute(self, client_id: str, limit: int) -> None:
         if self._ddb:
@@ -197,7 +267,11 @@ class RateLimiter:
         elif quota_key == "rollback":
             self._check_daily(scope_id, "rollback", quota_limit or SETTINGS.daily_quota_rollback)
         elif quota_key == "build_register":
-            self._check_daily(scope_id, "build_register", SETTINGS.daily_quota_build_register)
+            self._check_daily(
+                scope_id,
+                "build_register",
+                self._get_live_daily_limit("daily_quota_build_register", SETTINGS.daily_quota_build_register),
+            )
         elif quota_key == "upload_capability":
             self._check_daily(scope_id, "upload_capability", SETTINGS.daily_quota_upload_capability)
 

@@ -548,13 +548,13 @@ function parseGuardrailValue(value) {
   return Math.floor(parsed)
 }
 
-function parseSystemRateLimitValue(value, label) {
+function parseSystemRateLimitValue(value, label, min = 1, max = 5000) {
   const raw = String(value ?? '').trim()
   if (!raw) return { error: `${label} is required.` }
   if (!/^\d+$/.test(raw)) return { error: `${label} must be an integer.` }
   const parsed = Number(raw)
-  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 5000) {
-    return { error: `${label} must be between 1 and 5000.` }
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return { error: `${label} must be between ${min} and ${max}.` }
   }
   return { value: parsed }
 }
@@ -796,8 +796,16 @@ export default function App() {
   const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
   const [adminRecipeValidation, setAdminRecipeValidation] = useState(null)
   const [adminRecipeConfirmWarning, setAdminRecipeConfirmWarning] = useState(false)
-  const [systemRateLimitDraft, setSystemRateLimitDraft] = useState({ read_rpm: '', mutate_rpm: '' })
-  const [systemRateLimitBaseline, setSystemRateLimitBaseline] = useState({ read_rpm: '', mutate_rpm: '' })
+  const [systemRateLimitDraft, setSystemRateLimitDraft] = useState({
+    read_rpm: '',
+    mutate_rpm: '',
+    daily_quota_build_register: ''
+  })
+  const [systemRateLimitBaseline, setSystemRateLimitBaseline] = useState({
+    read_rpm: '',
+    mutate_rpm: '',
+    daily_quota_build_register: ''
+  })
   const [systemRateLimitLoading, setSystemRateLimitLoading] = useState(false)
   const [systemRateLimitSaving, setSystemRateLimitSaving] = useState(false)
   const [systemRateLimitError, setSystemRateLimitError] = useState('')
@@ -1634,11 +1642,13 @@ export default function App() {
         }
         setSystemRateLimitDraft({
           read_rpm: String(data?.read_rpm ?? ''),
-          mutate_rpm: String(data?.mutate_rpm ?? '')
+          mutate_rpm: String(data?.mutate_rpm ?? ''),
+          daily_quota_build_register: String(data?.daily_quota_build_register ?? '')
         })
         setSystemRateLimitBaseline({
           read_rpm: String(data?.read_rpm ?? ''),
-          mutate_rpm: String(data?.mutate_rpm ?? '')
+          mutate_rpm: String(data?.mutate_rpm ?? ''),
+          daily_quota_build_register: String(data?.daily_quota_build_register ?? '')
         })
       } catch (err) {
         if (isLoginRequiredError(err)) return
@@ -1673,9 +1683,23 @@ export default function App() {
       setSystemRateLimitError(mutateParsed.error)
       return
     }
+    const dailyBuildRegisterParsed = parseSystemRateLimitValue(
+      systemRateLimitDraft.daily_quota_build_register,
+      'Daily build registration quota',
+      0,
+      5000
+    )
+    if (dailyBuildRegisterParsed.error) {
+      setSystemRateLimitError(dailyBuildRegisterParsed.error)
+      return
+    }
     setSystemRateLimitSaving(true)
     try {
-      const payload = { read_rpm: readParsed.value, mutate_rpm: mutateParsed.value }
+      const payload = {
+        read_rpm: readParsed.value,
+        mutate_rpm: mutateParsed.value,
+        daily_quota_build_register: dailyBuildRegisterParsed.value
+      }
       const result = await api.put('/admin/system/rate-limits', payload)
       if (result && result.code) {
         setSystemRateLimitError(formatApiError(result, 'Failed to save system rate limits.'))
@@ -1683,11 +1707,17 @@ export default function App() {
       }
       setSystemRateLimitDraft({
         read_rpm: String(result?.read_rpm ?? payload.read_rpm),
-        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm)
+        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm),
+        daily_quota_build_register: String(
+          result?.daily_quota_build_register ?? payload.daily_quota_build_register
+        )
       })
       setSystemRateLimitBaseline({
         read_rpm: String(result?.read_rpm ?? payload.read_rpm),
-        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm)
+        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm),
+        daily_quota_build_register: String(
+          result?.daily_quota_build_register ?? payload.daily_quota_build_register
+        )
       })
       setSystemRateLimitNote('System rate limits saved.')
     } catch (err) {
@@ -1696,7 +1726,13 @@ export default function App() {
     } finally {
       setSystemRateLimitSaving(false)
     }
-  }, [api, isPlatformAdmin, systemRateLimitDraft.read_rpm, systemRateLimitDraft.mutate_rpm])
+  }, [
+    api,
+    isPlatformAdmin,
+    systemRateLimitDraft.read_rpm,
+    systemRateLimitDraft.mutate_rpm,
+    systemRateLimitDraft.daily_quota_build_register
+  ])
 
   const loadSystemCiPublishers = useCallback(
     async (options = {}) => {
@@ -4045,7 +4081,9 @@ export default function App() {
     systemRateLimitSaving,
     systemRateLimitDirty:
       String(systemRateLimitDraft.read_rpm).trim() !== String(systemRateLimitBaseline.read_rpm).trim() ||
-      String(systemRateLimitDraft.mutate_rpm).trim() !== String(systemRateLimitBaseline.mutate_rpm).trim(),
+      String(systemRateLimitDraft.mutate_rpm).trim() !== String(systemRateLimitBaseline.mutate_rpm).trim() ||
+      String(systemRateLimitDraft.daily_quota_build_register).trim() !==
+        String(systemRateLimitBaseline.daily_quota_build_register).trim(),
     systemRateLimitError,
     systemRateLimitNote,
     systemCiPublishersDraft,

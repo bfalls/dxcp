@@ -986,6 +986,23 @@ export default function AdminPage({
               />
               <div className="helper">Integer between 1 and 5000.</div>
             </div>
+            <div className="field">
+              <label htmlFor="system-daily-build-register-quota">Daily build registration quota</label>
+              <input
+                id="system-daily-build-register-quota"
+                type="number"
+                min="0"
+                max="5000"
+                step="1"
+                value={systemRateLimitDraft.daily_quota_build_register}
+                onChange={(e) => handleSystemRateLimitDraftChange('daily_quota_build_register', e.target.value)}
+                onInput={(e) => handleSystemRateLimitDraftChange('daily_quota_build_register', e.target.value)}
+                disabled={systemRateLimitLoading || systemRateLimitSaving}
+              />
+              <div className="helper">
+                Applies to CI build registration across the system (scoped per CI actor_id in counters).
+              </div>
+            </div>
           </div>
           {systemRateLimitError && <div className="helper space-8">{systemRateLimitError}</div>}
           {systemRateLimitNote && <div className="helper space-8">{systemRateLimitNote}</div>}
