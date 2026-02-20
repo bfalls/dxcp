@@ -4,6 +4,7 @@ import type { RunContext, JwtClaims, WhoAmI } from "./types.ts";
 
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
+const DEFAULT_ROLES_CLAIM = "https://dxcp.example/claims/roles";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -390,10 +391,17 @@ export function announceStep(label: string): void {
 }
 
 export function printIdentity(role: string, token: string, claims: JwtClaims, whoamiPayload: WhoAmI): void {
-  const roles = Array.isArray(whoamiPayload.roles) ? whoamiPayload.roles : [];
+  const rolesClaimKey = optionalEnv("DXCP_OIDC_ROLES_CLAIM") ?? DEFAULT_ROLES_CLAIM;
+  const claimsObj = claims as Record<string, unknown>;
+  const claimRolesValue = claimsObj[rolesClaimKey];
+  const claimRoles = Array.isArray(claimRolesValue)
+    ? claimRolesValue.filter((item): item is string => typeof item === "string")
+    : [];
+  const whoamiRoles = Array.isArray(whoamiPayload.roles) ? whoamiPayload.roles : [];
+  const roles = claimRoles.length > 0 ? claimRoles : whoamiRoles;
   logInfo(
     `Identity role=${role} email=${whoamiPayload.email ?? claims.email ?? ""} sub=${whoamiPayload.sub ?? claims.sub ?? ""} azp=${whoamiPayload.azp ?? claims.azp ?? ""} aud=${JSON.stringify(
       whoamiPayload.aud ?? claims.aud ?? "",
-    )} iss=${whoamiPayload.iss ?? claims.iss ?? ""} roles=${JSON.stringify(roles)} token=${redactToken(token)}`,
+    )} iss=${whoamiPayload.iss ?? claims.iss ?? ""} roles_claim_key=${rolesClaimKey} roles=${JSON.stringify(roles)} token=${redactToken(token)}`,
   );
 }
