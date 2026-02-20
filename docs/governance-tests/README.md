@@ -126,9 +126,13 @@ The full run executes the following invariant checks in order:
    - owner can call deploy endpoints in scope (permission sanity check uses unregistered version and expects `400 VERSION_NOT_FOUND`, not role denial).
    - observer can call read-only APIs (`GET /v1/services/{service}/versions`, `GET /v1/deployments`, and deployment status when available).
    - claims sanity requires expected role values via `whoami.roles` when present, or equivalent JWT roles claim.
-2. Gate negative: non-CI owner identity cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
+2. Gate negatives:
+   - non-CI owner identity cannot call `POST /v1/builds/register` (`403 CI_ONLY`).
+   - CI publisher identity is denied before allowlist configuration (`403 CI_ONLY`).
 3. CI allowlist admin setup: `PUT /v1/admin/system/ci-publishers` using admin user token, with matcher fields populated from `GET /v1/whoami` using CI M2M token (`iss`, `aud`, `azp`, `sub`).
-4. Build registration happy path: `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
+4. Build registration idempotency key negatives + happy path:
+   - missing or empty `Idempotency-Key` returns `400 IDMP_KEY_REQUIRED`.
+   - `POST /v1/builds/register` for computed `GOV_RUN_VERSION` returns `201`; replay with same `Idempotency-Key` returns `201` and `Idempotency-Replayed: true`.
 5. Build conflict: same idempotency key with different `git_sha` returns `409 BUILD_REGISTRATION_CONFLICT`.
 6. Deploy enforcement invariants:
    - Unregistered version (`0.<runMinor>.999`): both `POST /v1/deployments/validate` and `POST /v1/deployments` return `400 VERSION_NOT_FOUND`.

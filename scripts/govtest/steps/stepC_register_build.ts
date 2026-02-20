@@ -1,15 +1,42 @@
 import type { RunContext } from "../types.ts";
-import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, markStepEnd, markStepStart } from "../common.ts";
+import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, requiredEnv, markStepEnd, markStepStart } from "../common.ts";
 
 export async function stepC_registerBuildHappyPath(context: RunContext, ciToken: string): Promise<void> {
   const step = "C";
-  announceStep("C) Register build happy path and idempotency replay with same key");
+  announceStep("C) Build registration negatives for idempotency key plus happy path replay");
   markStepStart(context, step);
 
   const payload = buildRegisterExistingPayload(context, {
     version: context.runVersion,
     git_sha: "b".repeat(40),
   });
+  const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
+
+  const missingIdempotency = await apiRequest("POST", "/v1/builds/register", ciToken, {
+    body: payload,
+  });
+  await assertStatus(
+    missingIdempotency,
+    400,
+    "C: POST /v1/builds/register (missing idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
+  const invalidEmptyIdempotency = await fetch(`${baseApi}/v1/builds/register`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ciToken}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": "",
+    },
+    body: JSON.stringify(payload),
+  });
+  await assertStatus(
+    invalidEmptyIdempotency,
+    400,
+    "C: POST /v1/builds/register (invalid empty idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
 
   const first = await apiRequest("POST", "/v1/builds/register", ciToken, {
     idempotencyKey: context.idempotencyKeys.ciRegister,

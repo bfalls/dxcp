@@ -295,7 +295,7 @@ async function main(): Promise<number> {
   announceStep("Executing Phase 3 governance API assertions (fail-fast)");
 
   await stepR_roleAuthorizationChecks(context, tokens, claimsByRole);
-  await stepA_proveCiGateNegative(context, tokens.owner);
+  await stepA_proveCiGateNegative(context, tokens.owner, tokens.ci, tokens.admin);
   await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
   await stepC_registerBuildHappyPath(context, tokens.ci);
   await stepD_conflictDifferentGitShaSameIdempotencyKey(context, tokens.ci);
