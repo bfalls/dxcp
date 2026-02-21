@@ -29,10 +29,14 @@ The harness validates:
 - Delivery group scoping
 - Build publish gating
 - Idempotency behavior
+- Admin config auditability for CI publishers and mutation kill switch
 - Enforcement ordering
 - Deployment invariants
 - Rollback invariants
 - Quota and concurrency guardrails
+
+Admin config auditability conformance in govtest intentionally excludes live system rate-limit mutation assertions.
+Changing global `read_rpm` / `mutate_rpm` / `daily_quota_build_register` values during a run can throttle unrelated steps and destabilize fail-fast contract checks.
 
 The harness is fail-fast. Any invariant violation stops execution.
 

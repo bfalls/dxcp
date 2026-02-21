@@ -172,6 +172,32 @@ async def test_get_returns_persisted_policy(tmp_path: Path, monkeypatch):
     }
 
 
+async def test_put_ui_exposure_policy_writes_audit_event(tmp_path: Path, monkeypatch):
+    store = {
+        "/dxcp/config/policy/ui/exposure": json.dumps({"artifactRef": {"display": False}, "externalLinks": {"display": False}})
+    }
+    async with _client(tmp_path, monkeypatch, store=store) as client:
+        response = await client.put(
+            "/v1/admin/system/ui-exposure-policy",
+            headers={"X-Request-Id": "req-ui-policy-1", **auth_header(["dxcp-platform-admins"])},
+            json={"artifactRef": {"display": True}, "externalLinks": {"display": True}},
+        )
+        events = await client.get(
+            "/v1/audit/events?event_type=ADMIN_CONFIG_CHANGE",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert response.status_code == 200
+    assert events.status_code == 200
+    event = next(item for item in events.json() if item.get("target_id") == "ui_exposure_policy")
+    summary = json.loads(event["summary"])
+    assert event["target_type"] == "AdminSetting"
+    assert summary["request_id"] == "req-ui-policy-1"
+    assert summary["setting_key"] == "ui_exposure_policy"
+    assert summary["old_value"] == {"artifactRef": {"display": False}, "externalLinks": {"display": False}}
+    assert summary["new_value"] == {"artifactRef": {"display": True}, "externalLinks": {"display": True}}
+
+
 async def test_ui_read_endpoint_allows_standard_roles(tmp_path: Path, monkeypatch):
     store = {"/dxcp/config/policy/ui/exposure": json.dumps({"artifactRef": {"display": True}})}
     async with _client(tmp_path, monkeypatch, store=store) as client:

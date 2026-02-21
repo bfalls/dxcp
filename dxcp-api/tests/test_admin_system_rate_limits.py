@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -144,25 +145,21 @@ async def test_put_system_rate_limits_validation_bounds(tmp_path: Path, monkeypa
     assert body["request_id"]
 
 
-async def test_put_system_rate_limits_writes_ssm_and_logs(tmp_path: Path, monkeypatch):
+async def test_put_system_rate_limits_writes_ssm_and_audit_events(tmp_path: Path, monkeypatch):
     store = {
         "/dxcp/config/read_rpm": "60",
         "/dxcp/config/mutate_rpm": "10",
         "/dxcp/config/daily_quota_build_register": "50",
     }
-    captured = {}
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
-        import admin_system_routes
-
-        def _capture_log(message: str, *args):
-            rendered = message % args
-            captured["line"] = rendered
-
-        monkeypatch.setattr(admin_system_routes.logger, "info", _capture_log)
         response = await client.put(
             "/v1/admin/system/rate-limits",
-            headers=auth_header(["dxcp-platform-admins"]),
+            headers={"X-Request-Id": "req-rate-1", **auth_header(["dxcp-platform-admins"])},
             json={"read_rpm": 123, "mutate_rpm": 45, "daily_quota_build_register": 88},
+        )
+        events = await client.get(
+            "/v1/audit/events?event_type=ADMIN_CONFIG_CHANGE",
+            headers=auth_header(["dxcp-platform-admins"]),
         )
 
     assert response.status_code == 200
@@ -170,15 +167,21 @@ async def test_put_system_rate_limits_writes_ssm_and_logs(tmp_path: Path, monkey
     assert store["/dxcp/config/read_rpm"] == "123"
     assert store["/dxcp/config/mutate_rpm"] == "45"
     assert store["/dxcp/config/daily_quota_build_register"] == "88"
-    line = captured["line"]
-    assert "event=admin.system_rate_limits.updated" in line
-    assert "actor_id=user-1" in line
-    assert "old_read_rpm=60" in line
-    assert "old_mutate_rpm=10" in line
-    assert "old_daily_quota_build_register=50" in line
-    assert "new_read_rpm=123" in line
-    assert "new_mutate_rpm=45" in line
-    assert "new_daily_quota_build_register=88" in line
+    assert events.status_code == 200
+    payload = events.json()
+    relevant = [item for item in payload if item.get("target_id") in {"read_rpm", "mutate_rpm", "daily_quota_build_register"}]
+    assert len(relevant) == 3
+    for event in relevant:
+        assert event["event_type"] == "ADMIN_CONFIG_CHANGE"
+        assert event["target_type"] == "AdminSetting"
+        assert event["actor_id"] == "user-1"
+        summary = json.loads(event["summary"])
+        assert summary["request_id"] == "req-rate-1"
+        assert summary["actor_sub"] == "user-1"
+        assert summary["actor_email"] == "user@example.com"
+        assert summary["setting_key"] == event["target_id"]
+        assert "old_value" in summary
+        assert "new_value" in summary
 
 
 async def test_put_updates_live_read_limit_enforcement(tmp_path: Path, monkeypatch):

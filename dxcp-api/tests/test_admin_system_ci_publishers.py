@@ -225,3 +225,33 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
     assert before.json()["code"] == "CI_ONLY"
     assert update.status_code == 200
     assert after.status_code == 201
+
+
+async def test_put_system_ci_publishers_writes_audit_event(tmp_path: Path, monkeypatch):
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
+    updated_publishers = [_publisher("ci-bot-2", "ci-bot-2")]
+    async with _client(tmp_path, monkeypatch, store) as (client, _):
+        response = await client.put(
+            "/v1/admin/system/ci-publishers",
+            headers={
+                "X-Request-Id": "req-ci-publishers-1",
+                "Idempotency-Key": "ci-publishers-audit",
+                **auth_header(["dxcp-platform-admins"]),
+            },
+            json={"publishers": updated_publishers},
+        )
+        events = await client.get(
+            "/v1/audit/events?event_type=ADMIN_CONFIG_CHANGE",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert response.status_code == 200
+    assert events.status_code == 200
+    event = next(item for item in events.json() if item.get("target_id") == "ci_publishers")
+    summary = json.loads(event["summary"])
+    assert event["target_type"] == "AdminSetting"
+    assert event["actor_id"] == "user-1"
+    assert summary["request_id"] == "req-ci-publishers-1"
+    assert summary["setting_key"] == "ci_publishers"
+    assert summary["old_value"] == [_publisher("ci-bot-1", "ci-bot-1")]
+    assert summary["new_value"] == updated_publishers

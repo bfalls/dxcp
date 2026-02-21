@@ -368,6 +368,7 @@ register_admin_system_routes(
     rate_limiter=rate_limiter,
     require_role=require_role,
     error_response=error_response,
+    record_audit_event=lambda event: storage.insert_audit_event(event),
 )
 
 

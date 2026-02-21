@@ -30,6 +30,7 @@ May configure:
 - Rate limits
 - CI publisher allowlist
 - System settings
+- All admin configuration changes must emit an audit log entry with actor identity, timestamp, setting key, old value, new value, and request_id.
 
 ---------------------------------------------------------------------
 

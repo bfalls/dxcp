@@ -259,29 +259,30 @@ async def test_mutations_disabled_blocks_mutations_but_not_reads(tmp_path: Path,
     assert read_deployments.status_code == 200
 
 
-async def test_mutations_disabled_update_audit_log_includes_actor_and_reason(tmp_path: Path, monkeypatch):
+async def test_mutations_disabled_update_writes_audit_event_with_actor_and_reason(tmp_path: Path, monkeypatch):
     store = {"/dxcp/config/mutations_disabled": "false"}
-    captured = {}
     async with _client(tmp_path, monkeypatch, store=store) as (client, _):
-        import admin_system_routes
-
-        def _capture_log(message: str, *args):
-            captured["line"] = message % args
-
-        monkeypatch.setattr(admin_system_routes.logger, "info", _capture_log)
         response = await client.patch(
             "/v1/admin/system/mutations-disabled",
-            headers=auth_header(["dxcp-platform-admins"]),
+            headers={"X-Request-Id": "req-kill-switch-1", **auth_header(["dxcp-platform-admins"])},
             json={"mutations_disabled": True, "reason": "incident response"},
+        )
+        events = await client.get(
+            "/v1/audit/events?event_type=ADMIN_CONFIG_CHANGE",
+            headers=auth_header(["dxcp-platform-admins"]),
         )
 
     assert response.status_code == 200
-    line = captured["line"]
-    assert "event=admin.system_mutations_disabled.updated" in line
-    assert "actor_id=user-1" in line
-    assert "actor_sub=user-1" in line
-    assert "actor_email=user@example.com" in line
-    assert "old_value=False" in line
-    assert "new_value=True" in line
-    assert "reason=incident response" in line
-    assert "timestamp=" in line
+    assert events.status_code == 200
+    event = next(item for item in events.json() if item.get("target_id") == "mutations_disabled")
+    summary = json.loads(event["summary"])
+    assert event["event_type"] == "ADMIN_CONFIG_CHANGE"
+    assert event["target_type"] == "AdminSetting"
+    assert event["actor_id"] == "user-1"
+    assert summary["request_id"] == "req-kill-switch-1"
+    assert summary["actor_sub"] == "user-1"
+    assert summary["actor_email"] == "user@example.com"
+    assert summary["setting_key"] == "mutations_disabled"
+    assert summary["old_value"] is False
+    assert summary["new_value"] is True
+    assert summary["reason"] == "incident response"

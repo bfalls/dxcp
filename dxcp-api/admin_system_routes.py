@@ -405,6 +405,65 @@ def _validate_mutations_disabled_payload(payload: object) -> tuple[Optional[dict
     return {"mutations_disabled": mutations_disabled, "reason": normalized_reason}, None
 
 
+def _audit_admin_config_changes(
+    *,
+    actor,
+    claims: dict,
+    request: Request,
+    request_id_provider: Callable[[], str],
+    changes: dict[str, tuple[object, object]],
+    record_audit_event: Optional[Callable[[dict], None]],
+    reason: Optional[str] = None,
+) -> None:
+    request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).isoformat()
+    actor_sub = claims.get("sub")
+    actor_email = claims.get("email") or claims.get("https://dxcp.example/claims/email") or actor.email
+    actor_azp = claims.get("azp")
+    for setting_key, (old_value, new_value) in changes.items():
+        detail = {
+            "request_id": request_id,
+            "timestamp": timestamp,
+            "setting_key": setting_key,
+            "old_value": old_value,
+            "new_value": new_value,
+            "actor_id": actor.actor_id,
+            "actor_sub": actor_sub,
+            "actor_email": actor_email,
+            "actor_azp": actor_azp,
+            "actor_role": actor.role.value,
+        }
+        if reason is not None:
+            detail["reason"] = reason
+        logger.info(
+            "event=admin.config_change request_id=%s actor_id=%s actor_sub=%s actor_email=%s actor_azp=%s actor_role=%s setting_key=%s old_value=%s new_value=%s timestamp=%s",
+            request_id,
+            actor.actor_id,
+            actor_sub,
+            actor_email,
+            actor_azp,
+            actor.role.value,
+            setting_key,
+            old_value,
+            new_value,
+            timestamp,
+        )
+        if callable(record_audit_event):
+            record_audit_event(
+                {
+                    "event_id": str(uuid.uuid4()),
+                    "event_type": "ADMIN_CONFIG_CHANGE",
+                    "actor_id": actor.actor_id,
+                    "actor_role": actor.role.value,
+                    "target_type": "AdminSetting",
+                    "target_id": setting_key,
+                    "timestamp": timestamp,
+                    "outcome": "SUCCESS",
+                    "summary": json.dumps(detail, sort_keys=True),
+                }
+            )
+
+
 def register_admin_system_routes(
     app,
     *,
@@ -415,6 +474,7 @@ def register_admin_system_routes(
     rate_limiter,
     require_role: Callable,
     error_response: Callable,
+    record_audit_event: Optional[Callable[[dict], None]] = None,
 ) -> None:
     @app.get("/v1/admin/system/rate-limits")
     def get_system_rate_limits(request: Request, authorization: Optional[str] = Header(None)):
@@ -436,7 +496,7 @@ def register_admin_system_routes(
         request: Request,
         authorization: Optional[str] = Header(None),
     ):
-        actor = get_actor(authorization)
+        actor, claims = get_actor_and_claims(authorization)
         rate_limiter.check_mutate(actor.actor_id, "admin_system_rate_limits_update")
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system rate limits")
         if role_error:
@@ -468,18 +528,20 @@ def register_admin_system_routes(
                 "daily_quota_build_register": validated["daily_quota_build_register"],
                 "source": "ssm",
             }
-            request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
-            logger.info(
-                "event=admin.system_rate_limits.updated request_id=%s actor_id=%s actor_role=%s old_read_rpm=%s old_mutate_rpm=%s old_daily_quota_build_register=%s new_read_rpm=%s new_mutate_rpm=%s new_daily_quota_build_register=%s",
-                request_id,
-                actor.actor_id,
-                actor.role.value,
-                old_values["read_rpm"],
-                old_values["mutate_rpm"],
-                old_values["daily_quota_build_register"],
-                new_values["read_rpm"],
-                new_values["mutate_rpm"],
-                new_values["daily_quota_build_register"],
+            _audit_admin_config_changes(
+                actor=actor,
+                claims=claims,
+                request=request,
+                request_id_provider=request_id_provider,
+                changes={
+                    "read_rpm": (old_values.get("read_rpm"), new_values["read_rpm"]),
+                    "mutate_rpm": (old_values.get("mutate_rpm"), new_values["mutate_rpm"]),
+                    "daily_quota_build_register": (
+                        old_values.get("daily_quota_build_register"),
+                        new_values["daily_quota_build_register"],
+                    ),
+                },
+                record_audit_event=record_audit_event,
             )
             return new_values
         except ValueError as exc:
@@ -503,7 +565,7 @@ def register_admin_system_routes(
         idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
         authorization: Optional[str] = Header(None),
     ):
-        actor = get_actor(authorization)
+        actor, claims = get_actor_and_claims(authorization)
         rate_limiter.check_mutate(actor.actor_id, "admin_system_ci_publishers_update")
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system CI publishers")
         if role_error:
@@ -524,14 +586,18 @@ def register_admin_system_routes(
                 "publishers": [_publisher_to_dict(publisher) for publisher in validated],
                 "source": "ssm",
             }
-            request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
-            logger.info(
-                "event=admin.system_ci_publishers.updated request_id=%s actor_id=%s actor_role=%s old_ci_publishers=%s new_ci_publishers=%s",
-                request_id,
-                actor.actor_id,
-                actor.role.value,
-                ",".join(item.get("name", "") for item in old_values.get("publishers", [])),
-                ",".join(item.get("name", "") for item in new_values.get("publishers", [])),
+            _audit_admin_config_changes(
+                actor=actor,
+                claims=claims,
+                request=request,
+                request_id_provider=request_id_provider,
+                changes={
+                    "ci_publishers": (
+                        old_values.get("publishers", []),
+                        new_values["publishers"],
+                    ),
+                },
+                record_audit_event=record_audit_event,
             )
             return new_values
         except Exception:
@@ -557,7 +623,7 @@ def register_admin_system_routes(
         request: Request,
         authorization: Optional[str] = Header(None),
     ):
-        actor = get_actor(authorization)
+        actor, claims = get_actor_and_claims(authorization)
         rate_limiter.check_mutate(actor.actor_id, "admin_system_ui_exposure_policy_update")
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system UI exposure policy")
         if role_error:
@@ -570,7 +636,19 @@ def register_admin_system_routes(
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
         try:
+            try:
+                old_policy = _read_ui_exposure_policy_from_ssm().get("policy", _default_ui_exposure_policy())
+            except Exception:
+                old_policy = _default_ui_exposure_policy()
             _write_ui_exposure_policy_to_ssm(validated)
+            _audit_admin_config_changes(
+                actor=actor,
+                claims=claims,
+                request=request,
+                request_id_provider=request_id_provider,
+                changes={"ui_exposure_policy": (old_policy, validated)},
+                record_audit_event=record_audit_event,
+            )
             return {"policy": validated, "source": "ssm"}
         except ValueError as exc:
             return error_response(500, "INTERNAL_ERROR", str(exc))
@@ -606,20 +684,14 @@ def register_admin_system_routes(
             _write_mutations_disabled_to_ssm(new_value)
             SETTINGS.mutations_disabled = new_value
             SETTINGS.kill_switch = new_value
-            request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
-            actor_sub = claims.get("sub")
-            actor_email = claims.get("email") or claims.get("https://dxcp.example/claims/email") or actor.email
-            logger.info(
-                "event=admin.system_mutations_disabled.updated request_id=%s actor_id=%s actor_sub=%s actor_email=%s actor_role=%s old_value=%s new_value=%s reason=%s timestamp=%s",
-                request_id,
-                actor.actor_id,
-                actor_sub,
-                actor_email,
-                actor.role.value,
-                old_value,
-                new_value,
-                validated.get("reason"),
-                datetime.now(timezone.utc).isoformat(),
+            _audit_admin_config_changes(
+                actor=actor,
+                claims=claims,
+                request=request,
+                request_id_provider=request_id_provider,
+                changes={"mutations_disabled": (old_value, new_value)},
+                reason=validated.get("reason"),
+                record_audit_event=record_audit_event,
             )
             return {"mutations_disabled": new_value, "source": "ssm"}
         except ValueError as exc:
