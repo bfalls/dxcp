@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   announceStep,
@@ -33,6 +33,7 @@ import { stepK_adminConfigAuditConformance } from "./steps/stepK_admin_config_au
 import { stepR_roleAuthorizationChecks } from "./steps/stepRole_authorization.ts";
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
+const CONTRACT_SNAPSHOT_ARTIFACT = ".govtest.contract.snapshot.json";
 const ANSI = {
   reset: "\x1b[0m",
   green: "\x1b[32m",
@@ -174,6 +175,58 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
   };
   writeFileSync(join(process.cwd(), LAST_RUN_ARTIFACT), JSON.stringify(payload, null, 2), "utf8");
   console.log(`[INFO] Wrote run artifact: ${LAST_RUN_ARTIFACT}`);
+  writeContractSnapshot(context, dryRun);
+}
+
+function readGovernanceContractVersion(): string {
+  const contractPath = join(process.cwd(), "docs", "governance-tests", "GOVERNANCE_CONTRACT.md");
+  if (!existsSync(contractPath)) {
+    return "unknown";
+  }
+  const text = readFileSync(contractPath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const match = line.match(/(?:contract[_ -]?version|version)\s*[:=]\s*([A-Za-z0-9._-]+)/i);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return "unknown";
+}
+
+function writeContractSnapshot(context: RunContext, dryRun: boolean): void {
+  const checks = context.guardrails.checks.map((check) => ({
+    id: check.id,
+    status: check.status,
+    classification: check.classification,
+    required: check.classification === "CONTRACT",
+    detail: check.detail,
+  }));
+  const total = checks.length;
+  const passed = checks.filter((check) => check.status === "PASSED").length;
+  const failed = checks.filter((check) => check.status === "FAILED").length;
+  const skipped = checks.filter((check) => check.status === "SKIPPED").length;
+  const requiredFailed = checks.filter((check) => check.required && check.status === "FAILED").length;
+  const payload = {
+    contract_version: readGovernanceContractVersion(),
+    timestamp: new Date().toISOString(),
+    suite: "govtest-runtime",
+    conformance_profile: context.conformanceProfile,
+    dry_run: dryRun,
+    summary: {
+      total,
+      passed,
+      failed,
+      skipped,
+      required_failed: requiredFailed,
+    },
+    checks,
+    source: {
+      last_run_artifact: LAST_RUN_ARTIFACT,
+    },
+  };
+  writeFileSync(join(process.cwd(), CONTRACT_SNAPSHOT_ARTIFACT), JSON.stringify(payload, null, 2), "utf8");
+  console.log(`[INFO] Wrote contract snapshot: ${CONTRACT_SNAPSHOT_ARTIFACT}`);
 }
 
 function printSummary(context: RunContext): void {

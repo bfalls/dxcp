@@ -11,7 +11,7 @@ from auth_utils import auth_header, auth_header_for_subject, configure_auth_env,
 from test_helpers import seed_defaults
 
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.governance_contract]
 
 
 class _FakeSSMClient:

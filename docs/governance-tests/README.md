@@ -63,6 +63,23 @@ See SETUP_AND_OPERATIONS.md for configuration details.
 
 ---------------------------------------------------------------------
 
+## Unified Conformance Snapshot
+
+Governance conformance is evaluated in two layers:
+
+- Runtime conformance (`govtest`, live AWS/Spinnaker/Auth0): writes `.govtest.contract.snapshot.json`
+- Unit conformance (`dxcp-api` governance contract subset): writes `.dxcpapi.governance.snapshot.json`
+
+Both snapshots are merged into:
+
+- `.governance.conformance.snapshot.json`
+
+The manual GitHub Actions workflow (`.github/workflows/governance-tests.yml`) runs both layers, uploads all snapshots as artifacts, and fails unless overall merged conformance is `PASS`.
+
+Governance badge/status should track this workflow result (the merged overall conformance result), not either layer in isolation.
+
+---------------------------------------------------------------------
+
 ## Governance Philosophy
 
 Governance tests are not adjustable knobs.

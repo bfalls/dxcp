@@ -11,7 +11,7 @@ from auth_utils import auth_header, configure_auth_env, mock_jwks
 from test_helpers import seed_defaults
 
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.governance_contract]
 
 
 def _publisher(name: str, subject: str) -> dict:

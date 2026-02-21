@@ -77,7 +77,7 @@ def _load_main(tmp_path: Path):
     return main
 
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.governance_contract]
 
 
 @asynccontextmanager

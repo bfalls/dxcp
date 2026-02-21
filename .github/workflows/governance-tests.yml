@@ -7,8 +7,6 @@ jobs:
   govtest:
     runs-on: ubuntu-latest
     outputs:
-      mode: ${{ steps.mode.outputs.mode }}
-      missing_keys: ${{ steps.mode.outputs.missing_keys }}
       run_version: ${{ steps.extract.outputs.run_version }}
     steps:
       - name: Checkout
@@ -19,6 +17,11 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
@@ -28,56 +31,15 @@ jobs:
       - name: Install Playwright browser (Chromium)
         run: cd ui && npx playwright install --with-deps chromium
 
-      - name: Decide govtest mode
-        id: mode
-        env:
-          GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
-          GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
-          GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
-          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
-          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
-          GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
-          GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
-          GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
-          GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
-          GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
-          GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
-          GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
-          GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
-        shell: bash
+      - name: Install dxcp-api Python dependencies
         run: |
-          set -euo pipefail
-          missing=()
-          for key in \
-            GOV_DXCP_UI_BASE GOV_DXCP_API_BASE GOV_AWS_REGION \
-            GOV_AUTH0_DOMAIN GOV_AUTH0_AUDIENCE \
-            GOV_DXCP_UI_CLIENT_ID \
-            GOV_ADMIN_USERNAME GOV_ADMIN_PASSWORD \
-            GOV_OWNER_USERNAME GOV_OWNER_PASSWORD \
-            GOV_OBSERVER_USERNAME GOV_OBSERVER_PASSWORD \
-            GOV_CI_CLIENT_ID GOV_CI_CLIENT_SECRET; do
-            if [[ -z "${!key:-}" ]]; then
-              missing+=("$key")
-            fi
-          done
+          python -m pip install --upgrade pip
+          python -m pip install -r dxcp-api/requirements.txt
 
-          if [[ "${#missing[@]}" -gt 0 ]]; then
-            {
-              printf 'missing_keys=%s\n' "${missing[*]}"
-              echo "args=--dry-run"
-              echo "mode=DRY_RUN"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "missing_keys="
-              echo "args="
-              echo "mode=FULL"
-            } >> "$GITHUB_OUTPUT"
-          fi
+      - name: Run governance contract unit subset
+        run: python dxcp-api/scripts/governance_contract_unit.py
 
-      - name: Run governance harness
-        id: run_harness
+      - name: Run governance runtime harness (strict)
         env:
           GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
           GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
@@ -91,13 +53,15 @@ jobs:
           GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
           GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
           GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
+          GOV_NON_MEMBER_OWNER_USERNAME: ${{ secrets.GOV_NON_MEMBER_OWNER_USERNAME }}
+          GOV_NON_MEMBER_OWNER_PASSWORD: ${{ secrets.GOV_NON_MEMBER_OWNER_PASSWORD }}
           GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
           CI: "true"
         shell: bash
         run: |
           set -euo pipefail
-          npm run govtest -- ${{ steps.mode.outputs.args }} | tee govtest-output.log
+          npm run govtest -- --strict | tee govtest-output.log
 
       - name: Extract run version
         id: extract
@@ -107,14 +71,47 @@ jobs:
           run_version="$(grep -E '^runVersion=' govtest-output.log | tail -n1 | cut -d'=' -f2- || true)"
           echo "run_version=${run_version}" >> "$GITHUB_OUTPUT"
 
+      - name: Merge conformance snapshots
+        id: merge
+        shell: bash
+        run: |
+          set +e
+          node --experimental-strip-types scripts/govtest/merge_conformance_snapshot.ts
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload governance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-conformance-artifacts
+          if-no-files-found: warn
+          path: |
+            .govtest.contract.snapshot.json
+            .dxcpapi.governance.snapshot.json
+            .governance.conformance.snapshot.json
+            .govtest.last-run.json
+
       - name: Summary
+        if: always()
         run: |
           {
-            echo "Governance harness mode: ${{ steps.mode.outputs.mode }}"
             if [[ -n "${{ steps.extract.outputs.run_version }}" ]]; then
               echo "GOV_RUN_VERSION: ${{ steps.extract.outputs.run_version }}"
             fi
-            if [[ -n "${{ steps.mode.outputs.missing_keys }}" ]]; then
-              echo "Missing GOV_ keys: ${{ steps.mode.outputs.missing_keys }}"
+            if [[ "${{ steps.merge.outputs.status }}" == "0" ]]; then
+              echo "Unified governance conformance: PASS"
+            else
+              echo "Unified governance conformance: FAIL"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce merged conformance PASS
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.merge.outputs.status }}" != "0" ]]; then
+            echo "Merged governance conformance status is FAIL."
+            exit 1
+          fi

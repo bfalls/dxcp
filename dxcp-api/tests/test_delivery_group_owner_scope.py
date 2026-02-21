@@ -38,7 +38,7 @@ def _load_main(tmp_path: Path):
     return importlib.import_module("main")
 
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.governance_contract]
 
 
 def _seed_group(main, group_id: str, owner: str):

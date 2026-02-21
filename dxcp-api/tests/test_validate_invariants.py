@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 from test_helpers import seed_defaults
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.governance_contract]
 
 
 def _write_service_registry(path: Path) -> None:
