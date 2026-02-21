@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Page } from "@playwright/test";
 import { requiredEnv } from "./common.ts";
+import { getCachedToken, putCachedToken } from "./token_cache.ts";
 import {
   adminCredentialsFromEnv,
   captureAccessTokenFromSpaCache,
@@ -71,6 +72,21 @@ async function getUserAccessTokenViaCredentials(
   password: string,
   chromium: ChromiumApi,
 ): Promise<string> {
+  const authDomain = requiredEnv("GOV_AUTH0_DOMAIN");
+  const authAudience = requiredEnv("GOV_AUTH0_AUDIENCE");
+  const uiClientId = requiredEnv("GOV_DXCP_UI_CLIENT_ID");
+  const issuer = `https://${authDomain.replace(/^https?:\/\//, "").replace(/\/$/, "")}/`;
+  const cacheKey = `user:${label}:${username}:${authDomain}:${authAudience}:${uiClientId}`;
+  const cached = getCachedToken(cacheKey, {
+    iss: issuer,
+    aud: authAudience,
+    azp: uiClientId,
+  });
+  if (cached) {
+    console.log(`[INFO] Using cached ${label} user token`);
+    return cached;
+  }
+
   const baseURL = requiredEnv("GOV_DXCP_UI_BASE");
   const browser = await launchBrowser(chromium);
   const context = await browser.newContext({ baseURL });
@@ -83,6 +99,7 @@ async function getUserAccessTokenViaCredentials(
     if (!token) {
       throw new Error(`Captured empty token for role=${label}`);
     }
+    putCachedToken(cacheKey, token);
     console.log(`[INFO] Acquired ${label} user token`);
     return token;
   } finally {

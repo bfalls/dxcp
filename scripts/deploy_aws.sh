@@ -277,27 +277,56 @@ copy_dir_contents "$ROOT_DIR/spinnaker-adapter" "$API_BUILD_DIR/spinnaker-adapte
 echo "Deploying CDK stacks..."
 pushd "$ROOT_DIR/cdk" >/dev/null
 npm install
-set +e
-npx cdk acknowledge 34892 >/dev/null 2>&1
-npx cdk acknowledge 32775 >/dev/null 2>&1
-set -e
-set +e
-CDK_DEPLOY_OUTPUT="$(CDK_DISABLE_NOTICES=1 npx cdk deploy --all --require-approval never 2>&1)"
-CDK_DEPLOY_STATUS=$?
-set -e
-printf "%s\n" "$CDK_DEPLOY_OUTPUT"
-if [[ "$CDK_DEPLOY_STATUS" -ne 0 ]]; then
-  if grep -Fq "Cannot read properties of undefined (reading 'endsWith')" <<<"$CDK_DEPLOY_OUTPUT"; then
-    echo "WARNING: CDK CLI reported a post-deploy endsWith crash. Verifying stack outputs directly via CloudFormation..."
-  else
-    echo "CDK deploy failed." >&2
-    exit "$CDK_DEPLOY_STATUS"
-  fi
+CDK_OUTPUTS_FILE="${CDK_OUTPUTS_FILE:-cdk-outputs.json}"
+CDK_DEBUG_LOG="${CDK_DEBUG_LOG:-$ROOT_DIR/cdk/cdk-deploy-debug.log}"
+DXCP_CDK_SINGLE_STACK="${DXCP_CDK_SINGLE_STACK:-}"
+CDK_NOTICES_CACHE="${HOME}/.cdk/cache/notices.json"
+if [[ -f "$CDK_NOTICES_CACHE" ]]; then
+  rm -f "$CDK_NOTICES_CACHE"
 fi
 set +e
-npx cdk acknowledge 34892 >/dev/null 2>&1
-npx cdk acknowledge 32775 >/dev/null 2>&1
 set -e
+
+run_cdk_deploy() {
+  local stack="$1"
+  local verbose_flag="${2:-0}"
+  local cmd=(npx cdk deploy "$stack" --require-approval never --progress events --outputs-file "$CDK_OUTPUTS_FILE" --no-notices)
+  if [[ "$verbose_flag" -eq 1 ]]; then
+    cmd+=(--verbose)
+  fi
+  if [[ "$verbose_flag" -eq 1 ]]; then
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] stack=$stack verbose=1 command=${cmd[*]}" | tee -a "$CDK_DEBUG_LOG"
+    CDK_DISABLE_NOTICES=1 "${cmd[@]}" 2>&1 | tee -a "$CDK_DEBUG_LOG"
+    local rc="${PIPESTATUS[0]}"
+    echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] stack=$stack verbose=1 exit_code=$rc" | tee -a "$CDK_DEBUG_LOG"
+    return "$rc"
+  fi
+  CDK_DISABLE_NOTICES=1 "${cmd[@]}"
+}
+
+set +e
+CDK_DEPLOY_STATUS=0
+CDK_STACKS=(DxcpDataStack DxcpDemoRuntimeStack DxcpApiStack DxcpUiStack)
+if [[ -n "$DXCP_CDK_SINGLE_STACK" ]]; then
+  CDK_STACKS=("$DXCP_CDK_SINGLE_STACK")
+  echo "CDK single-stack mode enabled: ${DXCP_CDK_SINGLE_STACK}"
+fi
+for stack in "${CDK_STACKS[@]}"; do
+  run_cdk_deploy "$stack" 0
+  STACK_STATUS=$?
+  if [[ "$STACK_STATUS" -ne 0 ]]; then
+    CDK_DEPLOY_STATUS=$STACK_STATUS
+    echo "WARNING: CDK deploy failed for stack=${stack}. Capturing verbose diagnostics to $CDK_DEBUG_LOG ..." >&2
+    run_cdk_deploy "$stack" 1 >/dev/null 2>&1
+    echo "WARNING: verbose diagnostics capture complete for stack=${stack}" >&2
+    break
+  fi
+done
+set -e
+if [[ "$CDK_DEPLOY_STATUS" -ne 0 ]]; then
+  echo "WARNING: CDK CLI exited non-zero. Verifying required stack outputs directly via CloudFormation..." >&2
+  echo "WARNING: CDK diagnostics log: $CDK_DEBUG_LOG" >&2
+fi
 popd >/dev/null
 
 API_BASE="$(trim "$(stack_output "DxcpApiStack" "ApiBaseUrl")")"

@@ -45,11 +45,18 @@ class IdempotencyStore:
             return {
                 "response": json.loads(item.get("response", "{}")),
                 "status_code": int(item.get("statusCode", 0)),
+                "request_fingerprint": item.get("requestFingerprint"),
             }
         self._cleanup()
         return self._store.get(key)
 
-    def set(self, key: str, response: dict, status_code: int) -> None:
+    def set(
+        self,
+        key: str,
+        response: dict,
+        status_code: int,
+        request_fingerprint: Optional[str] = None,
+    ) -> None:
         expires_at = int(time.time() + SETTINGS.idempotency_ttl_seconds)
         if self._ddb:
             def _json_default(value):
@@ -57,20 +64,24 @@ class IdempotencyStore:
                     return int(value) if value == value.to_integral_value() else float(value)
                 raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
+            item = {
+                "pk": "IDEMPOTENCY",
+                "sk": key,
+                "response": json.dumps(response, default=_json_default),
+                "statusCode": Decimal(status_code),
+                "expiresAt": str(expires_at),
+                "ttl": Decimal(expires_at),
+            }
+            if request_fingerprint is not None:
+                item["requestFingerprint"] = request_fingerprint
             self._ddb.put_item(
-                Item={
-                    "pk": "IDEMPOTENCY",
-                    "sk": key,
-                    "response": json.dumps(response, default=_json_default),
-                    "statusCode": Decimal(status_code),
-                    "expiresAt": str(expires_at),
-                    "ttl": Decimal(expires_at),
-                }
+                Item=item
             )
             return
         self._cleanup()
         self._store[key] = {
             "response": response,
             "status_code": status_code,
+            "request_fingerprint": request_fingerprint,
             "expires_at": expires_at,
         }

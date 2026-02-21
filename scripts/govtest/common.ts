@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { RunContext, JwtClaims, WhoAmI, ConformanceProfile } from "./types.ts";
+import { getCachedToken, putCachedToken } from "./token_cache.ts";
 
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
@@ -201,6 +202,19 @@ export async function ensureCiToken(): Promise<string> {
   const audience = requiredEnv("GOV_AUTH0_AUDIENCE");
   const clientId = requiredEnv("GOV_CI_CLIENT_ID");
   const clientSecret = requiredEnv("GOV_CI_CLIENT_SECRET");
+  const issuer = `https://${domain.replace(/^https?:\/\//, "").replace(/\/$/, "")}/`;
+  const cacheKey = `ci:${domain}:${audience}:${clientId}`;
+
+  const cached = getCachedToken(cacheKey, {
+    iss: issuer,
+    aud: audience,
+    azp: clientId,
+  });
+  if (cached) {
+    process.env.GOV_CI_TOKEN = cached;
+    logInfo(`Using cached Auth0 token for role=ci token=${redactToken(cached)}`);
+    return cached;
+  }
 
   logInfo("Minting Auth0 token for role=ci");
   const token = await getClientCredentialsToken({
@@ -209,6 +223,7 @@ export async function ensureCiToken(): Promise<string> {
     clientId,
     clientSecret,
   });
+  putCachedToken(cacheKey, token);
   process.env.GOV_CI_TOKEN = token;
   logInfo(`Minted role=ci token=${redactToken(token)}`);
   return token;

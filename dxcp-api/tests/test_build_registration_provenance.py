@@ -114,6 +114,52 @@ def _insert_upload_capability(main) -> None:
     )
 
 
+def _stub_register_existing_build(main, monkeypatch) -> None:
+    def _fake_register_existing_build_internal(
+        service_entry: dict,
+        service: str,
+        version: str,
+        artifact_ref: str,
+        s3_bucket: str | None,
+        s3_key: str | None,
+        git_sha: str,
+        git_branch: str,
+        ci_provider: str,
+        ci_run_id: str,
+        built_at: str,
+        checksum_sha256: str | None,
+        repo: str | None,
+        actor: str | None,
+        ci_publisher: str | None,
+        commit_url: str | None,
+        run_url: str | None,
+    ) -> dict:
+        return main.storage.insert_build(
+            {
+                "service": service,
+                "version": version,
+                "artifactRef": artifact_ref,
+                "git_sha": git_sha,
+                "git_branch": git_branch,
+                "ci_provider": ci_provider,
+                "ci_run_id": ci_run_id,
+                "built_at": built_at,
+                "sha256": "a" * 64,
+                "sizeBytes": 1024,
+                "contentType": "application/zip",
+                "checksum_sha256": checksum_sha256,
+                "repo": repo,
+                "actor": actor,
+                "ci_publisher": ci_publisher,
+                "commit_url": commit_url,
+                "run_url": run_url,
+                "registeredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        )
+
+    monkeypatch.setattr(main, "_register_existing_build_internal", _fake_register_existing_build_internal)
+
+
 async def test_build_registration_missing_required_fields_returns_400(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
@@ -190,6 +236,47 @@ async def test_build_registration_conflicting_reregister_returns_409(tmp_path: P
             "/v1/builds",
             headers={"Idempotency-Key": "build-conflict-2", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
             json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0-hotfix.zip", git_sha="b" * 40),
+        )
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["code"] == "BUILD_REGISTRATION_CONFLICT"
+
+
+async def test_build_register_existing_same_key_same_body_replays(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        _stub_register_existing_build(main, monkeypatch)
+        payload = _build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip")
+        first = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-replay-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
+            json=payload,
+        )
+        second = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-replay-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
+            json=payload,
+        )
+
+    assert first.status_code == 201
+    assert first.headers["Idempotency-Replayed"] == "false"
+    assert second.status_code == 201
+    assert second.headers["Idempotency-Replayed"] == "true"
+    assert first.json()["id"] == second.json()["id"]
+
+
+async def test_build_register_existing_same_key_different_git_sha_returns_409(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        _stub_register_existing_build(main, monkeypatch)
+        first = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-conflict-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
+            json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip", git_sha="a" * 40),
+        )
+        second = await client.post(
+            "/v1/builds/register",
+            headers={"Idempotency-Key": "build-register-conflict-1", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-publisher-1")},
+            json=_build_payload("s3://dxcp-test-bucket/demo-service-1.0.0.zip", git_sha="b" * 40),
         )
 
     assert first.status_code == 201

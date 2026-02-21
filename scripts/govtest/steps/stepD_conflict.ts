@@ -1,9 +1,12 @@
 import type { RunContext } from "../types.ts";
 import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, markStepEnd, markStepStart } from "../common.ts";
 
-export async function stepD_conflictDifferentGitShaSameIdempotencyKey(context: RunContext, ciToken: string): Promise<void> {
+export async function stepD_sameIdempotencyKeyDifferentBodyReturnsConflict(
+  context: RunContext,
+  ciToken: string,
+): Promise<void> {
   const step = "D";
-  announceStep("D) Conflict on same Idempotency-Key with different git_sha");
+  announceStep("D) Same Idempotency-Key with different body must return conflict");
   markStepStart(context, step);
 
   const payload = buildRegisterExistingPayload(context, {
@@ -23,7 +26,7 @@ export async function stepD_conflictDifferentGitShaSameIdempotencyKey(context: R
   });
 
   const second = await apiRequest("POST", "/v1/builds/register", ciToken, {
-    idempotencyKey: `${context.idempotencyKeys.ciConflict}-alt`,
+    idempotencyKey: context.idempotencyKeys.ciConflict,
     body: conflictPayload,
   });
 

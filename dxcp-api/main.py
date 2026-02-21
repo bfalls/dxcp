@@ -119,6 +119,22 @@ IDEMPOTENCY_OBSERVABLE_PATHS = {
     "/v1/builds",
     "/v1/builds/upload-capability",
 }
+BUILD_REGISTER_FINGERPRINT_FIELDS = (
+    "service",
+    "version",
+    "artifactRef",
+    "git_sha",
+    "git_branch",
+    "ci_provider",
+    "ci_run_id",
+    "built_at",
+    "sha256",
+    "sizeBytes",
+    "contentType",
+    "repo",
+    "commit_url",
+    "run_url",
+)
 
 logger.info(
     "config.engine loaded engine_url=%s engine_token=%s",
@@ -1488,21 +1504,84 @@ def _recipe_public_view(actor: Actor, recipe: dict) -> dict:
     return payload
 
 
-def enforce_idempotency(request: Request, idempotency_key: str):
+def _normalize_fingerprint_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, list):
+        return [_normalize_fingerprint_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_fingerprint_value(value[key])
+            for key in sorted(value.keys())
+        }
+    return value
+
+
+def _build_register_request_fingerprint(req: BuildRegisterExistingRequest) -> str:
+    try:
+        canonical_built_at = _normalize_timestamp(req.built_at)
+    except ValueError:
+        canonical_built_at = _normalize_fingerprint_value(req.built_at)
+    payload = {
+        "service": req.service,
+        "version": req.version,
+        "artifactRef": req.artifactRef,
+        "git_sha": req.git_sha,
+        "git_branch": req.git_branch,
+        "ci_provider": req.ci_provider,
+        "ci_run_id": req.ci_run_id,
+        "built_at": canonical_built_at,
+        "sha256": getattr(req, "sha256", None),
+        "sizeBytes": getattr(req, "sizeBytes", None),
+        "contentType": getattr(req, "contentType", None),
+        "repo": req.repo,
+        "commit_url": req.commit_url,
+        "run_url": req.run_url,
+    }
+    normalized_payload = {
+        field: _normalize_fingerprint_value(payload.get(field))
+        for field in BUILD_REGISTER_FINGERPRINT_FIELDS
+    }
+    canonical_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def enforce_idempotency(
+    request: Request,
+    idempotency_key: str,
+    request_fingerprint: Optional[str] = None,
+    conflict_code: str = "IDEMPOTENCY_CONFLICT",
+    conflict_message: str = "Conflicting request body for idempotency key",
+):
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
     cached = idempotency.get(key)
     if cached:
+        cached_fingerprint = cached.get("request_fingerprint")
+        if (
+            request_fingerprint is not None
+            and cached_fingerprint is not None
+            and request_fingerprint != cached_fingerprint
+        ):
+            return error_response(409, conflict_code, conflict_message)
         if request.method == "POST" and request.url.path in IDEMPOTENCY_OBSERVABLE_PATHS:
             request.state.idempotency_replayed = True
         return JSONResponse(status_code=cached["status_code"], content=cached["response"])
     return None
 
 
-def store_idempotency(request: Request, idempotency_key: str, response: dict, status_code: int) -> None:
+def store_idempotency(
+    request: Request,
+    idempotency_key: str,
+    response: dict,
+    status_code: int,
+    request_fingerprint: Optional[str] = None,
+) -> None:
     if request.method == "POST" and request.url.path in IDEMPOTENCY_OBSERVABLE_PATHS:
         request.state.idempotency_replayed = False
     key = f"{idempotency_key}:{request.method}:{request.url.path}"
-    idempotency.set(key, response, status_code)
+    idempotency.set(key, response, status_code, request_fingerprint=request_fingerprint)
 
 
 def _get_artifact_source():
@@ -3297,7 +3376,14 @@ def register_existing_build(
     guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "build_register")
-    cached = enforce_idempotency(request, idempotency_key)
+    request_fingerprint = _build_register_request_fingerprint(req)
+    cached = enforce_idempotency(
+        request,
+        idempotency_key,
+        request_fingerprint=request_fingerprint,
+        conflict_code="BUILD_REGISTRATION_CONFLICT",
+        conflict_message="Conflicting build registration for idempotency key",
+    )
     if cached:
         return cached
 
@@ -3325,7 +3411,13 @@ def register_existing_build(
         if conflict:
             return conflict
         response_payload = _build_public_view(existing)
-        store_idempotency(request, idempotency_key, response_payload, 200)
+        store_idempotency(
+            request,
+            idempotency_key,
+            response_payload,
+            200,
+            request_fingerprint=request_fingerprint,
+        )
         return JSONResponse(status_code=200, content=response_payload)
 
     try:
@@ -3365,5 +3457,11 @@ def register_existing_build(
         record.get("artifactRef"),
     )
     response_payload = _build_public_view(record)
-    store_idempotency(request, idempotency_key, response_payload, 201)
+    store_idempotency(
+        request,
+        idempotency_key,
+        response_payload,
+        201,
+        request_fingerprint=request_fingerprint,
+    )
     return response_payload

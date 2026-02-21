@@ -22,7 +22,7 @@ import { getUserAccessTokenViaCustomCredentials, getUserAccessTokenViaPlaywright
 import { stepA_proveCiGateNegative } from "./steps/stepA_gate_negative.ts";
 import { stepB_configureCiPublishersAllowlist } from "./steps/stepB_configure_ci_publishers.ts";
 import { stepC_registerBuildHappyPath } from "./steps/stepC_register_build.ts";
-import { stepD_conflictDifferentGitShaSameIdempotencyKey } from "./steps/stepD_conflict.ts";
+import { stepD_sameIdempotencyKeyDifferentBodyReturnsConflict } from "./steps/stepD_conflict.ts";
 import { stepE_deployEnforcementUnregisteredVersion } from "./steps/stepE_deploy_enforcement.ts";
 import { stepF_deployHappyPath } from "./steps/stepF_deploy_happy.ts";
 import { stepG_rollbackAfterDeploy } from "./steps/rollback.ts";
@@ -334,7 +334,7 @@ async function main(): Promise<number> {
   await stepA_proveCiGateNegative(context, tokens.owner, tokens.ci, tokens.admin);
   await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
   await stepC_registerBuildHappyPath(context, tokens.ci);
-  await stepD_conflictDifferentGitShaSameIdempotencyKey(context, tokens.ci);
+  await stepD_sameIdempotencyKeyDifferentBodyReturnsConflict(context, tokens.ci);
   await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
   await stepF_deployHappyPath(context, tokens.owner, tokens.observer, nonMemberOwnerToken);
   await stepG_rollbackAfterDeploy(context, tokens.owner);

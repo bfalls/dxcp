@@ -33,6 +33,8 @@ ui/test-results/
 ui/playwright-report/
 ui/blob-report/
 .env.govtest
+.govtest.*.json
+cdk/*.log
 dxcp-api/.env
 dxcp-api/data/*.db
 integrations/backstage/packages/dxcp-plugin/dist/

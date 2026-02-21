@@ -286,6 +286,9 @@ class BuildRegisterExistingRequest(BaseModel):
     built_at: str
     commit_url: Optional[str] = None
     run_url: Optional[str] = None
+    sha256: Optional[str] = None
+    sizeBytes: Optional[int] = None
+    contentType: Optional[str] = None
     checksum_sha256: Optional[str] = None
     repo: Optional[str] = None
     actor: Optional[str] = None
