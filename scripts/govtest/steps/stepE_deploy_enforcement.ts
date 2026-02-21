@@ -1,5 +1,14 @@
 import type { RunContext } from "../types.ts";
-import { announceStep, apiRequest, assertStatus, buildDeploymentIntent, decodeJson, markStepEnd, markStepStart } from "../common.ts";
+import {
+  announceStep,
+  apiRequest,
+  assertStatus,
+  buildDeploymentIntent,
+  decodeJson,
+  markStepEnd,
+  markStepStart,
+  requiredEnv,
+} from "../common.ts";
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
@@ -80,6 +89,33 @@ export async function stepE_deployEnforcementUnregisteredVersion(
     body: buildDeploymentIntent(context, context.unregisteredVersion),
   });
   await assertStatus(validate, 400, "E: POST /v1/deployments/validate (unregistered)", "VERSION_NOT_FOUND");
+
+  const missingIdempotency = await apiRequest("POST", "/v1/deployments", ownerToken, {
+    body: buildDeploymentIntent(context, context.unregisteredVersion),
+  });
+  await assertStatus(
+    missingIdempotency,
+    400,
+    "E: POST /v1/deployments (missing idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
+  const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
+  const emptyIdempotency = await fetch(`${baseApi}/v1/deployments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ownerToken}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": "",
+    },
+    body: JSON.stringify(buildDeploymentIntent(context, context.unregisteredVersion)),
+  });
+  await assertStatus(
+    emptyIdempotency,
+    400,
+    "E: POST /v1/deployments (empty idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
 
   const deploy = await apiRequest("POST", "/v1/deployments", ownerToken, {
     idempotencyKey: context.idempotencyKeys.deployUnregistered,

@@ -10,6 +10,7 @@ import {
   markStepEnd,
   markStepStart,
   optionalEnv,
+  requiredEnv,
 } from "../common.ts";
 
 type RollbackTarget = {
@@ -101,9 +102,33 @@ export async function submitRollback(
   target: RollbackTarget,
 ): Promise<SubmittedRollback> {
   if (target.deploymentId) {
+    const rollbackPath = `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback`;
+    const missingIdempotency = await apiRequest("POST", rollbackPath, ownerToken);
+    await assertStatus(
+      missingIdempotency,
+      400,
+      `G: POST ${rollbackPath} (missing idempotency key)`,
+      "IDMP_KEY_REQUIRED",
+    );
+
+    const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
+    const emptyIdempotency = await fetch(`${baseApi}${rollbackPath}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        "Idempotency-Key": "",
+      },
+    });
+    await assertStatus(
+      emptyIdempotency,
+      400,
+      `G: POST ${rollbackPath} (empty idempotency key)`,
+      "IDMP_KEY_REQUIRED",
+    );
+
     const rollbackById = await apiRequest(
       "POST",
-      `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback`,
+      rollbackPath,
       ownerToken,
       { idempotencyKey: context.idempotencyKeys.rollbackSubmit },
     );
@@ -134,9 +159,37 @@ export async function submitRollback(
   }
 
   assert(typeof target.version === "string" && target.version.length > 0, "G: rollback redeploy requires target version");
+  const rollbackIntent = buildDeploymentIntent(context, target.version);
+  const missingIdempotency = await apiRequest("POST", "/v1/deployments", ownerToken, {
+    body: rollbackIntent,
+  });
+  await assertStatus(
+    missingIdempotency,
+    400,
+    "G: POST /v1/deployments (rollback redeploy, missing idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
+  const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
+  const emptyIdempotency = await fetch(`${baseApi}/v1/deployments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ownerToken}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": "",
+    },
+    body: JSON.stringify(rollbackIntent),
+  });
+  await assertStatus(
+    emptyIdempotency,
+    400,
+    "G: POST /v1/deployments (rollback redeploy, empty idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
   const deploy = await apiRequest("POST", "/v1/deployments", ownerToken, {
     idempotencyKey: context.idempotencyKeys.rollbackSubmit,
-    body: buildDeploymentIntent(context, target.version),
+    body: rollbackIntent,
   });
   const deployBody = await assertStatus(deploy, 201, "G: POST /v1/deployments (rollback redeploy)");
   const deploymentId = deployBody?.id;

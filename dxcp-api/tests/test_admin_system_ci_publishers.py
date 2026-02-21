@@ -155,11 +155,30 @@ async def test_put_system_ci_publishers_validation(tmp_path: Path, monkeypatch, 
     async with _client(tmp_path, monkeypatch, store) as (client, _):
         response = await client.put(
             "/v1/admin/system/ci-publishers",
-            headers=auth_header(["dxcp-platform-admins"]),
+            headers={"Idempotency-Key": "ci-publishers-validate", **auth_header(["dxcp-platform-admins"])},
             json=payload,
         )
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_REQUEST"
+
+
+async def test_put_system_ci_publishers_requires_idempotency_key(tmp_path: Path, monkeypatch):
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
+    async with _client(tmp_path, monkeypatch, store) as (client, _):
+        missing = await client.put(
+            "/v1/admin/system/ci-publishers",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={"publishers": [_publisher("ci-bot-2", "ci-bot-2")]},
+        )
+        empty = await client.put(
+            "/v1/admin/system/ci-publishers",
+            headers={"Idempotency-Key": "", **auth_header(["dxcp-platform-admins"])},
+            json={"publishers": [_publisher("ci-bot-2", "ci-bot-2")]},
+        )
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "IDMP_KEY_REQUIRED"
+    assert empty.status_code == 400
+    assert empty.json()["code"] == "IDMP_KEY_REQUIRED"
 
 
 async def test_put_system_ci_publishers_writes_ssm_and_updates_runtime(tmp_path: Path, monkeypatch):
@@ -168,7 +187,7 @@ async def test_put_system_ci_publishers_writes_ssm_and_updates_runtime(tmp_path:
     async with _client(tmp_path, monkeypatch, store) as (client, main):
         response = await client.put(
             "/v1/admin/system/ci-publishers",
-            headers=auth_header(["dxcp-platform-admins"]),
+            headers={"Idempotency-Key": "ci-publishers-update", **auth_header(["dxcp-platform-admins"])},
             json={"publishers": updated_publishers},
         )
     assert response.status_code == 200
@@ -194,7 +213,7 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
         )
         update = await client.put(
             "/v1/admin/system/ci-publishers",
-            headers=auth_header(["dxcp-platform-admins"]),
+            headers={"Idempotency-Key": "ci-publishers-rotate", **auth_header(["dxcp-platform-admins"])},
             json={"publishers": [_publisher("user-1", "user-1")]},
         )
         after = await client.post(

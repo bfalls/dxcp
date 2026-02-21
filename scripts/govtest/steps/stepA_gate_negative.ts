@@ -1,12 +1,13 @@
 import type { RunContext } from "../types.ts";
 import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, decodeJson, markStepEnd, markStepStart } from "../common.ts";
 
-async function putCiPublishersWithRetry(adminToken: string, publishers: any[]): Promise<any> {
+async function putCiPublishersWithRetry(adminToken: string, publishers: any[], idempotencyKey: string): Promise<any> {
   const maxAttempts = 3;
   let lastPayload: any = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await apiRequest("PUT", "/v1/admin/system/ci-publishers", adminToken, {
+      idempotencyKey,
       body: { publishers },
     });
 
@@ -61,7 +62,7 @@ export async function stepA_proveCiGateNegative(
     },
   ];
 
-  await putCiPublishersWithRetry(adminToken, denyAllPublishers);
+  await putCiPublishersWithRetry(adminToken, denyAllPublishers, `govtest-${context.runId}-ci-gate-deny`);
   try {
     const ciDenied = await apiRequest("POST", "/v1/builds/register", ciToken, {
       idempotencyKey: `${context.idempotencyKeys.gateNegative}-ci-not-allowlisted`,
@@ -69,7 +70,7 @@ export async function stepA_proveCiGateNegative(
     });
     await assertStatus(ciDenied, 403, "A: POST /v1/builds/register (ci token not allowlisted)", "CI_ONLY");
   } finally {
-    await putCiPublishersWithRetry(adminToken, originalPublishers);
+    await putCiPublishersWithRetry(adminToken, originalPublishers, `govtest-${context.runId}-ci-gate-restore`);
   }
 
   markStepEnd(context, step);

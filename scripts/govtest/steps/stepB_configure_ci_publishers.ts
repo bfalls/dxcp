@@ -10,6 +10,7 @@ import {
   markStepStart,
   optionalEnv,
   printIdentity,
+  requiredEnv,
   whoAmI,
 } from "../common.ts";
 
@@ -19,12 +20,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function putCiPublishersWithRetry(adminToken: string, updated: any[]): Promise<any> {
+async function putCiPublishersWithRetry(adminToken: string, updated: any[], idempotencyKey: string): Promise<any> {
   const maxAttempts = 3;
   let lastPayload: any = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const put = await apiRequest("PUT", "/v1/admin/system/ci-publishers", adminToken, {
+      idempotencyKey,
       body: { publishers: updated },
     });
 
@@ -90,7 +92,34 @@ export async function stepB_configureCiPublishersAllowlist(context: RunContext, 
     description: `govtest run ${context.runId}`,
   });
 
-  const putPayload = await putCiPublishersWithRetry(adminToken, updated);
+  const missingIdempotency = await apiRequest("PUT", "/v1/admin/system/ci-publishers", adminToken, {
+    body: { publishers: updated },
+  });
+  await assertStatus(
+    missingIdempotency,
+    400,
+    "B: PUT /v1/admin/system/ci-publishers (missing idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
+  const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
+  const emptyIdempotency = await fetch(`${baseApi}/v1/admin/system/ci-publishers`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": "",
+    },
+    body: JSON.stringify({ publishers: updated }),
+  });
+  await assertStatus(
+    emptyIdempotency,
+    400,
+    "B: PUT /v1/admin/system/ci-publishers (empty idempotency key)",
+    "IDMP_KEY_REQUIRED",
+  );
+
+  const putPayload = await putCiPublishersWithRetry(adminToken, updated, `govtest-${context.runId}-ci-publishers-update`);
 
   const found = Array.isArray(putPayload?.publishers) && putPayload.publishers.some((p: any) => p?.name === entryName);
   assert(found, "B: Updated CI publishers response did not include govtest publisher entry.");

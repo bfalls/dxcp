@@ -174,6 +174,24 @@ async def test_deploy_happy_path_creates_roll_forward_record(tmp_path: Path, mon
         assert body["engineExecutionUrl"].startswith("http://engine.local/")
 
 
+async def test_deploy_requires_idempotency_key(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        missing = await client.post(
+            "/v1/deployments",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(),
+        )
+        empty = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "IDMP_KEY_REQUIRED"
+    assert empty.status_code == 400
+    assert empty.json()["code"] == "IDMP_KEY_REQUIRED"
+
+
 async def test_deploy_rejects_version_not_found(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         payload = _deploy_payload(version="9.9.9")

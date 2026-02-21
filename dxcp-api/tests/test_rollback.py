@@ -112,14 +112,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
 
 async def test_rollback_requires_idempotency_key(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
-        response = await client.post(
+        missing = await client.post(
             "/v1/deployments/unknown/rollback",
             headers=auth_header(["dxcp-platform-admins"]),
             json={},
         )
-    assert response.status_code == 400
-    body = response.json()
-    assert body["code"] == "IDMP_KEY_REQUIRED"
+        empty = await client.post(
+            "/v1/deployments/unknown/rollback",
+            headers={"Idempotency-Key": "", **auth_header(["dxcp-platform-admins"])},
+            json={},
+        )
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "IDMP_KEY_REQUIRED"
+    assert empty.status_code == 400
+    assert empty.json()["code"] == "IDMP_KEY_REQUIRED"
 
 
 async def test_rollback_invalid_environment(tmp_path: Path, monkeypatch):

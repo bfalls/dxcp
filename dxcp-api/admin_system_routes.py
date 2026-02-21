@@ -32,6 +32,7 @@ from fastapi import Header, Request
 
 from config import SETTINGS
 from models import CiPublisher, CiPublisherProvider, Role
+from policy import PolicyError
 
 try:
     import boto3
@@ -356,6 +357,7 @@ def register_admin_system_routes(
     app,
     *,
     get_actor: Callable,
+    guardrails,
     request_id_provider: Callable[[], str],
     rate_limiter,
     require_role: Callable,
@@ -441,6 +443,7 @@ def register_admin_system_routes(
     def update_system_ci_publishers(
         payload: dict,
         request: Request,
+        idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
         authorization: Optional[str] = Header(None),
     ):
         actor = get_actor(authorization)
@@ -448,6 +451,11 @@ def register_admin_system_routes(
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system CI publishers")
         if role_error:
             return role_error
+        try:
+            guardrails.require_mutations_enabled()
+            guardrails.require_idempotency_key(idempotency_key)
+        except PolicyError as exc:
+            return error_response(exc.status_code, exc.code, exc.message)
         validated, validation_error = _validate_ci_publishers_payload(payload)
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
