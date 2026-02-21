@@ -117,6 +117,7 @@ spinnaker = SpinnakerAdapter(
 logger = logging.getLogger("dxcp.api")
 guardrails = Guardrails(storage)
 artifact_source = None
+_ENGINE_INVOKE_COUNTER = 0
 IDEMPOTENCY_REPLAYED_HEADER = "Idempotency-Replayed"
 IDEMPOTENCY_OBSERVABLE_PATHS = {
     "/v1/builds/register",
@@ -1280,6 +1281,32 @@ def _engine_unavailable_discriminator(code: str, raw_message: str, upstream_stat
     return False
 
 
+def _is_test_mode() -> bool:
+    return os.getenv("DXCP_TEST_MODE", "").strip() == "1"
+
+
+def _reset_engine_invocation_counter() -> None:
+    global _ENGINE_INVOKE_COUNTER
+    _ENGINE_INVOKE_COUNTER = 0
+
+
+def _get_engine_invocation_counter() -> int:
+    if not _is_test_mode():
+        return 0
+    return _ENGINE_INVOKE_COUNTER
+
+
+def _invoke_engine(kind: str, payload: dict, idempotency_key: str) -> dict:
+    global _ENGINE_INVOKE_COUNTER
+    if _is_test_mode():
+        _ENGINE_INVOKE_COUNTER += 1
+    if kind == "deploy":
+        return spinnaker.trigger_deploy(payload, idempotency_key)
+    if kind == "rollback":
+        return spinnaker.trigger_rollback(payload, idempotency_key)
+    raise ValueError(f"Unsupported engine invocation kind: {kind}")
+
+
 def _preflight_engine_readiness(actor: Actor) -> Optional[JSONResponse]:
     if spinnaker.mode != "http":
         return None
@@ -2083,7 +2110,7 @@ def create_deployment(
         payload["artifactRef"] = build["artifactRef"]
 
     try:
-        execution = spinnaker.trigger_deploy(payload, idempotency_key)
+        execution = _invoke_engine("deploy", payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start deployment", exc)
     execution_id, execution_url = _extract_engine_execution(execution)
@@ -2364,7 +2391,7 @@ def create_promotion(
             return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for promotion")
         payload["artifactRef"] = build["artifactRef"]
     try:
-        execution = spinnaker.trigger_deploy(payload, idempotency_key)
+        execution = _invoke_engine("deploy", payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start promotion", exc)
     execution_id, execution_url = _extract_engine_execution(execution)
@@ -3184,7 +3211,7 @@ def rollback_deployment(
             payload["artifactRef"] = build["artifactRef"]
 
     try:
-        execution = spinnaker.trigger_rollback(payload, idempotency_key)
+        execution = _invoke_engine("rollback", payload, idempotency_key)
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start rollback", exc)
     execution_id, execution_url = _extract_engine_execution(execution)

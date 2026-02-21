@@ -102,6 +102,7 @@ Policy enforcement must occur in this order:
 3) Quota checks
 4) Concurrency checks
 5) Engine execution
+6) Engine execution must not be invoked if any prior governance invariant fails.
 
 Example:
 
