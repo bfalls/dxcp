@@ -47,16 +47,16 @@ jobs:
           GOV_AWS_REGION: ${{ vars.GOV_AWS_REGION }}
           GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
           GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_DXCP_UI_CLIENT_ID: ${{ secrets.GOV_DXCP_UI_CLIENT_ID }}
-          GOV_ADMIN_USERNAME: ${{ secrets.GOV_ADMIN_USERNAME }}
+          GOV_DXCP_UI_CLIENT_ID: ${{ vars.GOV_DXCP_UI_CLIENT_ID }}
+          GOV_ADMIN_USERNAME: ${{ vars.GOV_ADMIN_USERNAME }}
           GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
-          GOV_OWNER_USERNAME: ${{ secrets.GOV_OWNER_USERNAME }}
+          GOV_OWNER_USERNAME: ${{ vars.GOV_OWNER_USERNAME }}
           GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
-          GOV_OBSERVER_USERNAME: ${{ secrets.GOV_OBSERVER_USERNAME }}
+          GOV_OBSERVER_USERNAME: ${{ vars.GOV_OBSERVER_USERNAME }}
           GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
-          GOV_NON_MEMBER_OWNER_USERNAME: ${{ secrets.GOV_NON_MEMBER_OWNER_USERNAME }}
+          GOV_NON_MEMBER_OWNER_USERNAME: ${{ vars.GOV_NON_MEMBER_OWNER_USERNAME }}
           GOV_NON_MEMBER_OWNER_PASSWORD: ${{ secrets.GOV_NON_MEMBER_OWNER_PASSWORD }}
-          GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
+          GOV_CI_CLIENT_ID: ${{ vars.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
           CI: "true"
         shell: bash
