@@ -251,6 +251,15 @@ function printSummary(context: RunContext): void {
 
 async function main(): Promise<number> {
   loadLocalDotenv();
+  const cliStrict = hasArg("--strict");
+  const cliDiagnostic = hasArg("--diagnostic");
+  assert(!(cliStrict && cliDiagnostic), "Cannot use both --strict and --diagnostic.");
+  if (cliStrict) {
+    process.env.GOV_CONFORMANCE_PROFILE = "strict";
+  } else if (cliDiagnostic) {
+    process.env.GOV_CONFORMANCE_PROFILE = "diagnostic";
+  }
+
   for (const key of [
     "GOV_DXCP_UI_BASE",
     "GOV_DXCP_API_BASE",

@@ -50,6 +50,11 @@ Required keys:
 - GOV_CI_CLIENT_ID
 - GOV_CI_CLIENT_SECRET
 
+Strict conformance additional required keys:
+
+- GOV_NON_MEMBER_OWNER_USERNAME
+- GOV_NON_MEMBER_OWNER_PASSWORD
+
 Optional key:
 
 - GOV_CONFORMANCE_PROFILE
@@ -72,7 +77,7 @@ Create real users:
 - admin
 - owner
 - observer
-- optional non-member-owner
+- non-member-owner (required for strict conformance; optional in diagnostic)
 
 Store credentials securely.
 
@@ -93,6 +98,7 @@ Full mode executes all invariants defined in GOVERNANCE_CONTRACT.md.
 Conformance behavior:
 
 - `strict`: contract invariants cannot be skipped. Missing contract prerequisites fail the run.
+- `strict` requires non-member owner credentials (`GOV_NON_MEMBER_OWNER_USERNAME` and `GOV_NON_MEMBER_OWNER_PASSWORD`) to enforce `403 DELIVERY_GROUP_SCOPE_REQUIRED` on `GET /v1/deployments/{id}`.
 - `diagnostic`: environment-limited checks may be skipped for operational diagnostics.
 
 ---------------------------------------------------------------------

@@ -50,7 +50,12 @@ export async function stepF_deployHappyPath(
 
   if (nonMemberOwnerToken) {
     const nonMemberStatus = await apiRequest("GET", `/v1/deployments/${encodeURIComponent(deploymentId)}`, nonMemberOwnerToken);
-    await assertStatus(nonMemberStatus, 403, `F: non-member owner GET /v1/deployments/${deploymentId}`);
+    await assertStatus(
+      nonMemberStatus,
+      403,
+      `F: non-member owner GET /v1/deployments/${deploymentId}`,
+      "DELIVERY_GROUP_SCOPE_REQUIRED",
+    );
   }
 
   const deadline = Date.now() + timeoutSeconds * 1000;
