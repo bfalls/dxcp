@@ -67,7 +67,11 @@ from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
 from storage import build_storage, utc_now
-from admin_system_routes import register_admin_system_routes, read_ui_exposure_policy
+from admin_system_routes import (
+    register_admin_system_routes,
+    read_mutations_disabled_with_fallback,
+    read_ui_exposure_policy,
+)
 
 
 HERE = os.path.abspath(os.path.dirname(__file__))
@@ -357,6 +361,7 @@ def can_view(actor: Actor) -> bool:
 register_admin_system_routes(
     app,
     get_actor=get_actor,
+    get_actor_and_claims=get_actor_and_claims,
     guardrails=guardrails,
     request_id_provider=get_request_id,
     rate_limiter=rate_limiter,
@@ -1815,10 +1820,15 @@ def _ui_refresh_settings() -> dict:
         default_value = min_value
     if default_value > max_value:
         default_value = max_value
+    kill_switch = read_mutations_disabled_with_fallback()
+    mutations_disabled = bool(kill_switch.get("mutations_disabled", SETTINGS.mutations_disabled))
+    SETTINGS.mutations_disabled = mutations_disabled
+    SETTINGS.kill_switch = mutations_disabled
     return {
         "default_refresh_interval_seconds": int(default_value),
         "min_refresh_interval_seconds": int(min_value),
         "max_refresh_interval_seconds": int(max_value),
+        "mutations_disabled": mutations_disabled,
     }
 
 
@@ -2489,6 +2499,7 @@ def create_delivery_group(
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create delivery groups")
     if role_error:
         return role_error
+    guardrails.require_mutations_enabled()
     rate_limiter.check_mutate(actor.actor_id, "delivery_group_create")
     payload = group.dict()
     payload.pop("change_reason", None)
@@ -2522,6 +2533,7 @@ def update_delivery_group(
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update delivery groups")
     if role_error:
         return role_error
+    guardrails.require_mutations_enabled()
     rate_limiter.check_mutate(actor.actor_id, "delivery_group_update")
     payload = group.dict()
     if payload.get("id") and payload["id"] != group_id:
@@ -2562,6 +2574,7 @@ def create_recipe(
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create recipes")
     if role_error:
         return role_error
+    guardrails.require_mutations_enabled()
     rate_limiter.check_mutate(actor.actor_id, "recipe_create")
     payload = recipe.dict()
     payload.pop("change_reason", None)
@@ -2596,6 +2609,7 @@ def update_recipe(
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update recipes")
     if role_error:
         return role_error
+    guardrails.require_mutations_enabled()
     rate_limiter.check_mutate(actor.actor_id, "recipe_update")
     payload = recipe.dict()
     payload["engine_type"] = EngineType.SPINNAKER.value

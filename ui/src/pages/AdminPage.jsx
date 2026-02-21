@@ -118,6 +118,14 @@ export default function AdminPage({
   systemUiExposurePolicyDirty,
   systemUiExposurePolicyError,
   systemUiExposurePolicyNote,
+  mutationsDisabled,
+  systemMutationsDisabled,
+  systemMutationsDisabledLoading,
+  systemMutationsDisabledSaving,
+  systemMutationsDisabledError,
+  systemMutationsDisabledNote,
+  loadSystemMutationsDisabled,
+  saveSystemMutationsDisabled,
   whoamiData,
   whoamiLoading,
   whoamiError,
@@ -127,6 +135,10 @@ export default function AdminPage({
   const [copyTokenBusy, setCopyTokenBusy] = React.useState(false)
   const [copyTokenNote, setCopyTokenNote] = React.useState('')
   const [copyTokenError, setCopyTokenError] = React.useState('')
+  const [killSwitchDialogOpen, setKillSwitchDialogOpen] = React.useState(false)
+  const [killSwitchPhrase, setKillSwitchPhrase] = React.useState('')
+  const [killSwitchReason, setKillSwitchReason] = React.useState('')
+  const [killSwitchStepConfirmed, setKillSwitchStepConfirmed] = React.useState(false)
 
   const handleCopyAccessToken = async () => {
     setCopyTokenBusy(true)
@@ -139,6 +151,44 @@ export default function AdminPage({
       setCopyTokenError(result?.message || 'Copy failed. Use DevTools header copy instead.')
     }
     setCopyTokenBusy(false)
+  }
+
+  const openKillSwitchDialog = () => {
+    if (adminReadOnly || systemMutationsDisabledLoading || systemMutationsDisabledSaving) return
+    setKillSwitchDialogOpen(true)
+    setKillSwitchPhrase('')
+    setKillSwitchReason('')
+    setKillSwitchStepConfirmed(false)
+  }
+
+  const closeKillSwitchDialog = () => {
+    if (systemMutationsDisabledSaving) return
+    setKillSwitchDialogOpen(false)
+    setKillSwitchPhrase('')
+    setKillSwitchReason('')
+    setKillSwitchStepConfirmed(false)
+  }
+
+  const currentlyDisabled = systemMutationsDisabled === true
+  const disablingMutations = !currentlyDisabled
+  const disablePhraseRequired = 'DISABLE MUTATIONS'
+  const phraseAccepted = !disablingMutations || killSwitchPhrase === disablePhraseRequired
+  const canAcknowledgeStepOne = phraseAccepted && !systemMutationsDisabledSaving
+  const canConfirmKillSwitchChange =
+    killSwitchStepConfirmed &&
+    phraseAccepted &&
+    !systemMutationsDisabledSaving &&
+    !systemMutationsDisabledLoading
+
+  const confirmKillSwitchChange = async () => {
+    if (!canConfirmKillSwitchChange) return
+    const ok = await saveSystemMutationsDisabled(disablingMutations, killSwitchReason)
+    if (ok) {
+      setKillSwitchDialogOpen(false)
+      setKillSwitchPhrase('')
+      setKillSwitchReason('')
+      setKillSwitchStepConfirmed(false)
+    }
   }
 
   const headerAction =
@@ -168,6 +218,7 @@ export default function AdminPage({
                     loadSystemRateLimits({ force: true })
                     loadSystemCiPublishers({ force: true })
                     loadSystemUiExposurePolicy({ force: true })
+                    loadSystemMutationsDisabled({ force: true })
                     loadWhoAmI({ force: true })
                   }}
                   disabled={
@@ -177,10 +228,16 @@ export default function AdminPage({
                     systemCiPublishersSaving ||
                     systemUiExposurePolicyLoading ||
                     systemUiExposurePolicySaving ||
+                    systemMutationsDisabledLoading ||
+                    systemMutationsDisabledSaving ||
                     whoamiLoading
                   }
                 >
-                  {systemRateLimitLoading || systemCiPublishersLoading || systemUiExposurePolicyLoading || whoamiLoading
+                  {systemRateLimitLoading ||
+                  systemCiPublishersLoading ||
+                  systemUiExposurePolicyLoading ||
+                  systemMutationsDisabledLoading ||
+                  whoamiLoading
                     ? 'Loading...'
                     : 'Refresh'}
                 </button>
@@ -204,6 +261,9 @@ export default function AdminPage({
       <div className="page-header-zone">
         <PageHeader title="Admin" actions={headerAction} />
         {adminReadOnly && <div className="helper">Only Platform Admins can modify this.</div>}
+        <div className="helper">
+          Mutations: <strong>{mutationsDisabled ? 'DISABLED' : 'ENABLED'}</strong>
+        </div>
         <div className="tabs">
           <button
             className={adminTab === 'delivery-groups' ? 'active' : ''}
@@ -953,6 +1013,95 @@ export default function AdminPage({
       )}
       {adminTab === 'system-settings' && isPlatformAdmin && (
         <SectionCard>
+          <h2>Mutation Kill Switch</h2>
+          <div className="list-item admin-detail two-col">
+            <div>Status</div>
+            <div>
+              <strong>{currentlyDisabled ? 'Mutations: DISABLED' : 'Mutations: ENABLED'}</strong>
+            </div>
+          </div>
+          <div className="helper space-8">When disabled, DXCP operates in read-only mode.</div>
+          <div className="helper">Impact:</div>
+          <div className="helper">- Deploys blocked</div>
+          <div className="helper">- Rollbacks blocked</div>
+          <div className="helper">- Build publishing blocked</div>
+          <div className="helper">- Reads still available</div>
+          {systemMutationsDisabledError && <div className="helper space-8">{systemMutationsDisabledError}</div>}
+          {systemMutationsDisabledNote && <div className="helper space-8">{systemMutationsDisabledNote}</div>}
+          <div className="space-12" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              className={`button ${currentlyDisabled ? '' : 'danger'}`}
+              onClick={openKillSwitchDialog}
+              disabled={systemMutationsDisabledSaving || systemMutationsDisabledLoading}
+            >
+              {currentlyDisabled ? 'Enable mutations' : 'Disable mutations'}
+            </button>
+          </div>
+          {killSwitchDialogOpen && (
+            <div className="card space-12">
+              <h2>{currentlyDisabled ? 'Enable mutations' : 'Disable mutations'}</h2>
+              <div className="helper">
+                {currentlyDisabled
+                  ? 'This will re-enable all mutating API endpoints immediately.'
+                  : 'This will put DXCP into read-only mode immediately.'}
+              </div>
+              {!currentlyDisabled && (
+                <div className="field space-8">
+                  <label htmlFor="kill-switch-confirm-phrase">Type exact phrase to continue</label>
+                  <input
+                    id="kill-switch-confirm-phrase"
+                    value={killSwitchPhrase}
+                    onChange={(e) => setKillSwitchPhrase(e.target.value)}
+                    onInput={(e) => setKillSwitchPhrase(e.target.value)}
+                    placeholder={disablePhraseRequired}
+                    autoComplete="off"
+                  />
+                  <div className="helper">Required phrase: {disablePhraseRequired}</div>
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="kill-switch-reason">Reason (optional)</label>
+                <textarea
+                  id="kill-switch-reason"
+                  rows={3}
+                  value={killSwitchReason}
+                  onChange={(e) => setKillSwitchReason(e.target.value)}
+                  onInput={(e) => setKillSwitchReason(e.target.value)}
+                />
+              </div>
+              {!killSwitchStepConfirmed ? (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    className="button secondary"
+                    onClick={() => setKillSwitchStepConfirmed(true)}
+                    disabled={!canAcknowledgeStepOne}
+                  >
+                    Continue
+                  </button>
+                  <button className="button secondary" onClick={closeKillSwitchDialog}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    className={`button ${currentlyDisabled ? '' : 'danger'}`}
+                    onClick={confirmKillSwitchChange}
+                    disabled={!canConfirmKillSwitchChange}
+                  >
+                    {systemMutationsDisabledSaving
+                      ? 'Saving...'
+                      : currentlyDisabled
+                        ? 'Confirm enable mutations'
+                        : 'Confirm disable mutations'}
+                  </button>
+                  <button className="button secondary" onClick={closeKillSwitchDialog} disabled={systemMutationsDisabledSaving}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <h2>Rate limits</h2>
           <div className="helper">Changing rate limits affects platform safety and cost controls.</div>
           <div className="row space-12">

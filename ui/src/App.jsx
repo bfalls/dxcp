@@ -43,6 +43,7 @@ const DEFAULT_PUBLIC_SETTINGS = {
   default_refresh_interval_seconds: 300,
   min_refresh_interval_seconds: 60,
   max_refresh_interval_seconds: 3600,
+  mutations_disabled: false,
   policy: {
     uiExposure: {
       artifactRef: {
@@ -827,6 +828,11 @@ export default function App() {
   const [systemUiExposurePolicySaving, setSystemUiExposurePolicySaving] = useState(false)
   const [systemUiExposurePolicyError, setSystemUiExposurePolicyError] = useState('')
   const [systemUiExposurePolicyNote, setSystemUiExposurePolicyNote] = useState('')
+  const [systemMutationsDisabled, setSystemMutationsDisabled] = useState(false)
+  const [systemMutationsDisabledLoading, setSystemMutationsDisabledLoading] = useState(false)
+  const [systemMutationsDisabledSaving, setSystemMutationsDisabledSaving] = useState(false)
+  const [systemMutationsDisabledError, setSystemMutationsDisabledError] = useState('')
+  const [systemMutationsDisabledNote, setSystemMutationsDisabledNote] = useState('')
   const [whoamiData, setWhoamiData] = useState(null)
   const [whoamiLoading, setWhoamiLoading] = useState(false)
   const [whoamiError, setWhoamiError] = useState('')
@@ -957,6 +963,7 @@ export default function App() {
     [adminSettings]
   )
   const adminReadOnly = !isPlatformAdmin
+  const mutationsDisabled = publicSettings?.mutations_disabled === true
   const rawRefreshSeconds = userSettings?.refresh_interval_seconds ?? defaultRefreshSeconds
   const { value: refreshIntervalSeconds } = useMemo(
     () => clampRefreshIntervalSeconds(rawRefreshSeconds, minRefreshSeconds, maxRefreshSeconds),
@@ -1601,10 +1608,12 @@ export default function App() {
         default_refresh_interval_seconds: data.default_refresh_interval_seconds ?? 300,
         min_refresh_interval_seconds: data.min_refresh_interval_seconds ?? 60,
         max_refresh_interval_seconds: data.max_refresh_interval_seconds ?? 3600,
+        mutations_disabled: data.mutations_disabled === true,
         policy: {
           uiExposure
         }
       })
+      setSystemMutationsDisabled(data.mutations_disabled === true)
     } catch (err) {
       if (isLoginRequiredError(err)) return
     }
@@ -1871,6 +1880,71 @@ export default function App() {
       setSystemUiExposurePolicySaving(false)
     }
   }, [api, isPlatformAdmin, systemUiExposurePolicyDraft])
+
+  const loadSystemMutationsDisabled = useCallback(
+    async (options = {}) => {
+      if (!isPlatformAdmin) return
+      setSystemMutationsDisabledError('')
+      setSystemMutationsDisabledNote('')
+      setSystemMutationsDisabledLoading(true)
+      try {
+        const force = Boolean(options?.force)
+        const data = await api.get('/admin/system/mutations-disabled', { bypassCache: true, cacheTtlMs: force ? 0 : 2000 })
+        if (data && data.code) {
+          setSystemMutationsDisabledError(formatApiError(data, 'Failed to load mutation kill switch status.'))
+          return
+        }
+        const next = data?.mutations_disabled === true
+        setSystemMutationsDisabled(next)
+        setPublicSettings((prev) => ({
+          ...(prev || DEFAULT_PUBLIC_SETTINGS),
+          mutations_disabled: next
+        }))
+      } catch (err) {
+        if (isLoginRequiredError(err)) return
+        setSystemMutationsDisabledError('Failed to load mutation kill switch status.')
+      } finally {
+        setSystemMutationsDisabledLoading(false)
+      }
+    },
+    [api, isPlatformAdmin]
+  )
+
+  const saveSystemMutationsDisabled = useCallback(async (nextValue, reason = '') => {
+    if (!isPlatformAdmin) {
+      setSystemMutationsDisabledError('Only Platform Admins can modify this.')
+      return false
+    }
+    setSystemMutationsDisabledError('')
+    setSystemMutationsDisabledNote('')
+    setSystemMutationsDisabledSaving(true)
+    try {
+      const payload = { mutations_disabled: nextValue === true }
+      const trimmedReason = String(reason || '').trim()
+      if (trimmedReason) {
+        payload.reason = trimmedReason
+      }
+      const result = await api.put('/admin/system/mutations-disabled', payload)
+      if (result && result.code) {
+        setSystemMutationsDisabledError(formatApiError(result, 'Failed to update mutation kill switch status.'))
+        return false
+      }
+      const updated = result?.mutations_disabled === true
+      setSystemMutationsDisabled(updated)
+      setSystemMutationsDisabledNote(updated ? 'Mutations disabled.' : 'Mutations enabled.')
+      setPublicSettings((prev) => ({
+        ...(prev || DEFAULT_PUBLIC_SETTINGS),
+        mutations_disabled: updated
+      }))
+      return true
+    } catch (err) {
+      if (isLoginRequiredError(err)) return false
+      setSystemMutationsDisabledError('Failed to update mutation kill switch status.')
+      return false
+    } finally {
+      setSystemMutationsDisabledSaving(false)
+    }
+  }, [api, isPlatformAdmin])
 
   const loadWhoAmI = useCallback(
     async (options = {}) => {
@@ -2827,6 +2901,7 @@ export default function App() {
       loadSystemRateLimits()
       loadSystemCiPublishers()
       loadSystemUiExposurePolicy()
+      loadSystemMutationsDisabled()
       loadWhoAmI()
     }
   }, [
@@ -2838,6 +2913,7 @@ export default function App() {
     loadSystemRateLimits,
     loadSystemCiPublishers,
     loadSystemUiExposurePolicy,
+    loadSystemMutationsDisabled,
     loadWhoAmI
   ])
 
@@ -4111,7 +4187,15 @@ export default function App() {
       systemUiExposurePolicyDraft.artifactRef.display !== systemUiExposurePolicyBaseline.artifactRef.display ||
       systemUiExposurePolicyDraft.externalLinks.display !== systemUiExposurePolicyBaseline.externalLinks.display,
     systemUiExposurePolicyError,
-    systemUiExposurePolicyNote
+    systemUiExposurePolicyNote,
+    mutationsDisabled,
+    systemMutationsDisabled,
+    systemMutationsDisabledLoading,
+    systemMutationsDisabledSaving,
+    systemMutationsDisabledError,
+    systemMutationsDisabledNote,
+    loadSystemMutationsDisabled,
+    saveSystemMutationsDisabled
   }
 
   const infoItems = []
@@ -4126,6 +4210,12 @@ export default function App() {
   }
   if (statusMessage) {
     infoItems.push({ headline: 'Status', message: statusMessage })
+  }
+  if (mutationsDisabled) {
+    infoItems.push({
+      headline: 'Read-only mode',
+      message: 'DXCP is in read-only mode. Mutations are disabled.'
+    })
   }
 
   return (

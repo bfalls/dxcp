@@ -188,7 +188,21 @@ const buildFetchMock = ({
       return ok({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
-        max_refresh_interval_seconds: 3600
+        max_refresh_interval_seconds: 3600,
+        mutations_disabled: false
+      })
+    }
+    if (pathname === '/v1/admin/system/mutations-disabled' && (!options.method || options.method === 'GET')) {
+      return ok({
+        mutations_disabled: false,
+        source: 'ssm'
+      })
+    }
+    if (pathname === '/v1/admin/system/mutations-disabled' && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      return ok({
+        mutations_disabled: body.mutations_disabled === true,
+        source: 'ssm'
       })
     }
     if (pathname === '/v1/ui/policy/ui-exposure') {

@@ -21,7 +21,7 @@ class Guardrails:
         self.storage = storage
 
     def require_mutations_enabled(self) -> None:
-        if SETTINGS.kill_switch:
+        if SETTINGS.mutations_disabled:
             raise PolicyError(503, "MUTATIONS_DISABLED", "Mutating operations are disabled")
 
     def require_idempotency_key(self, key: Optional[str]) -> None:

@@ -218,6 +218,7 @@ fail test.
 
 If enabled,
 all mutating endpoints return 503 MUTATIONS_DISABLED.
+This includes platform admin mutation endpoints.
 
 ---------------------------------------------------------------------
 

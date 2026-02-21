@@ -129,12 +129,29 @@ test.describe("govtest thin UI proof", () => {
             .map((option) => (option as HTMLOptionElement).value)
             .filter((value) => Boolean(value) && value !== "__select__" && value !== "__custom__"),
         );
-      const selectedVersion = pickHighestZeroOneVersion(versionValues);
-      console.log(`[govtest.spec] selected highest 0.1.* version=${selectedVersion}`);
-      await versionSelect.selectOption(selectedVersion, { force: true });
+      const configuredRunVersion = (process.env.GOV_RUN_VERSION || "").trim();
+      const useStrictRunIdChecks = configuredRunVersion.length > 0;
+      const selectedVersion = useStrictRunIdChecks ? configuredRunVersion : pickHighestZeroOneVersion(versionValues);
+      if (!versionValues.includes(selectedVersion)) {
+        throw new Error(
+          `Selected version ${selectedVersion} is not available in the Deploy version list.`,
+        );
+      }
+      if (!useStrictRunIdChecks) {
+        console.log(
+          "[govtest.spec] GOV_RUN_VERSION is not set; using highest 0.1.* fallback. Run `npm run govtest` first for strict Run ID value assertions.",
+        );
+      }
+      console.log(`[govtest.spec] selected version=${selectedVersion} strict=${useStrictRunIdChecks ? "true" : "false"}`);
+      const versionTrigger = page.locator(".custom-select-trigger").first();
+      await expect(versionTrigger).toBeVisible({ timeout: 20000 });
+      await versionTrigger.click();
+      const versionOption = page.locator(".custom-select-option", { hasText: selectedVersion }).first();
+      await expect(versionOption).toBeVisible({ timeout: 20000 });
+      await versionOption.click();
       await expect(versionSelect).toHaveValue(selectedVersion);
 
-      await expect(page.getByText("Build Provenance", { exact: true })).toBeVisible();
+      await expect(page.getByText("Build Provenance", { exact: true })).toBeVisible({ timeout: 20000 });
       await expect(page.getByText("Loading provenance...")).toHaveCount(0, { timeout: 20000 });
       const unavailable = page.getByText("Build provenance unavailable for this version.");
       const provenanceBlock = page.locator(".provenance-block");
@@ -160,7 +177,14 @@ test.describe("govtest thin UI proof", () => {
       await expect(provenanceBlock.getByText("Registered", { exact: true })).toBeVisible({ timeout: 20000 });
       await expect(provenanceBlock.getByText("Artifact", { exact: true })).toBeVisible({ timeout: 20000 });
       await expect(provenanceBlock.getByText("CI Provider", { exact: true })).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("Run ID", { exact: true })).toBeVisible({ timeout: 20000 });
+      const runIdLabel = provenanceBlock.getByText("Run ID", { exact: true }).first();
+      await expect(runIdLabel).toBeVisible({ timeout: 20000 });
+      if (useStrictRunIdChecks) {
+        const runIdValue = runIdLabel.locator("xpath=following::dd[1]").first();
+        await expect(runIdValue).toBeVisible({ timeout: 20000 });
+        await expect(runIdValue).not.toHaveText(/^\s*-\s*$/);
+        await expect(runIdValue).not.toHaveText(/^\s*$/);
+      }
     } finally {
       await ownerContext.close();
     }

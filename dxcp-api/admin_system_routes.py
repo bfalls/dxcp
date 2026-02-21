@@ -26,6 +26,7 @@ import logging
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from fastapi import Header, Request
@@ -88,6 +89,37 @@ def _ssm_get_parameter(name: str) -> str:
 
 def _ssm_put_parameter(name: str, value: str) -> None:
     _ssm_client().put_parameter(Name=name, Value=value, Type="String", Overwrite=True)
+
+
+def _parse_boolean(value: object, field: str, allow_string: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if allow_string and isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true"}:
+            return True
+        if text in {"0", "false"}:
+            return False
+    raise ValueError(f"{field} must be a boolean")
+
+
+def _read_mutations_disabled_from_ssm() -> dict:
+    prefix = _ssm_prefix()
+    raw = _ssm_get_parameter(f"{prefix}/mutations_disabled")
+    parsed = _parse_boolean(raw, "mutations_disabled", allow_string=True)
+    return {"mutations_disabled": parsed, "source": "ssm"}
+
+
+def read_mutations_disabled_with_fallback() -> dict:
+    try:
+        return _read_mutations_disabled_from_ssm()
+    except Exception:
+        return {"mutations_disabled": bool(SETTINGS.mutations_disabled), "source": "runtime"}
+
+
+def _write_mutations_disabled_to_ssm(value: bool) -> None:
+    prefix = _ssm_prefix()
+    _ssm_put_parameter(f"{prefix}/mutations_disabled", "true" if value else "false")
 
 
 def _default_ui_exposure_policy() -> dict:
@@ -353,10 +385,31 @@ def _validate_ui_exposure_policy_payload(payload: object) -> tuple[Optional[dict
     return normalized, None
 
 
+def _validate_mutations_disabled_payload(payload: object) -> tuple[Optional[dict], Optional[str]]:
+    if not isinstance(payload, dict):
+        return None, "Payload must be an object"
+    if "mutations_disabled" not in payload:
+        return None, "mutations_disabled is required"
+    try:
+        mutations_disabled = _parse_boolean(payload.get("mutations_disabled"), "mutations_disabled")
+    except ValueError as exc:
+        return None, str(exc)
+    reason = payload.get("reason")
+    normalized_reason: Optional[str] = None
+    if reason is not None:
+        if not isinstance(reason, str):
+            return None, "reason must be a string"
+        stripped = reason.strip()
+        if stripped:
+            normalized_reason = stripped
+    return {"mutations_disabled": mutations_disabled, "reason": normalized_reason}, None
+
+
 def register_admin_system_routes(
     app,
     *,
     get_actor: Callable,
+    get_actor_and_claims: Callable,
     guardrails,
     request_id_provider: Callable[[], str],
     rate_limiter,
@@ -388,6 +441,10 @@ def register_admin_system_routes(
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system rate limits")
         if role_error:
             return role_error
+        try:
+            guardrails.require_mutations_enabled()
+        except PolicyError as exc:
+            return error_response(exc.status_code, exc.code, exc.message)
         validated, validation_error = _validate_update_payload(payload)
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
@@ -505,6 +562,10 @@ def register_admin_system_routes(
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system UI exposure policy")
         if role_error:
             return role_error
+        try:
+            guardrails.require_mutations_enabled()
+        except PolicyError as exc:
+            return error_response(exc.status_code, exc.code, exc.message)
         validated, validation_error = _validate_ui_exposure_policy_payload(payload)
         if validation_error:
             return error_response(400, "INVALID_REQUEST", validation_error)
@@ -515,6 +576,72 @@ def register_admin_system_routes(
             return error_response(500, "INTERNAL_ERROR", str(exc))
         except Exception:
             return error_response(500, "INTERNAL_ERROR", "Unable to update system UI exposure policy in SSM")
+
+    @app.get("/v1/admin/system/mutations-disabled")
+    def get_system_mutations_disabled(request: Request, authorization: Optional[str] = Header(None)):
+        actor = get_actor(authorization)
+        rate_limiter.check_read(actor.actor_id)
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view system mutation kill switch")
+        if role_error:
+            return role_error
+        return read_mutations_disabled_with_fallback()
+
+    def _update_mutations_disabled(
+        payload: dict,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+    ):
+        actor, claims = get_actor_and_claims(authorization)
+        rate_limiter.check_mutate(actor.actor_id, "admin_system_mutations_disabled_update")
+        role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update system mutation kill switch")
+        if role_error:
+            return role_error
+        validated, validation_error = _validate_mutations_disabled_payload(payload)
+        if validation_error:
+            return error_response(400, "INVALID_REQUEST", validation_error)
+        try:
+            old_values = read_mutations_disabled_with_fallback()
+            old_value = bool(old_values.get("mutations_disabled"))
+            new_value = bool(validated["mutations_disabled"])
+            _write_mutations_disabled_to_ssm(new_value)
+            SETTINGS.mutations_disabled = new_value
+            SETTINGS.kill_switch = new_value
+            request_id = request_id_provider() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
+            actor_sub = claims.get("sub")
+            actor_email = claims.get("email") or claims.get("https://dxcp.example/claims/email") or actor.email
+            logger.info(
+                "event=admin.system_mutations_disabled.updated request_id=%s actor_id=%s actor_sub=%s actor_email=%s actor_role=%s old_value=%s new_value=%s reason=%s timestamp=%s",
+                request_id,
+                actor.actor_id,
+                actor_sub,
+                actor_email,
+                actor.role.value,
+                old_value,
+                new_value,
+                validated.get("reason"),
+                datetime.now(timezone.utc).isoformat(),
+            )
+            return {"mutations_disabled": new_value, "source": "ssm"}
+        except ValueError as exc:
+            return error_response(500, "INTERNAL_ERROR", str(exc))
+        except Exception:
+            return error_response(500, "INTERNAL_ERROR", "Unable to update system mutation kill switch in SSM")
+
+    @app.put("/v1/admin/system/mutations-disabled")
+    def update_system_mutations_disabled_put(
+        payload: dict,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+    ):
+        return _update_mutations_disabled(payload, request, authorization)
+
+    @app.patch("/v1/admin/system/mutations-disabled")
+    def update_system_mutations_disabled_patch(
+        payload: dict,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+    ):
+        return _update_mutations_disabled(payload, request, authorization)
 
     @app.get("/v1/ui/policy/ui-exposure")
     def get_ui_exposure_policy(request: Request, authorization: Optional[str] = Header(None)):

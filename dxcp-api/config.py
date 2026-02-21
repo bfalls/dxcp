@@ -8,7 +8,14 @@ from models import CiPublisher, CiPublisherProvider
 class Settings:
     def __init__(self) -> None:
         self.ssm_prefix = os.getenv("DXCP_SSM_PREFIX", "")
-        self.kill_switch = self._get("kill_switch", "DXCP_KILL_SWITCH", "0", str) in ["1", "true", "TRUE", "True"]
+        legacy_kill_switch = self._as_bool(self._get("kill_switch", "DXCP_KILL_SWITCH", "0", str))
+        mutations_disabled_raw = self._get("mutations_disabled", "DXCP_MUTATIONS_DISABLED", None, str)
+        if mutations_disabled_raw is None:
+            self.mutations_disabled = legacy_kill_switch
+        else:
+            self.mutations_disabled = self._as_bool(mutations_disabled_raw)
+        # Backward-compatible alias used by older call sites.
+        self.kill_switch = self.mutations_disabled
         self.demo_mode = self._get("demo_mode", "DXCP_DEMO_MODE", "true", str) in ["1", "true", "TRUE", "True"]
         self.db_path = os.getenv("DXCP_DB_PATH", "./data/dxcp.db")
 
@@ -97,6 +104,10 @@ class Settings:
             "0",
             str,
         ) in ["1", "true", "TRUE", "True"]
+
+    def _as_bool(self, value: object) -> bool:
+        text = str(value or "").strip().lower()
+        return text in {"1", "true", "yes", "on"}
 
     def _get(self, ssm_key: str, env_key: str, default, parser: Callable) -> Optional[object]:
         if env_key in os.environ:

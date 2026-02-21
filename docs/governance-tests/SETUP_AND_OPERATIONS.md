@@ -98,6 +98,7 @@ Full mode executes all invariants defined in GOVERNANCE_CONTRACT.md.
 Conformance behavior:
 
 - `strict`: contract invariants cannot be skipped. Missing contract prerequisites fail the run.
+- `strict` runs mutation kill-switch conformance checks and requires a working PLATFORM_ADMIN account with admin system settings write access.
 - `strict` requires non-member owner credentials (`GOV_NON_MEMBER_OWNER_USERNAME` and `GOV_NON_MEMBER_OWNER_PASSWORD`) to enforce `403 DELIVERY_GROUP_SCOPE_REQUIRED` on `GET /v1/deployments/{id}`.
 - `diagnostic`: environment-limited checks may be skipped for operational diagnostics.
 
