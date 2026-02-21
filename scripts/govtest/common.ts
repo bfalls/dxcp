@@ -6,6 +6,9 @@ import { getCachedToken, putCachedToken } from "./token_cache.ts";
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
 const DEFAULT_ROLES_CLAIM = "https://dxcp.example/claims/roles";
+const VERSION_FETCH_MAX_ATTEMPTS = 5;
+const VERSION_FETCH_INITIAL_BACKOFF_MS = 1000;
+const RETRYABLE_VERSION_FETCH_STATUS = new Set([429, 500, 502, 503, 504]);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -26,6 +29,10 @@ function redactToken(token: string): string {
 
 export function fail(message: string): never {
   throw new Error(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function assert(condition: unknown, message: string): asserts condition {
@@ -250,23 +257,70 @@ function extractVersionCandidate(raw: any): string | undefined {
   return undefined;
 }
 
+async function readResponsePayload(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function stringifyPayload(payload: any): string {
+  if (typeof payload === "string") {
+    return payload;
+  }
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
 async function fetchVersions(ownerToken: string, service: string): Promise<string[]> {
-  const response = await apiRequest("GET", `/v1/services/${service}/versions`, ownerToken);
-  const payload = await decodeJson(response);
-  if (!response.ok) {
-    fail(`Version fetch failed (${response.status}): ${JSON.stringify(payload)}`);
+  let backoffMs = VERSION_FETCH_INITIAL_BACKOFF_MS;
+  for (let attempt = 1; attempt <= VERSION_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await apiRequest("GET", `/v1/services/${service}/versions`, ownerToken);
+      const payload = await readResponsePayload(response);
+      if (!response.ok) {
+        if (RETRYABLE_VERSION_FETCH_STATUS.has(response.status) && attempt < VERSION_FETCH_MAX_ATTEMPTS) {
+          logInfo(
+            `Version fetch attempt ${attempt}/${VERSION_FETCH_MAX_ATTEMPTS} failed (${response.status}); retrying in ${backoffMs}ms.`,
+          );
+          await sleep(backoffMs);
+          backoffMs *= 2;
+          continue;
+        }
+        fail(`Version fetch failed (${response.status}): ${stringifyPayload(payload)}`);
+      }
+
+      const source = Array.isArray(payload) ? payload : Array.isArray(payload?.versions) ? payload.versions : null;
+      if (!source) {
+        fail("Unsupported version response shape; expected [] or { versions: [] }.");
+      }
+
+      const normalized = source
+        .map((entry) => extractVersionCandidate(entry))
+        .filter((v): v is string => typeof v === "string");
+
+      return normalized;
+    } catch (error) {
+      if (attempt < VERSION_FETCH_MAX_ATTEMPTS) {
+        const message = error instanceof Error ? error.message : String(error);
+        logInfo(
+          `Version fetch attempt ${attempt}/${VERSION_FETCH_MAX_ATTEMPTS} errored (${message}); retrying in ${backoffMs}ms.`,
+        );
+        await sleep(backoffMs);
+        backoffMs *= 2;
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const source = Array.isArray(payload) ? payload : Array.isArray(payload?.versions) ? payload.versions : null;
-  if (!source) {
-    fail("Unsupported version response shape; expected [] or { versions: [] }.");
-  }
-
-  const normalized = source
-    .map((entry) => extractVersionCandidate(entry))
-    .filter((v): v is string => typeof v === "string");
-
-  return normalized;
+  fail("Version fetch failed after retries.");
 }
 
 async function fetchSeedArtifactRef(ownerToken: string, service: string, version: string): Promise<string | undefined> {
