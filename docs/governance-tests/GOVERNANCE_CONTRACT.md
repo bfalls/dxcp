@@ -169,6 +169,33 @@ Delivery group:
 
 Quota failures must return 429 QUOTA_EXCEEDED.
 
+4.4 Deployment Record Immutability
+
+Deployment records are immutable after creation.
+
+Protected fields that MUST NOT be changed after record creation:
+
+- service
+- environment
+- recipeId
+- version
+- deploymentKind
+- rollbackOf
+- deliveryGroupId
+- actor identity fields captured at submit time
+- policy decision snapshot captured at submit time
+- terminal outcome / final state once set
+
+Allowed post-create mutations are system-managed operational fields only:
+
+- updatedAt
+- in-progress state progression before a terminal state is reached
+- append-only operational evidence (for example failures/timeline observations)
+- supersession linkage metadata that does not rewrite protected fields
+
+Any API attempt to modify a deployment record must fail with:
+409 IMMUTABLE_RECORD.
+
 ---------------------------------------------------------------------
 
 5. Deployment Read Access

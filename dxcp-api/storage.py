@@ -50,6 +50,15 @@ def utc_now() -> str:
 
 
 DEFAULT_ENGINE_TYPE = "SPINNAKER"
+TERMINAL_DEPLOYMENT_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"}
+TERMINAL_DEPLOYMENT_OUTCOMES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK", "SUPERSEDED"}
+
+
+class ImmutableDeploymentError(Exception):
+    def __init__(self, message: str = "Deployment records are immutable after creation") -> None:
+        super().__init__(message)
+        self.code = "IMMUTABLE_RECORD"
+        self.status_code = 409
 
 
 class Storage:
@@ -1031,6 +1040,15 @@ class Storage:
         outcome: Optional[str] = None,
         superseded_by: Optional[str] = None,
     ) -> None:
+        existing = self.get_deployment(deployment_id)
+        if existing:
+            existing_state = existing.get("state")
+            if existing_state in TERMINAL_DEPLOYMENT_STATES and state != existing_state:
+                raise ImmutableDeploymentError("Cannot change terminal deployment state")
+            if outcome is not None:
+                existing_outcome = existing.get("outcome") or base_outcome_from_state(existing_state)
+                if existing_outcome in TERMINAL_DEPLOYMENT_OUTCOMES and outcome != existing_outcome:
+                    raise ImmutableDeploymentError("Cannot change terminal deployment outcome")
         conn = self._connect()
         cur = conn.cursor()
         updates = ["state = ?", "updated_at = ?"]
@@ -1047,6 +1065,16 @@ class Storage:
             tuple(params),
         )
         self._replace_failures(cur, deployment_id, failures)
+        conn.commit()
+        conn.close()
+
+    def update_deployment_superseded_by(self, deployment_id: str, superseded_by: Optional[str]) -> None:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE deployments SET superseded_by = ?, updated_at = ? WHERE id = ?",
+            (superseded_by, utc_now(), deployment_id),
+        )
         conn.commit()
         conn.close()
 
@@ -1173,23 +1201,11 @@ class Storage:
         if not latest_success:
             return
         if latest_success.get("id") != record.get("id"):
-            self.update_deployment(
-                record["id"],
-                record["state"],
-                record.get("failures", []),
-                outcome="SUPERSEDED",
-                superseded_by=latest_success.get("id"),
-            )
+            self.update_deployment_superseded_by(record["id"], latest_success.get("id"))
             return
         for deployment in deployments:
             if deployment.get("state") == "SUCCEEDED" and deployment.get("id") != record.get("id"):
-                self.update_deployment(
-                    deployment["id"],
-                    deployment["state"],
-                    deployment.get("failures", []),
-                    outcome="SUPERSEDED",
-                    superseded_by=record.get("id"),
-                )
+                self.update_deployment_superseded_by(deployment["id"], record.get("id"))
                 break
 
     def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:
@@ -2071,7 +2087,17 @@ class DynamoStorage:
             "delivery_group_id": record.get("deliveryGroupId"),
             "failures": failures,
         }
-        self.table.put_item(Item=item)
+        try:
+            self.table.put_item(
+                Item=item,
+                ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+            )
+        except Exception as exc:
+            if ClientError is not None and isinstance(exc, ClientError):
+                error_code = (exc.response.get("Error") or {}).get("Code")
+                if error_code == "ConditionalCheckFailedException":
+                    raise ImmutableDeploymentError("Deployment record already exists and cannot be replaced") from exc
+            raise
         record["deploymentKind"] = deployment_kind
         record["outcome"] = outcome
         record["intentCorrelationId"] = intent_correlation_id
@@ -2088,6 +2114,15 @@ class DynamoStorage:
         outcome: Optional[str] = None,
         superseded_by: Optional[str] = None,
     ) -> None:
+        existing = self.get_deployment(deployment_id)
+        if existing:
+            existing_state = existing.get("state")
+            if existing_state in TERMINAL_DEPLOYMENT_STATES and state != existing_state:
+                raise ImmutableDeploymentError("Cannot change terminal deployment state")
+            if outcome is not None:
+                existing_outcome = existing.get("outcome") or base_outcome_from_state(existing_state)
+                if existing_outcome in TERMINAL_DEPLOYMENT_OUTCOMES and outcome != existing_outcome:
+                    raise ImmutableDeploymentError("Cannot change terminal deployment outcome")
         updates = ["#state = :state", "updatedAt = :updatedAt", "failures = :failures"]
         values = {
             ":state": state,
@@ -2106,6 +2141,16 @@ class DynamoStorage:
             UpdateExpression=f"SET {', '.join(updates)}",
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
+        )
+
+    def update_deployment_superseded_by(self, deployment_id: str, superseded_by: Optional[str]) -> None:
+        self.table.update_item(
+            Key={"pk": "DEPLOYMENT", "sk": deployment_id},
+            UpdateExpression="SET supersededBy = :supersededBy, updatedAt = :updatedAt",
+            ExpressionAttributeValues={
+                ":supersededBy": superseded_by,
+                ":updatedAt": utc_now(),
+            },
         )
 
     def get_deployment(self, deployment_id: str) -> Optional[dict]:
@@ -2204,23 +2249,11 @@ class DynamoStorage:
         if not latest_success:
             return
         if latest_success.get("id") != record.get("id"):
-            self.update_deployment(
-                record["id"],
-                record["state"],
-                record.get("failures", []),
-                outcome="SUPERSEDED",
-                superseded_by=latest_success.get("id"),
-            )
+            self.update_deployment_superseded_by(record["id"], latest_success.get("id"))
             return
         for deployment in deployments:
             if deployment.get("state") == "SUCCEEDED" and deployment.get("id") != record.get("id"):
-                self.update_deployment(
-                    deployment["id"],
-                    deployment["state"],
-                    deployment.get("failures", []),
-                    outcome="SUPERSEDED",
-                    superseded_by=record.get("id"),
-                )
+                self.update_deployment_superseded_by(deployment["id"], record.get("id"))
                 break
 
     def find_prior_successful_deployment(self, deployment_id: str) -> Optional[dict]:

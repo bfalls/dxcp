@@ -221,7 +221,7 @@ async def test_rollback_requires_prior_success(tmp_path: Path, monkeypatch):
     assert body["code"] == "NO_PRIOR_SUCCESSFUL_VERSION"
 
 
-async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkeypatch):
+async def test_rollback_creates_record_without_mutating_original_record(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, main, fake):
         _insert_deployment(
             main.storage,
@@ -277,5 +277,6 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkey
         assert by_id[body["id"]]["rollbackOf"] == "dep-b"
 
         original = main.storage.get_deployment("dep-b")
-        assert original["state"] == "ROLLED_BACK"
-        assert original["outcome"] == "ROLLED_BACK"
+        assert original["state"] == "SUCCEEDED"
+        assert original["outcome"] == "SUCCEEDED"
+        assert original["rollbackOf"] is None

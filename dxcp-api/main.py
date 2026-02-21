@@ -66,7 +66,7 @@ from models import (
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
-from storage import build_storage, utc_now
+from storage import ImmutableDeploymentError, build_storage, utc_now
 from admin_system_routes import (
     register_admin_system_routes,
     read_mutations_disabled_with_fallback,
@@ -1651,18 +1651,17 @@ def refresh_from_spinnaker(deployment: dict) -> dict:
     if state in ["PENDING", "ACTIVE", "IN_PROGRESS", "SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]:
         failures = normalize_failures(execution.get("failures"))
         outcome = base_outcome_from_state(state)
-        storage.update_deployment(deployment["id"], state, failures, outcome=outcome)
+        try:
+            storage.update_deployment(deployment["id"], state, failures, outcome=outcome)
+        except ImmutableDeploymentError as exc:
+            logger.warning(
+                "deployment.immutable_blocked deployment_id=%s state=%s error=%s",
+                deployment.get("id"),
+                state,
+                redact_text(str(exc)),
+            )
+            return deployment
         deployment = storage.get_deployment(deployment["id"]) or deployment
-        if state == "SUCCEEDED" and deployment.get("rollbackOf"):
-            original = storage.get_deployment(deployment["rollbackOf"])
-            if original and original.get("state") != "ROLLED_BACK":
-                storage.update_deployment(
-                    original["id"],
-                    "ROLLED_BACK",
-                    original.get("failures", []),
-                    outcome=base_outcome_from_state("ROLLED_BACK"),
-                    superseded_by=deployment.get("id"),
-                )
         if state == "SUCCEEDED":
             storage.apply_supersession(deployment)
     return deployment
@@ -2859,6 +2858,59 @@ def get_deployment(
     deployments = storage.list_deployments(deployment.get("service"), None, deployment.get("environment"))
     latest_success_by_scope = _latest_success_by_scope(deployments)
     return _deployment_public_view(actor, deployment, latest_success_by_scope)
+
+
+@app.patch("/v1/deployments/{deployment_id}")
+def patch_deployment(
+    deployment_id: str,
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "update deployments")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "deployment_update_attempt")
+    deployment = storage.get_deployment(deployment_id)
+    if not deployment:
+        return error_response(404, "NOT_FOUND", "Deployment not found")
+    if not _actor_can_read_deployment(actor, deployment):
+        return error_response(
+            403,
+            "DELIVERY_GROUP_SCOPE_REQUIRED",
+            "Deployment not in actor delivery group scope",
+        )
+    protected_fields = sorted(
+        {
+            "service",
+            "environment",
+            "recipeId",
+            "version",
+            "deploymentKind",
+            "rollbackOf",
+            "outcome",
+            "finalState",
+            "deliveryGroupId",
+            "submittedBy",
+            "submittedByRole",
+            "submittedByEmail",
+            "policySnapshot",
+            "policyDecisionSnapshot",
+        }
+    )
+    attempted = [field for field in protected_fields if field in payload]
+    details = {
+        "protected_fields": protected_fields,
+        "attempted_fields": attempted,
+    }
+    return error_response(
+        409,
+        "IMMUTABLE_RECORD",
+        "Deployment records are immutable after creation",
+        details=details,
+    )
 
 
 @app.get("/v1/deployments/{deployment_id}/failures")

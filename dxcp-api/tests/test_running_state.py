@@ -146,13 +146,6 @@ async def test_running_state_rollforward_and_rollback(tmp_path: Path, monkeypatc
             "1.0.0",
             rollback_of="dep-b",
         )
-        main.storage.update_deployment(
-            "dep-b",
-            "ROLLED_BACK",
-            [],
-            outcome="ROLLED_BACK",
-            superseded_by="dep-r",
-        )
         response = await client.get(
             "/v1/services/demo-service/running?environment=sandbox",
             headers=auth_header(["dxcp-observers"]),
