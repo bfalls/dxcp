@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { ApiStack } from "../lib/api-stack";
 import { DataStack } from "../lib/data-stack";
 import { DemoRuntimeStack } from "../lib/demo-runtime-stack";
+import { EnvVpcStack } from "../lib/env-vpc-stack";
 import { UiStack } from "../lib/ui-stack";
 
 const app = new cdk.App();
@@ -25,6 +26,24 @@ const corsOriginsRaw = app.node.tryGetContext("corsOrigins") || process.env.DXCP
 const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXCP_SPINNAKER_MODE || "http";
 
 const env = { account, region };
+
+new EnvVpcStack(app, "dxcp-env-vpc-dev", {
+  env,
+  environmentName: "dev",
+  cidrBlock: "10.10.0.0/16",
+});
+
+new EnvVpcStack(app, "dxcp-env-vpc-staging", {
+  env,
+  environmentName: "staging",
+  cidrBlock: "10.20.0.0/16",
+});
+
+new EnvVpcStack(app, "dxcp-env-vpc-prod", {
+  env,
+  environmentName: "prod",
+  cidrBlock: "10.30.0.0/16",
+});
 
 const dataStack = new DataStack(app, "DxcpDataStack", {
   env,

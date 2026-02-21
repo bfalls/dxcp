@@ -5,6 +5,29 @@ Local uses env files. AWS uses SSM when `DXCP_SSM_PREFIX` is set.
 
 ---
 
+## Environment VPC contract (Phase 0B)
+
+Region: `us-east-1`
+
+Environment contract:
+- `dev` -> `10.10.0.0/16` (`dxcp-env-vpc-dev`)
+- `staging` -> `10.20.0.0/16` (`dxcp-env-vpc-staging`)
+- `prod` -> `10.30.0.0/16` (`dxcp-env-vpc-prod`)
+
+Rules:
+- No cross-VPC connectivity.
+- No NAT gateways in Phase 0B.
+
+Single infra command:
+- `./scripts/deploy_env_infra.sh`
+
+Generated registry (authoritative handoff):
+- `docs/generated/env_vpc_registry.json`
+
+The infra command is idempotent, deploys only the three environment VPC stacks, regenerates the registry on every run, and fails if NAT is detected in any environment VPC.
+
+---
+
 ## Set local env (API)
 
 Create `dxcp-api/.env` from `dxcp-api/.env.example`.

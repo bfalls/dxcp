@@ -280,6 +280,13 @@ Check runtime configuration: `GET /v1/config/sanity`.
 The script prints a summary block with UI URL, API base, and resource IDs.
 Set OIDC parameters in SSM before first login (see docs/AUTH.md).
 
+Infra-only environment VPC deploy (dev/staging/prod only):
+```
+./scripts/deploy_env_infra.sh
+```
+This provisions only environment VPC stacks (`dxcp-env-vpc-dev`, `dxcp-env-vpc-staging`, `dxcp-env-vpc-prod`).
+It is safe to run repeatedly and applies CloudFormation updates when CDK definitions change.
+
 Sanity checks:
 ```
 curl -sS https://YOUR_API_BASE/v1/health
