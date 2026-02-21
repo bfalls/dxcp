@@ -36,6 +36,22 @@ Generated registry (authoritative handoff):
 
 The infra command is idempotent, deploys only `dxcp-env-*` environment stacks (VPC + IAM), regenerates the registry on every run, and fails if NAT is detected in any environment VPC.
 
+## Spinnaker account mapping (generated)
+
+Run:
+- `./scripts/deploy_env_infra.sh`
+
+Generated artifacts:
+- `docs/generated/spinnaker_accounts.aws.yml`
+- `docs/generated/spinnaker_accounts.README.md`
+
+Environment to Spinnaker account mapping:
+- `dev` -> `dev-aws` -> `environments.dev.spinnakerRoleArn`
+- `staging` -> `staging-aws` -> `environments.staging.spinnakerRoleArn`
+- `prod` -> `prod-aws` -> `environments.prod.spinnakerRoleArn`
+
+This is an execution engine configuration handoff for Spinnaker. DXCP remains authoritative for environment policy and governance enforcement in later phases.
+
 ---
 
 ## Set local env (API)
