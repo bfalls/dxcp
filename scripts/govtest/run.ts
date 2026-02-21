@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import {
   announceStep,
   assert,
@@ -34,13 +35,18 @@ import { stepR_roleAuthorizationChecks } from "./steps/stepRole_authorization.ts
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
 const CONTRACT_SNAPSHOT_ARTIFACT = ".govtest.contract.snapshot.json";
-const ANSI = {
-  reset: "\x1b[0m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-} as const;
+const require = createRequire(import.meta.url);
+const { ANSI, formatTag } = require("../ansi.cjs") as {
+  ANSI: {
+    reset: string;
+    green: string;
+    red: string;
+    yellow: string;
+    blue: string;
+    boldCyan: string;
+  };
+  formatTag: (label: string, color: string) => string;
+};
 
 type ResultKind = "success" | "failure" | "information";
 
@@ -63,7 +69,7 @@ function labelFor(kind: ResultKind): string {
 function printEvaluatedLine(kind: ResultKind, message: string): void {
   const color = colorFor(kind);
   const label = labelFor(kind);
-  console.log(`${color}[${label}]${ANSI.reset} ${message}`);
+  console.log(`${formatTag(label, color)} ${message}`);
 }
 
 function printSummaryField(kind: ResultKind, key: string, value: string | number | boolean): void {

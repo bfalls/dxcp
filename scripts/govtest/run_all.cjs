@@ -3,6 +3,7 @@
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { ANSI, colorize } = require("../ansi.cjs");
 
 const repoRoot = path.join(__dirname, "..", "..");
 const forwardedArgs = process.argv.slice(2);
@@ -62,7 +63,7 @@ function findPython() {
 }
 
 function main() {
-  console.log("\x1b[1;36mRunning Unified Governance Conformance (unit + runtime + merge)\x1b[0m");
+  console.log(colorize("Running Unified Governance Conformance (unit + runtime + merge)", ANSI.boldCyan));
 
   const python = findPython();
   if (!python) {
