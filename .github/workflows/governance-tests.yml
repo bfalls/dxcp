@@ -97,16 +97,43 @@ jobs:
 
       - name: Summary
         if: always()
+        shell: bash
         run: |
+          set -euo pipefail
+          merge_status="${{ steps.merge.outputs.status }}"
+          run_version="${{ steps.extract.outputs.run_version }}"
+          if [[ "${merge_status}" == "0" ]]; then
+            conformance="PASS"
+          else
+            conformance="FAIL"
+          fi
+
           {
-            if [[ -n "${{ steps.extract.outputs.run_version }}" ]]; then
-              echo "GOV_RUN_VERSION: ${{ steps.extract.outputs.run_version }}"
-            fi
-            if [[ "${{ steps.merge.outputs.status }}" == "0" ]]; then
-              echo "Unified governance conformance: PASS"
-            else
-              echo "Unified governance conformance: FAIL"
-            fi
+            echo "## Governance Conformance Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Unified governance conformance | ${conformance} |"
+            echo "| Merge step status code | ${merge_status:-unset} |"
+            echo "| GOV_RUN_VERSION | ${run_version:-unset} |"
+            echo "| Workflow run | [View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "### Artifact Files"
+            echo ""
+            echo "| File | Present at summary time |"
+            echo "| --- | --- |"
+            for artifact in \
+              ".govtest.contract.snapshot.json" \
+              ".dxcpapi.governance.snapshot.json" \
+              ".governance.conformance.snapshot.json" \
+              ".govtest.last-run.json"; do
+              if [[ -f "${artifact}" ]]; then
+                present="yes"
+              else
+                present="no"
+              fi
+              echo "| \`${artifact}\` | ${present} |"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce merged conformance PASS
