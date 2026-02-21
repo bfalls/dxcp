@@ -290,3 +290,10 @@ Destroy everything:
 ```
 ./scripts/destroy_aws.sh
 ```
+## Governance
+
+[![Governance Conformance](../../actions/workflows/governance-tests.yml/badge.svg?branch=main)](../../actions/workflows/governance-tests.yml)
+
+DXCP enforces authoritative, deterministic deployment governance before any execution engine is invoked. All policy decisions are evaluated server-side and must pass strict invariants covering role boundaries, idempotency, immutability, quota enforcement, kill-switch safety, and auditability.
+
+Governance failures short-circuit before engine dispatch. No deployment can proceed unless it conforms to the frozen governance contract, which is validated via both unit-level invariants and runtime conformance tests. The result is machine-verifiable, enterprise-grade control with contained blast radius and zero side effects on policy failure. See [DXCP Governance Contract](docs/governance-tests/GOVERNANCE_CONTRACT.md).
