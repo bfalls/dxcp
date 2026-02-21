@@ -89,6 +89,22 @@ function readJsonFile<T>(path: string): T {
   return JSON.parse(text) as T;
 }
 
+function readContractVersionFromDoc(): string {
+  const docPath = join(process.cwd(), "docs", "governance-tests", "GOVERNANCE_CONTRACT.md");
+  if (!existsSync(docPath)) {
+    return "unknown";
+  }
+  const text = readFileSync(docPath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const match = line.match(/^GovernanceContractVersion\s*:\s*([A-Za-z0-9._-]+)\s*$/i);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return "unknown";
+}
+
 function normalizeRuntimeSummary(runtime: RuntimeSnapshot | null): {
   total: number;
   passed: number;
@@ -148,6 +164,24 @@ function main(): number {
   const unitSummary = normalizeUnitSummary(unit);
   const runtimeChecks = Array.isArray(runtime?.checks) ? runtime!.checks! : [];
   const unitTests = Array.isArray(unit?.tests) ? unit!.tests! : [];
+  const docVersion = readContractVersionFromDoc();
+  const runtimeVersion = runtime?.contract_version ?? "unknown";
+  const unitVersion = unit?.contract_version ?? "unknown";
+
+  if (runtimeVersion !== "unknown" && unitVersion !== "unknown" && runtimeVersion !== unitVersion) {
+    throw new Error(
+      `Contract version mismatch between runtime and unit snapshots: runtime=${runtimeVersion}, unit=${unitVersion}`,
+    );
+  }
+  if (docVersion !== "unknown") {
+    if (runtimeVersion !== "unknown" && runtimeVersion !== docVersion) {
+      throw new Error(`Runtime snapshot contract_version ${runtimeVersion} does not match contract doc version ${docVersion}`);
+    }
+    if (unitVersion !== "unknown" && unitVersion !== docVersion) {
+      throw new Error(`Unit snapshot contract_version ${unitVersion} does not match contract doc version ${docVersion}`);
+    }
+  }
+
   const runtimeStrictPassed =
     runtime?.conformance_profile === "strict" &&
     runtimeSummary.required_failed === 0 &&
@@ -156,11 +190,13 @@ function main(): number {
   const overallStatus = runtimeStrictPassed && unitPassed ? "PASS" : "FAIL";
 
   const governanceContractVersion =
-    runtime?.contract_version && runtime.contract_version !== "unknown"
-      ? runtime.contract_version
-      : unit?.contract_version && unit.contract_version !== "unknown"
-        ? unit.contract_version
-        : "unknown";
+    docVersion !== "unknown"
+      ? docVersion
+      : runtime?.contract_version && runtime.contract_version !== "unknown"
+        ? runtime.contract_version
+        : unit?.contract_version && unit.contract_version !== "unknown"
+          ? unit.contract_version
+          : "unknown";
 
   const payload: { [key: string]: JsonValue } = {
     governance_contract_version: governanceContractVersion,
@@ -187,6 +223,9 @@ function main(): number {
 
   writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf8");
   console.log(`[INFO] Wrote merged conformance snapshot: ${args.outputPath}`);
+  console.log(
+    `[INFO] GovernanceContractVersion taken from docs/governance-tests/GOVERNANCE_CONTRACT.md: ${governanceContractVersion}`,
+  );
 
   if (overallStatus !== "PASS") {
     console.error("[ERROR] Governance conformance status is FAIL.");

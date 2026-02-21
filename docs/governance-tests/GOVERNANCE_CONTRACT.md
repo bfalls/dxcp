@@ -1,3 +1,7 @@
+GovernanceContractVersion: 1.0
+GovernanceFreezeDate: 2026-02-21
+ChangeRule: Any new or changed REQUIRED invariant requires a version bump.
+
 # DXCP Governance Contract
 
 This document defines the authoritative governance invariants for DXCP.

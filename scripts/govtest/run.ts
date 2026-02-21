@@ -186,7 +186,7 @@ function readGovernanceContractVersion(): string {
   const text = readFileSync(contractPath, "utf8");
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
-    const match = line.match(/(?:contract[_ -]?version|version)\s*[:=]\s*([A-Za-z0-9._-]+)/i);
+    const match = line.match(/^GovernanceContractVersion\s*:\s*([A-Za-z0-9._-]+)\s*$/i);
     if (match?.[1]) {
       return match[1];
     }

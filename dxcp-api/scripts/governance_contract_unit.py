@@ -31,7 +31,7 @@ def _read_contract_version() -> str:
         return "unknown"
     text = CONTRACT_DOC.read_text(encoding="utf-8", errors="replace")
     for line in text.splitlines():
-        match = re.search(r"(?:contract[_ -]?version|version)\s*[:=]\s*([A-Za-z0-9._-]+)", line, re.IGNORECASE)
+        match = re.search(r"^\s*GovernanceContractVersion\s*:\s*([A-Za-z0-9._-]+)\s*$", line, re.IGNORECASE)
         if match:
             return match.group(1)
     return "unknown"
