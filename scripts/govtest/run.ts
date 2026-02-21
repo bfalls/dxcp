@@ -27,6 +27,7 @@ import { stepE_deployEnforcementUnregisteredVersion } from "./steps/stepE_deploy
 import { stepF_deployHappyPath } from "./steps/stepF_deploy_happy.ts";
 import { stepG_rollbackAfterDeploy } from "./steps/rollback.ts";
 import { stepH_guardrailSpotChecks } from "./steps/guardrails.ts";
+import { stepI_ciDenialMatrixEnforcement } from "./steps/stepI_ci_denial_matrix.ts";
 import { stepR_roleAuthorizationChecks } from "./steps/stepRole_authorization.ts";
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
@@ -337,6 +338,7 @@ async function main(): Promise<number> {
   await stepD_sameIdempotencyKeyDifferentBodyReturnsConflict(context, tokens.ci);
   await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
   await stepF_deployHappyPath(context, tokens.owner, tokens.observer, nonMemberOwnerToken);
+  await stepI_ciDenialMatrixEnforcement(context, tokens.ci, claimsByRole.ci as Record<string, unknown>);
   await stepG_rollbackAfterDeploy(context, tokens.owner);
   await stepH_guardrailSpotChecks(context, tokens.owner);
 
@@ -351,7 +353,7 @@ async function main(): Promise<number> {
     );
   }
   assert(failedGuardrails.length === 0, `Guardrail checks failed: ${failedGuardrails.map((c) => c.id).join(", ")}`);
-  assert(Object.keys(context.timings.stepStart).length === 9, "Expected 9 steps to run");
+  assert(Object.keys(context.timings.stepStart).length === 10, "Expected 10 steps to run");
   printSummary(context);
   writeRunArtifact(context, false);
   return 0;

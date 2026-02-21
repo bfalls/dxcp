@@ -290,7 +290,9 @@ set -e
 run_cdk_deploy() {
   local stack="$1"
   local verbose_flag="${2:-0}"
-  local cmd=(npx cdk deploy "$stack" --require-approval never --progress events --outputs-file "$CDK_OUTPUTS_FILE" --no-notices)
+  # Deploy each stack explicitly; dependencies are already ordered in CDK_STACKS below.
+  # Without --exclusively, CDK may re-process dependency stacks on later deploy calls.
+  local cmd=(npx cdk deploy "$stack" --exclusively --require-approval never --progress events --outputs-file "$CDK_OUTPUTS_FILE" --no-notices)
   if [[ "$verbose_flag" -eq 1 ]]; then
     cmd+=(--verbose)
   fi
