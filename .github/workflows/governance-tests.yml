@@ -88,6 +88,7 @@ jobs:
         with:
           name: governance-conformance-artifacts
           if-no-files-found: warn
+          include-hidden-files: true
           path: |
             .govtest.contract.snapshot.json
             .dxcpapi.governance.snapshot.json
