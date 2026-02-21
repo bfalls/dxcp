@@ -52,6 +52,15 @@ def utc_now() -> str:
 DEFAULT_ENGINE_TYPE = "SPINNAKER"
 TERMINAL_DEPLOYMENT_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"}
 TERMINAL_DEPLOYMENT_OUTCOMES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK", "SUPERSEDED"}
+PROTECTED_DEPLOYMENT_FIELDS = (
+    "service",
+    "environment",
+    "recipeId",
+    "version",
+    "deploymentKind",
+    "rollbackOf",
+    "intentCorrelationId",
+)
 
 
 class ImmutableDeploymentError(Exception):
@@ -59,6 +68,14 @@ class ImmutableDeploymentError(Exception):
         super().__init__(message)
         self.code = "IMMUTABLE_RECORD"
         self.status_code = 409
+
+
+def _assert_protected_fields_unchanged(before: Optional[dict], after: Optional[dict]) -> None:
+    if not before or not after:
+        return
+    for field in PROTECTED_DEPLOYMENT_FIELDS:
+        if before.get(field) != after.get(field):
+            raise ImmutableDeploymentError(f"Cannot change protected deployment field: {field}")
 
 
 class Storage:
@@ -1067,8 +1084,11 @@ class Storage:
         self._replace_failures(cur, deployment_id, failures)
         conn.commit()
         conn.close()
+        current = self.get_deployment(deployment_id)
+        _assert_protected_fields_unchanged(existing, current)
 
     def update_deployment_superseded_by(self, deployment_id: str, superseded_by: Optional[str]) -> None:
+        existing = self.get_deployment(deployment_id)
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
@@ -1077,6 +1097,8 @@ class Storage:
         )
         conn.commit()
         conn.close()
+        current = self.get_deployment(deployment_id)
+        _assert_protected_fields_unchanged(existing, current)
 
     def _replace_failures(self, cur: sqlite3.Cursor, deployment_id: str, failures: List[dict]) -> None:
         cur.execute("DELETE FROM failures WHERE deployment_id = ?", (deployment_id,))
@@ -2142,8 +2164,11 @@ class DynamoStorage:
             ExpressionAttributeNames=names,
             ExpressionAttributeValues=values,
         )
+        current = self.get_deployment(deployment_id)
+        _assert_protected_fields_unchanged(existing, current)
 
     def update_deployment_superseded_by(self, deployment_id: str, superseded_by: Optional[str]) -> None:
+        existing = self.get_deployment(deployment_id)
         self.table.update_item(
             Key={"pk": "DEPLOYMENT", "sk": deployment_id},
             UpdateExpression="SET supersededBy = :supersededBy, updatedAt = :updatedAt",
@@ -2152,6 +2177,8 @@ class DynamoStorage:
                 ":updatedAt": utc_now(),
             },
         )
+        current = self.get_deployment(deployment_id)
+        _assert_protected_fields_unchanged(existing, current)
 
     def get_deployment(self, deployment_id: str) -> Optional[dict]:
         response = self.table.get_item(Key={"pk": "DEPLOYMENT", "sk": deployment_id})

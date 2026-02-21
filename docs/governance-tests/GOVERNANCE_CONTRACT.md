@@ -173,6 +173,9 @@ Quota failures must return 429 QUOTA_EXCEEDED.
 
 Deployment records are immutable after creation.
 
+There is no supported API to mutate DeploymentRecord(s) after creation.
+PATCH/PUT/POST update attempts to /v1/deployments/{id} must return 405.
+
 Protected fields that MUST NOT be changed after record creation:
 
 - service
@@ -192,9 +195,6 @@ Allowed post-create mutations are system-managed operational fields only:
 - in-progress state progression before a terminal state is reached
 - append-only operational evidence (for example failures/timeline observations)
 - supersession linkage metadata that does not rewrite protected fields
-
-Any API attempt to modify a deployment record must fail with:
-409 IMMUTABLE_RECORD.
 
 ---------------------------------------------------------------------
 

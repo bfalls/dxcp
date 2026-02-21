@@ -2860,59 +2860,6 @@ def get_deployment(
     return _deployment_public_view(actor, deployment, latest_success_by_scope)
 
 
-@app.patch("/v1/deployments/{deployment_id}")
-def patch_deployment(
-    deployment_id: str,
-    payload: dict,
-    request: Request,
-    authorization: Optional[str] = Header(None),
-):
-    actor = get_actor(authorization)
-    role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "update deployments")
-    if role_error:
-        return role_error
-    guardrails.require_mutations_enabled()
-    rate_limiter.check_mutate(actor.actor_id, "deployment_update_attempt")
-    deployment = storage.get_deployment(deployment_id)
-    if not deployment:
-        return error_response(404, "NOT_FOUND", "Deployment not found")
-    if not _actor_can_read_deployment(actor, deployment):
-        return error_response(
-            403,
-            "DELIVERY_GROUP_SCOPE_REQUIRED",
-            "Deployment not in actor delivery group scope",
-        )
-    protected_fields = sorted(
-        {
-            "service",
-            "environment",
-            "recipeId",
-            "version",
-            "deploymentKind",
-            "rollbackOf",
-            "outcome",
-            "finalState",
-            "deliveryGroupId",
-            "submittedBy",
-            "submittedByRole",
-            "submittedByEmail",
-            "policySnapshot",
-            "policyDecisionSnapshot",
-        }
-    )
-    attempted = [field for field in protected_fields if field in payload]
-    details = {
-        "protected_fields": protected_fields,
-        "attempted_fields": attempted,
-    }
-    return error_response(
-        409,
-        "IMMUTABLE_RECORD",
-        "Deployment records are immutable after creation",
-        details=details,
-    )
-
-
 @app.get("/v1/deployments/{deployment_id}/failures")
 def get_deployment_failures(
     deployment_id: str,

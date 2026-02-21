@@ -174,7 +174,7 @@ async def test_deploy_happy_path_creates_roll_forward_record(tmp_path: Path, mon
         assert body["engineExecutionUrl"].startswith("http://engine.local/")
 
 
-async def test_deployment_record_patch_rejects_immutable_field_changes(tmp_path: Path, monkeypatch):
+async def test_deployment_record_update_methods_are_unsupported(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         created = await client.post(
             "/v1/deployments",
@@ -184,15 +184,24 @@ async def test_deployment_record_patch_rejects_immutable_field_changes(tmp_path:
         assert created.status_code == 201
         deployment_id = created.json()["id"]
 
-        immutable_attempt = await client.patch(
+        patch_attempt = await client.patch(
             f"/v1/deployments/{deployment_id}",
             headers=auth_header(["dxcp-platform-admins"]),
             json={"version": "9.9.9"},
         )
-        assert immutable_attempt.status_code == 409
-        body = immutable_attempt.json()
-        assert body["code"] == "IMMUTABLE_RECORD"
-        assert "version" in body["details"]["attempted_fields"]
+        put_attempt = await client.put(
+            f"/v1/deployments/{deployment_id}",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={"version": "9.9.9"},
+        )
+        post_attempt = await client.post(
+            f"/v1/deployments/{deployment_id}",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={"version": "9.9.9"},
+        )
+        assert patch_attempt.status_code == 405
+        assert put_attempt.status_code == 405
+        assert post_attempt.status_code == 405
 
         read_back = await client.get(
             f"/v1/deployments/{deployment_id}",
@@ -200,6 +209,43 @@ async def test_deployment_record_patch_rejects_immutable_field_changes(tmp_path:
         )
         assert read_back.status_code == 200
         assert read_back.json()["version"] == "1.2.3"
+
+
+async def test_internal_update_preserves_protected_deployment_fields(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        created = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-immutable-2", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+        assert created.status_code == 201
+        deployment_id = created.json()["id"]
+        before = main.storage.get_deployment(deployment_id)
+
+        main.storage.update_deployment(deployment_id, "SUCCEEDED", [], outcome="SUCCEEDED")
+
+        after = main.storage.get_deployment(deployment_id)
+        for field in ["service", "environment", "recipeId", "version", "deploymentKind", "rollbackOf", "intentCorrelationId"]:
+            assert after[field] == before[field]
+
+
+async def test_internal_update_rejects_terminal_state_rewrite(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        created = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-immutable-3", **auth_header(["dxcp-platform-admins"])},
+            json=_deploy_payload(),
+        )
+        assert created.status_code == 201
+        deployment_id = created.json()["id"]
+
+        main.storage.update_deployment(deployment_id, "SUCCEEDED", [], outcome="SUCCEEDED")
+        with pytest.raises(main.ImmutableDeploymentError):
+            main.storage.update_deployment(deployment_id, "FAILED", [], outcome="FAILED")
+
+        record = main.storage.get_deployment(deployment_id)
+        assert record["state"] == "SUCCEEDED"
+        assert record["outcome"] == "SUCCEEDED"
 
 
 async def test_deploy_requires_idempotency_key(tmp_path: Path, monkeypatch):
