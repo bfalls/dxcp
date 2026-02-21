@@ -14,8 +14,8 @@ import {
 } from "../common.ts";
 
 type RollbackTarget = {
-  version?: string;
-  deploymentId?: string;
+  version: string;
+  deploymentId: string;
 };
 
 type SubmittedRollback = {
@@ -55,39 +55,38 @@ export async function discoverRollbackTarget(context: RunContext, ownerToken: st
   if (!candidate) {
     return null;
   }
-  const version = typeof candidate.version === "string" ? candidate.version : undefined;
-  const deploymentId = typeof candidate.id === "string" ? candidate.id : undefined;
-  assert(version || deploymentId, "G: rollback target discovery found a record without id/version");
+  const version = typeof candidate.version === "string" ? candidate.version : "";
+  const deploymentId = typeof candidate.id === "string" ? candidate.id : "";
+  assert(version.length > 0, "G: rollback target discovery found a record without version");
+  assert(deploymentId.length > 0, "G: rollback target discovery found a record without deployment id");
   return { version, deploymentId };
 }
 
 export async function validateRollback(context: RunContext, ownerToken: string, target: RollbackTarget): Promise<void> {
-  if (target.deploymentId) {
-    const byDeploymentId = await apiRequest(
-      "POST",
-      `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback/validate`,
-      ownerToken,
-    );
-    if (byDeploymentId.status === 200) {
-      context.rollback.validationMode = "rollback-endpoint";
-      return;
-    }
-    if (byDeploymentId.status === 404 || byDeploymentId.status === 405) {
-      const payload = await decodeJson(byDeploymentId);
-      if (payload?.code === "NOT_FOUND") {
-        throw new Error(
-          `G: POST /v1/deployments/${target.deploymentId}/rollback/validate failed with HTTP ${byDeploymentId.status}; body=${JSON.stringify(payload)}`,
-        );
-      }
-    } else {
-      const payload = await decodeJson(byDeploymentId);
+  const byDeploymentId = await apiRequest(
+    "POST",
+    `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback/validate`,
+    ownerToken,
+  );
+  if (byDeploymentId.status === 200) {
+    context.rollback.validationMode = "rollback-endpoint";
+    return;
+  }
+  if (byDeploymentId.status === 404 || byDeploymentId.status === 405) {
+    const payload = await decodeJson(byDeploymentId);
+    if (payload?.code === "NOT_FOUND") {
       throw new Error(
         `G: POST /v1/deployments/${target.deploymentId}/rollback/validate failed with HTTP ${byDeploymentId.status}; body=${JSON.stringify(payload)}`,
       );
     }
+  } else {
+    const payload = await decodeJson(byDeploymentId);
+    throw new Error(
+      `G: POST /v1/deployments/${target.deploymentId}/rollback/validate failed with HTTP ${byDeploymentId.status}; body=${JSON.stringify(payload)}`,
+    );
   }
 
-  assert(typeof target.version === "string" && target.version.length > 0, "G: rollback fallback validation requires target version");
+  assert(typeof target.version === "string" && target.version.length > 0, "G: rollback validation requires target version");
   const validate = await apiRequest("POST", "/v1/deployments/validate", ownerToken, {
     body: buildDeploymentIntent(context, target.version),
   });
@@ -101,100 +100,41 @@ export async function submitRollback(
   ownerToken: string,
   target: RollbackTarget,
 ): Promise<SubmittedRollback> {
-  if (target.deploymentId) {
-    const rollbackPath = `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback`;
-    const missingIdempotency = await apiRequest("POST", rollbackPath, ownerToken);
-    await assertStatus(
-      missingIdempotency,
-      400,
-      `G: POST ${rollbackPath} (missing idempotency key)`,
-      "IDMP_KEY_REQUIRED",
-    );
-
-    const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
-    const emptyIdempotency = await fetch(`${baseApi}${rollbackPath}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${ownerToken}`,
-        "Idempotency-Key": "",
-      },
-    });
-    await assertStatus(
-      emptyIdempotency,
-      400,
-      `G: POST ${rollbackPath} (empty idempotency key)`,
-      "IDMP_KEY_REQUIRED",
-    );
-
-    const rollbackById = await apiRequest(
-      "POST",
-      rollbackPath,
-      ownerToken,
-      { idempotencyKey: context.idempotencyKeys.rollbackSubmit },
-    );
-    if (rollbackById.status === 201) {
-      const body = await assertStatus(
-        rollbackById,
-        201,
-        `G: POST /v1/deployments/${target.deploymentId}/rollback`,
-      );
-      const deploymentId = body?.id;
-      assert(typeof deploymentId === "string" && deploymentId.length > 0, "G: rollback submit response missing id");
-      context.rollback.submissionMode = "rollback-endpoint";
-      return { deploymentId };
-    }
-    if (rollbackById.status === 404 || rollbackById.status === 405) {
-      const payload = await decodeJson(rollbackById);
-      if (payload?.code === "NOT_FOUND") {
-        throw new Error(
-          `G: POST /v1/deployments/${target.deploymentId}/rollback failed with HTTP ${rollbackById.status}; body=${JSON.stringify(payload)}`,
-        );
-      }
-    } else {
-      const payload = await decodeJson(rollbackById);
-      throw new Error(
-        `G: POST /v1/deployments/${target.deploymentId}/rollback failed with HTTP ${rollbackById.status}; body=${JSON.stringify(payload)}`,
-      );
-    }
-  }
-
-  assert(typeof target.version === "string" && target.version.length > 0, "G: rollback redeploy requires target version");
-  const rollbackIntent = buildDeploymentIntent(context, target.version);
-  const missingIdempotency = await apiRequest("POST", "/v1/deployments", ownerToken, {
-    body: rollbackIntent,
-  });
+  const rollbackPath = `/v1/deployments/${encodeURIComponent(target.deploymentId)}/rollback`;
+  const missingIdempotency = await apiRequest("POST", rollbackPath, ownerToken);
   await assertStatus(
     missingIdempotency,
     400,
-    "G: POST /v1/deployments (rollback redeploy, missing idempotency key)",
+    `G: POST ${rollbackPath} (missing idempotency key)`,
     "IDMP_KEY_REQUIRED",
   );
 
   const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
-  const emptyIdempotency = await fetch(`${baseApi}/v1/deployments`, {
+  const emptyIdempotency = await fetch(`${baseApi}${rollbackPath}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${ownerToken}`,
-      "Content-Type": "application/json",
       "Idempotency-Key": "",
     },
-    body: JSON.stringify(rollbackIntent),
   });
   await assertStatus(
     emptyIdempotency,
     400,
-    "G: POST /v1/deployments (rollback redeploy, empty idempotency key)",
+    `G: POST ${rollbackPath} (empty idempotency key)`,
     "IDMP_KEY_REQUIRED",
   );
 
-  const deploy = await apiRequest("POST", "/v1/deployments", ownerToken, {
+  const rollbackById = await apiRequest("POST", rollbackPath, ownerToken, {
     idempotencyKey: context.idempotencyKeys.rollbackSubmit,
-    body: rollbackIntent,
   });
-  const deployBody = await assertStatus(deploy, 201, "G: POST /v1/deployments (rollback redeploy)");
-  const deploymentId = deployBody?.id;
-  assert(typeof deploymentId === "string" && deploymentId.length > 0, "G: rollback redeploy response missing id");
-  context.rollback.submissionMode = "redeploy";
+  const body = await assertStatus(
+    rollbackById,
+    201,
+    `G: POST /v1/deployments/${target.deploymentId}/rollback`,
+  );
+  const deploymentId = body?.id;
+  assert(typeof deploymentId === "string" && deploymentId.length > 0, "G: rollback submit response missing id");
+  context.rollback.submissionMode = "rollback-endpoint";
   return { deploymentId };
 }
 
@@ -226,6 +166,34 @@ export async function pollRollback(
   throw new Error(`G: rollback polling timed out after ${timeoutSeconds}s (deploymentId=${submitted.deploymentId})`);
 }
 
+async function assertRollbackRecordShape(
+  context: RunContext,
+  ownerToken: string,
+  submitted: SubmittedRollback,
+): Promise<void> {
+  const response = await apiRequest("GET", `/v1/deployments/${encodeURIComponent(submitted.deploymentId)}`, ownerToken);
+  const rollbackRecord = await assertStatus(
+    response,
+    200,
+    `G: GET /v1/deployments/${submitted.deploymentId} (post-rollback record)`,
+  );
+
+  const deploymentKind = rollbackRecord?.deploymentKind;
+  assert(
+    deploymentKind === "ROLLBACK",
+    `G: rollback deploymentKind expected ROLLBACK, got ${String(deploymentKind)}`,
+  );
+
+  const priorDeploymentId = context.rollback.targetDeploymentId;
+  assert(
+    typeof priorDeploymentId === "string" && priorDeploymentId.length > 0,
+    "G: rollback target deployment id missing; cannot assert rollbackOf linkage",
+  );
+  const rollbackOf = rollbackRecord?.rollbackOf;
+  assert(typeof rollbackOf === "string" && rollbackOf.length > 0, "G: rollback record missing rollbackOf");
+  assert(rollbackOf === priorDeploymentId, `G: rollbackOf mismatch; expected ${priorDeploymentId}, got ${String(rollbackOf)}`);
+}
+
 export async function stepG_rollbackAfterDeploy(context: RunContext, ownerToken: string): Promise<void> {
   const step = "G";
   announceStep("G) Rollback governance check: discover prior successful target, validate, submit, and poll");
@@ -253,6 +221,7 @@ export async function stepG_rollbackAfterDeploy(context: RunContext, ownerToken:
   const submitted = await submitRollback(context, ownerToken, target);
   context.rollback.deploymentId = submitted.deploymentId;
   await pollRollback(context, ownerToken, submitted);
+  await assertRollbackRecordShape(context, ownerToken, submitted);
 
   markStepEnd(context, step);
 }

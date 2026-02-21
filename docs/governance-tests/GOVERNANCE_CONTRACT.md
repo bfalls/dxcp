@@ -197,6 +197,12 @@ Rollback requires:
 Rollback must create a new DeploymentRecord
 with deploymentKind = ROLLBACK.
 
+Rollback record linkage:
+
+- Rollback record must reference the prior deployment id.
+- Canonical linkage field is rollbackOf.
+- rollbackOf must equal the prior deployment id.
+
 ---------------------------------------------------------------------
 
 7. Claims Sanity

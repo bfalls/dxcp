@@ -248,6 +248,7 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkey
         )
         assert response.status_code == 201
         body = response.json()
+        assert body["deploymentKind"] == "ROLLBACK"
         assert body["version"] == "1.0.0"
         assert body["rollbackOf"] == "dep-b"
         assert body["engineExecutionId"]
@@ -263,6 +264,17 @@ async def test_rollback_creates_record_and_updates_status(tmp_path: Path, monkey
         assert detail.status_code == 200
         detail_body = detail.json()
         assert detail_body["state"] == "SUCCEEDED"
+        assert detail_body["deploymentKind"] == "ROLLBACK"
+        assert detail_body["rollbackOf"] == "dep-b"
+
+        listing = await client.get(
+            "/v1/deployments?service=demo-service&environment=sandbox",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        assert listing.status_code == 200
+        by_id = {item["id"]: item for item in listing.json()}
+        assert by_id[body["id"]]["deploymentKind"] == "ROLLBACK"
+        assert by_id[body["id"]]["rollbackOf"] == "dep-b"
 
         original = main.storage.get_deployment("dep-b")
         assert original["state"] == "ROLLED_BACK"
