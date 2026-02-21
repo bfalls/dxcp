@@ -18,13 +18,23 @@ Rules:
 - No cross-VPC connectivity.
 - No NAT gateways in Phase 0B.
 
+IAM account-boundary simulation:
+- `spinnaker-dev-role` for Environment=`dev` resources
+- `spinnaker-staging-role` for Environment=`staging` resources
+- `spinnaker-prod-role` for Environment=`prod` resources
+- `spinnaker-assumer-role` is the principal that assumes those three roles
+
+Mapping note:
+- Later Spinnaker account configs should map each account to the corresponding `spinnakerRoleArn` from the generated registry.
+- This is IAM-boundary simulation within one AWS account, not true multi-account isolation.
+
 Single infra command:
 - `./scripts/deploy_env_infra.sh`
 
 Generated registry (authoritative handoff):
 - `docs/generated/env_vpc_registry.json`
 
-The infra command is idempotent, deploys only the three environment VPC stacks, regenerates the registry on every run, and fails if NAT is detected in any environment VPC.
+The infra command is idempotent, deploys only `dxcp-env-*` environment stacks (VPC + IAM), regenerates the registry on every run, and fails if NAT is detected in any environment VPC.
 
 ---
 

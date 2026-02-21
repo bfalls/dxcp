@@ -16,11 +16,18 @@ fi
 
 ENVIRONMENTS=("dev" "staging" "prod")
 CIDRS=("10.10.0.0/16" "10.20.0.0/16" "10.30.0.0/16")
-STACKS=(
+VPC_STACKS=(
   "dxcp-env-vpc-dev"
   "dxcp-env-vpc-staging"
   "dxcp-env-vpc-prod"
 )
+IAM_STACKS=(
+  "dxcp-env-iam-dev"
+  "dxcp-env-iam-staging"
+  "dxcp-env-iam-prod"
+)
+ASSUMER_STACK="dxcp-env-iam-assumer"
+STACKS=("${VPC_STACKS[@]}" "${IAM_STACKS[@]}" "$ASSUMER_STACK")
 
 if [[ "${#STACKS[@]}" -eq 0 ]]; then
   echo "ERROR: stack list is empty; refusing to deploy." >&2
@@ -31,11 +38,19 @@ echo "Infra-only (VPC environments). Not deploying DXCP."
 echo "AWS region: $AWS_REGION"
 echo "Deploying stacks:"
 for stack in "${STACKS[@]}"; do
+  if [[ "$stack" != dxcp-env-* ]]; then
+    echo "ERROR: stack '$stack' is outside allowed infra namespace dxcp-env-*." >&2
+    exit 1
+  fi
   echo "- $stack"
 done
 
-if [[ "${#ENVIRONMENTS[@]}" -ne "${#STACKS[@]}" || "${#CIDRS[@]}" -ne "${#STACKS[@]}" ]]; then
+if [[ "${#ENVIRONMENTS[@]}" -ne "${#VPC_STACKS[@]}" || "${#CIDRS[@]}" -ne "${#VPC_STACKS[@]}" ]]; then
   echo "ERROR: environment contract arrays are inconsistent." >&2
+  exit 1
+fi
+if [[ "${#IAM_STACKS[@]}" -ne "${#VPC_STACKS[@]}" ]]; then
+  echo "ERROR: IAM and VPC stack arrays are inconsistent." >&2
   exit 1
 fi
 
@@ -79,25 +94,31 @@ stack_output() {
 declare -a REGISTRY_ROWS=()
 declare -a SUMMARY_ROWS=()
 
-for i in "${!STACKS[@]}"; do
+for i in "${!VPC_STACKS[@]}"; do
   env_name="${ENVIRONMENTS[$i]}"
   expected_cidr="${CIDRS[$i]}"
-  stack_name="${STACKS[$i]}"
+  vpc_stack_name="${VPC_STACKS[$i]}"
+  iam_stack_name="${IAM_STACKS[$i]}"
 
-  vpc_id="$(stack_output "$stack_name" "VpcId")"
-  public_subnet_ids_csv="$(stack_output "$stack_name" "PublicSubnetIds")"
-  output_cidr="$(stack_output "$stack_name" "VpcCidr")"
+  vpc_id="$(stack_output "$vpc_stack_name" "VpcId")"
+  public_subnet_ids_csv="$(stack_output "$vpc_stack_name" "PublicSubnetIds")"
+  output_cidr="$(stack_output "$vpc_stack_name" "VpcCidr")"
+  spinnaker_role_arn="$(stack_output "$iam_stack_name" "SpinnakerRoleArn")"
 
   if [[ -z "$vpc_id" || "$vpc_id" == "None" ]]; then
-    echo "ERROR: missing VpcId output on stack $stack_name." >&2
+    echo "ERROR: missing VpcId output on stack $vpc_stack_name." >&2
     exit 1
   fi
   if [[ -z "$public_subnet_ids_csv" || "$public_subnet_ids_csv" == "None" ]]; then
-    echo "ERROR: missing PublicSubnetIds output on stack $stack_name." >&2
+    echo "ERROR: missing PublicSubnetIds output on stack $vpc_stack_name." >&2
     exit 1
   fi
   if [[ -z "$output_cidr" || "$output_cidr" == "None" ]]; then
-    echo "ERROR: missing VpcCidr output on stack $stack_name." >&2
+    echo "ERROR: missing VpcCidr output on stack $vpc_stack_name." >&2
+    exit 1
+  fi
+  if [[ -z "$spinnaker_role_arn" || "$spinnaker_role_arn" == "None" ]]; then
+    echo "ERROR: missing SpinnakerRoleArn output on stack $iam_stack_name." >&2
     exit 1
   fi
   if [[ "$output_cidr" != "$expected_cidr" ]]; then
@@ -118,13 +139,22 @@ for i in "${!STACKS[@]}"; do
     exit 1
   fi
 
-  REGISTRY_ROWS+=("${env_name}|${expected_cidr}|${vpc_id}|${public_subnet_ids_csv}")
-  SUMMARY_ROWS+=("${env_name}|${vpc_id}|${public_subnet_ids_csv}")
+  REGISTRY_ROWS+=("${env_name}|${expected_cidr}|${vpc_id}|${public_subnet_ids_csv}|${spinnaker_role_arn}")
+  SUMMARY_ROWS+=("${env_name}|${vpc_id}|${public_subnet_ids_csv}|${spinnaker_role_arn}")
 done
+
+spinnaker_assumer_role_arn="$(stack_output "$ASSUMER_STACK" "SpinnakerAssumerRoleArn")"
+if [[ -z "$spinnaker_assumer_role_arn" || "$spinnaker_assumer_role_arn" == "None" ]]; then
+  echo "ERROR: missing SpinnakerAssumerRoleArn output on stack $ASSUMER_STACK." >&2
+  exit 1
+fi
 
 mkdir -p "$(dirname "$REGISTRY_PATH")"
 REGISTRY_ROWS_TEXT="$(printf '%s\n' "${REGISTRY_ROWS[@]}")"
-REGISTRY_PATH="$REGISTRY_PATH_PY" REGISTRY_ROWS_TEXT="$REGISTRY_ROWS_TEXT" python - <<'PY'
+REGISTRY_PATH="$REGISTRY_PATH_PY" \
+REGISTRY_ROWS_TEXT="$REGISTRY_ROWS_TEXT" \
+SPINNAKER_ASSUMER_ROLE_ARN="$spinnaker_assumer_role_arn" \
+python - <<'PY'
 import json
 import os
 
@@ -135,7 +165,7 @@ environments = {}
 for env_name in order:
     found = False
     for row in rows:
-        name, cidr, vpc_id, subnet_csv = row.split("|", 3)
+        name, cidr, vpc_id, subnet_csv, role_arn = row.split("|", 4)
         if name != env_name:
             continue
         subnet_ids = [item.strip() for item in subnet_csv.split(",") if item.strip()]
@@ -144,13 +174,18 @@ for env_name in order:
             "cidr": cidr,
             "vpcId": vpc_id,
             "publicSubnetIds": subnet_ids,
+            "spinnakerRoleArn": role_arn,
         }
         found = True
         break
     if not found:
         raise SystemExit(f"Missing registry row for environment: {env_name}")
 
-payload = {"region": "us-east-1", "environments": environments}
+payload = {
+    "region": "us-east-1",
+    "spinnakerAssumerRoleArn": os.environ["SPINNAKER_ASSUMER_ROLE_ARN"],
+    "environments": environments,
+}
 registry_path = os.environ["REGISTRY_PATH"]
 os.makedirs(os.path.dirname(registry_path), exist_ok=True)
 with open(registry_path, "w", encoding="ascii") as handle:
@@ -158,11 +193,12 @@ with open(registry_path, "w", encoding="ascii") as handle:
     handle.write("\n")
 PY
 
-echo "Environment VPC summary:"
+echo "Environment infra summary:"
 for row in "${SUMMARY_ROWS[@]}"; do
-  IFS="|" read -r env_name vpc_id subnet_ids_csv <<<"$row"
-  echo "- ${env_name}: vpcId=${vpc_id} publicSubnetIds=${subnet_ids_csv}"
+  IFS="|" read -r env_name vpc_id subnet_ids_csv spinnaker_role_arn <<<"$row"
+  echo "- ${env_name}: vpcId=${vpc_id} publicSubnetIds=${subnet_ids_csv} spinnakerRoleArn=${spinnaker_role_arn}"
 done
+echo "- spinnakerAssumerRoleArn=${spinnaker_assumer_role_arn}"
 echo "Wrote registry: $REGISTRY_PATH"
 
 exit 0
