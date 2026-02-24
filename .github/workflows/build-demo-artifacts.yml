@@ -186,7 +186,7 @@ jobs:
           DXCP_API_BASE: ${{ vars.DXCP_API_BASE }}
           GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
           GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
-          GOV_CI_CLIENT_ID: ${{ secrets.GOV_CI_CLIENT_ID }}
+          GOV_CI_CLIENT_ID: ${{ vars.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
         shell: bash
         run: |
