@@ -146,8 +146,9 @@ jobs:
               version_source="s3-bootstrap"
             fi
             if [[ -z "$current_version" ]]; then
-              echo "Unable to determine current version for ${service}. Create initial tag ${service}/vX.Y.Z or seed one artifact in S3." >&2
-              exit 1
+              current_version="0.1.0"
+              version_source="bootstrap-default"
+              echo "No prior version history found for ${service}; bootstrapping from ${current_version}."
             fi
 
             version="$(bump_patch "$current_version")"
