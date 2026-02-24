@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from html import escape
+import os
 from pathlib import Path
 
 
@@ -20,6 +21,9 @@ def handler(event, context):
     version = load_version()
     now = datetime.now(timezone.utc).isoformat()
     request_id = getattr(context, "aws_request_id", "unknown")
+    lambda_version = getattr(context, "function_version", os.getenv("AWS_LAMBDA_FUNCTION_VERSION", "unknown"))
+    lambda_name = os.getenv("AWS_LAMBDA_FUNCTION_NAME", SERVICE_NAME)
+    invoked_arn = getattr(context, "invoked_function_arn", "unknown")
     params = (event or {}).get("queryStringParameters") or {}
     raw_x = params.get("x", "5")
     try:
@@ -39,6 +43,9 @@ def handler(event, context):
   <body style="font-family: Arial, sans-serif; padding: 40px;">
     <h1>{SERVICE_NAME}</h1>
     <p>Version: <strong>{version}</strong></p>
+    <p>Lambda Function Version: <strong>{escape(str(lambda_version))}</strong></p>
+    <p>Lambda Function Name: <strong>{escape(str(lambda_name))}</strong></p>
+    <p>Invoked Function ARN: <strong>{escape(str(invoked_arn))}</strong></p>
     <p>Rendered at: <strong>{now}</strong></p>
     <p>Request ID: <strong>{request_id}</strong></p>
     <h2>Calculation</h2>
