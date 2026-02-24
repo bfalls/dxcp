@@ -222,7 +222,7 @@ jobs:
 
           whoami="$(curl -sS --fail --show-error -H "Authorization: Bearer ${DXCP_API_TOKEN}" "${dxcp_base}/whoami")"
           echo "DXCP caller identity: ${whoami}"
-          python3 -c 'import json,sys; i=json.loads(sys.argv[1]); cid=sys.argv[2]; aud=sys.argv[3]; dom=sys.argv[4]; iss=str(i.get("iss") or ""); azp=str(i.get("azp") or ""); sub=str(i.get("sub") or ""); av=i.get("aud"); exp=f"https://{dom.rstrip(\"/\")}/"; ok=(aud in av) if isinstance(av,list) else (str(av)==aud); exp_sub=f"{cid}@clients"; assert iss==exp, f"Unexpected issuer {iss!r} != {exp!r}"; assert ok, f"Expected audience {aud!r}, got {av!r}"; assert azp==cid, f"Expected azp {cid!r}, got {azp!r}"; assert exp_sub in sub, f"Expected sub to contain {exp_sub!r}, got {sub!r}"' "${whoami}" "${GOV_CI_CLIENT_ID}" "${GOV_AUTH0_AUDIENCE}" "${GOV_AUTH0_DOMAIN}"
+          python3 -c 'import json,sys; i=json.loads(sys.argv[1]); cid=sys.argv[2]; aud=sys.argv[3]; dom=sys.argv[4]; iss=str(i.get("iss") or ""); azp=str(i.get("azp") or ""); sub=str(i.get("sub") or ""); av=i.get("aud"); exp="https://" + dom.rstrip("/") + "/"; ok=(aud in av) if isinstance(av,list) else (str(av)==aud); exp_sub=cid + "@clients"; assert iss==exp, f"Unexpected issuer {iss!r} != {exp!r}"; assert ok, f"Expected audience {aud!r}, got {av!r}"; assert azp==cid, f"Expected azp {cid!r}, got {azp!r}"; assert exp_sub in sub, f"Expected sub to contain {exp_sub!r}, got {sub!r}"' "${whoami}" "${GOV_CI_CLIENT_ID}" "${GOV_AUTH0_AUDIENCE}" "${GOV_AUTH0_DOMAIN}"
 
           {
             echo "### DXCP CI identity"
