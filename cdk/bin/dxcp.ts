@@ -3,6 +3,7 @@ import * as cdk from "aws-cdk-lib";
 import { ApiStack } from "../lib/api-stack";
 import { DataStack } from "../lib/data-stack";
 import { DemoRuntimeStack } from "../lib/demo-runtime-stack";
+import { EnvDemoRuntimeStack } from "../lib/stacks/env-demo-runtime-stack";
 import { EnvVpcStack } from "../lib/env-vpc-stack";
 import { EnvIamAssumerStack, EnvIamStack } from "../lib/stacks/env-iam-stack";
 import { UiStack } from "../lib/ui-stack";
@@ -29,6 +30,8 @@ const spinnakerMode = app.node.tryGetContext("spinnakerMode") || process.env.DXC
 const env = { account, region };
 const iamAccount = account || cdk.Aws.ACCOUNT_ID;
 const assumerRoleArn = `arn:aws:iam::${iamAccount}:role/spinnaker-assumer-role`;
+const spinnakerLocalUserName = "spinnaker-local-user";
+const spinnakerLocalUserArn = `arn:aws:iam::${iamAccount}:user/${spinnakerLocalUserName}`;
 const assumerTrustedPrincipalArn =
   app.node.tryGetContext("spinnakerAssumerTrustedPrincipalArn") ||
   process.env.DXCP_SPINNAKER_ASSUMER_TRUSTED_PRINCIPAL_ARN;
@@ -37,21 +40,25 @@ const iamDevStack = new EnvIamStack(app, "dxcp-env-iam-dev", {
   env,
   environmentName: "dev",
   assumerRoleArn,
+  additionalTrustedUserArn: spinnakerLocalUserArn,
 });
 const iamStagingStack = new EnvIamStack(app, "dxcp-env-iam-staging", {
   env,
   environmentName: "staging",
   assumerRoleArn,
+  additionalTrustedUserArn: spinnakerLocalUserArn,
 });
 const iamProdStack = new EnvIamStack(app, "dxcp-env-iam-prod", {
   env,
   environmentName: "prod",
   assumerRoleArn,
+  additionalTrustedUserArn: spinnakerLocalUserArn,
 });
 
 new EnvIamAssumerStack(app, "dxcp-env-iam-assumer", {
   env,
   trustedPrincipalArn: assumerTrustedPrincipalArn,
+  localUserName: spinnakerLocalUserName,
   targetRoleArns: [
     iamDevStack.roleArn,
     iamStagingStack.roleArn,
@@ -75,6 +82,21 @@ new EnvVpcStack(app, "dxcp-env-vpc-prod", {
   env,
   environmentName: "prod",
   cidrBlock: "10.30.0.0/16",
+});
+
+new EnvDemoRuntimeStack(app, "dxcp-env-demo-runtime-dev", {
+  env,
+  environmentName: "dev",
+});
+
+new EnvDemoRuntimeStack(app, "dxcp-env-demo-runtime-staging", {
+  env,
+  environmentName: "staging",
+});
+
+new EnvDemoRuntimeStack(app, "dxcp-env-demo-runtime-prod", {
+  env,
+  environmentName: "prod",
 });
 
 const dataStack = new DataStack(app, "DxcpDataStack", {

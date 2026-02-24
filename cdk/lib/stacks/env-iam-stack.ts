@@ -1,15 +1,17 @@
 import { Stack, StackProps, CfnOutput } from "aws-cdk-lib";
-import { ArnPrincipal, CompositePrincipal, Effect, PolicyDocument, PolicyStatement, Role } from "aws-cdk-lib/aws-iam";
+import { ArnPrincipal, CompositePrincipal, Effect, PolicyDocument, PolicyStatement, Role, User } from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 
 export interface EnvIamStackProps extends StackProps {
   environmentName: "dev" | "staging" | "prod";
   assumerRoleArn: string;
+  additionalTrustedUserArn?: string;
 }
 
 export interface EnvIamAssumerStackProps extends StackProps {
   targetRoleArns: string[];
   trustedPrincipalArn?: string;
+  localUserName?: string;
 }
 
 export class EnvIamStack extends Stack {
@@ -25,6 +27,10 @@ export class EnvIamStack extends Stack {
       StringEquals: { "aws:RequestTag/Environment": envName },
       "ForAllValues:StringEquals": { "aws:TagKeys": ["Environment"] },
     };
+    const demoLambdaFunctionArns = [
+      `arn:aws:lambda:${this.region}:${this.account}:function:demo-service*`,
+      `arn:aws:lambda:${this.region}:${this.account}:function:demo-service-2*`,
+    ];
 
     const role = new Role(this, "SpinnakerEnvRole", {
       roleName,
@@ -41,9 +47,18 @@ export class EnvIamStack extends Stack {
                 "ec2:Describe*",
                 "autoscaling:Describe*",
                 "elasticloadbalancing:Describe*",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:DescribeAlarmsForMetric",
+                "cloudwatch:DescribeAlarmHistory",
+                "cloudwatch:GetMetricData",
+                "cloudwatch:ListMetrics",
+                "acm:ListCertificates",
+                "acm:DescribeCertificate",
+                "acm:GetCertificate",
                 "iam:GetRole",
                 "iam:ListRoles",
                 "iam:ListInstanceProfiles",
+                "iam:ListServerCertificates",
                 "iam:GetInstanceProfile",
               ],
               resources: ["*"],
@@ -114,10 +129,41 @@ export class EnvIamStack extends Stack {
                 },
               },
             }),
+            // Allow native Spinnaker Lambda code deployments for the DXCP demo services.
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: [
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:GetAlias",
+                "lambda:ListAliases",
+                "lambda:ListVersionsByFunction",
+                "lambda:InvokeFunction",
+                "lambda:UpdateFunctionCode",
+                "lambda:PublishVersion",
+                "lambda:UpdateAlias",
+                "lambda:CreateAlias",
+                "lambda:DeleteAlias",
+              ],
+              resources: demoLambdaFunctionArns,
+            }),
           ],
         }),
       },
     });
+
+    if (props.additionalTrustedUserArn) {
+      role.assumeRolePolicy?.addStatements(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          actions: ["sts:AssumeRole"],
+          principals: [new ArnPrincipal(`arn:aws:iam::${this.account}:root`)],
+          conditions: {
+            ArnEquals: { "aws:PrincipalArn": props.additionalTrustedUserArn },
+          },
+        }),
+      );
+    }
 
     this.roleArn = role.roleArn;
     new CfnOutput(this, "SpinnakerRoleArn", { value: this.roleArn });
@@ -147,7 +193,44 @@ export class EnvIamAssumerStack extends Stack {
       }),
     );
 
+    const localUser = new User(this, "SpinnakerLocalUser", {
+      userName: props.localUserName ?? "spinnaker-local-user",
+    });
+    localUser.addToPolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: [
+          "ec2:DescribeRegions",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeInternetGateways",
+          "ec2:DescribeNatGateways",
+          "ec2:DescribeNetworkAcls",
+          "ec2:DescribeTags",
+          "ec2:DescribeInstances",
+          "ec2:DescribeImages",
+          "ec2:DescribeKeyPairs",
+          "elasticloadbalancing:Describe*",
+          "autoscaling:Describe*",
+          "iam:ListInstanceProfiles",
+          "iam:GetInstanceProfile",
+        ],
+        resources: ["*"],
+      }),
+    );
+    localUser.addToPolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["sts:AssumeRole"],
+        resources: props.targetRoleArns,
+      }),
+    );
+
     this.roleArn = role.roleArn;
     new CfnOutput(this, "SpinnakerAssumerRoleArn", { value: this.roleArn });
+    new CfnOutput(this, "SpinnakerLocalUserArn", { value: localUser.userArn });
   }
 }
