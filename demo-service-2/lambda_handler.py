@@ -53,7 +53,7 @@ def handler(event, context):
     <meta charset="utf-8" />
     <title>{SERVICE_NAME}</title>
   </head>
-  <body style="font-family: Arial, sans-serif; padding: 40px;">
+  <body style="font-family: Arial, sans-serif; padding: 40px; background-color: #E8F5E9; color: #000;">
     <h1>{SERVICE_NAME}</h1>
     <p>Version: <strong>{version}</strong></p>
     <p>Lambda Function Version: <strong>{escape(str(lambda_version))}</strong></p>
