@@ -17,13 +17,26 @@ def load_version() -> str:
     return "0.0.0"
 
 
+def lambda_invocation_metadata(context) -> tuple[str, str, str, str]:
+    lambda_version = str(getattr(context, "function_version", os.getenv("AWS_LAMBDA_FUNCTION_VERSION", "unknown")))
+    lambda_name = str(os.getenv("AWS_LAMBDA_FUNCTION_NAME", SERVICE_NAME))
+    invoked_arn = str(getattr(context, "invoked_function_arn", "unknown"))
+    qualifier = ""
+    arn_parts = invoked_arn.split(":")
+    if len(arn_parts) >= 8 and arn_parts[5] == "function":
+        qualifier = arn_parts[7]
+    if lambda_version == "$LATEST":
+        version_note = "Executing unqualified function code ($LATEST). Publish and invoke an alias/version to see a numeric Lambda version."
+    else:
+        version_note = "Executing a published Lambda version."
+    return lambda_version, lambda_name, invoked_arn, qualifier or "-", version_note
+
+
 def handler(event, context):
     version = load_version()
     now = datetime.now(timezone.utc).isoformat()
     request_id = getattr(context, "aws_request_id", "unknown")
-    lambda_version = getattr(context, "function_version", os.getenv("AWS_LAMBDA_FUNCTION_VERSION", "unknown"))
-    lambda_name = os.getenv("AWS_LAMBDA_FUNCTION_NAME", SERVICE_NAME)
-    invoked_arn = getattr(context, "invoked_function_arn", "unknown")
+    lambda_version, lambda_name, invoked_arn, invoked_qualifier, lambda_version_note = lambda_invocation_metadata(context)
     params = (event or {}).get("queryStringParameters") or {}
     raw_x = params.get("x", "5")
     try:
@@ -44,6 +57,8 @@ def handler(event, context):
     <h1>{SERVICE_NAME}</h1>
     <p>Version: <strong>{version}</strong></p>
     <p>Lambda Function Version: <strong>{escape(str(lambda_version))}</strong></p>
+    <p>Invoked Qualifier: <strong>{escape(str(invoked_qualifier))}</strong></p>
+    <p style="color:#555;">{escape(str(lambda_version_note))}</p>
     <p>Lambda Function Name: <strong>{escape(str(lambda_name))}</strong></p>
     <p>Invoked Function ARN: <strong>{escape(str(invoked_arn))}</strong></p>
     <p>Rendered at: <strong>{now}</strong></p>
