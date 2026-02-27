@@ -1,0 +1,34 @@
+name: DXCP Build Register Example
+
+on:
+  workflow_dispatch:
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    env:
+      DXCP_API_BASE: ${{ vars.DXCP_API_BASE }}
+      GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+      GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+      GOV_CI_CLIENT_ID: ${{ vars.GOV_CI_CLIENT_ID }}
+      GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Register build in DXCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 scripts/ci/register_build.py \
+            --service demo-service \
+            --version 1.2.3 \
+            --artifact-ref "s3://${{ vars.DXCP_ARTIFACT_BUCKET }}/demo-service/demo-service-1.2.3.zip" \
+            --git-sha "${{ github.sha }}" \
+            --git-branch "${{ github.ref_name }}" \
+            --ci-provider github \
+            --ci-run-id "${{ github.run_id }}" \
+            --built-at "${built_at}" \
+            --commit-url "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
