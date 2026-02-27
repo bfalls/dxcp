@@ -145,6 +145,12 @@ Artifacts are uploaded as:
 Version is tag-authoritative per service (`<service>/vX.Y.Z`).
 CI bumps patch from the latest service tag, publishes that version, then creates/pushes the new tag.
 
+## CI build registration integration
+
+For the canonical CI integration contract, helper usage, templates, and validation checklist, see:
+- `docs/integrations/ci/overview.md`
+- `docs/integrations/ci/validation.md`
+
 ---
 
 ## UI local run

@@ -96,6 +96,10 @@ pytest dxcp-api/tests/test_*_invariants.py
 DXCP only allows build registration from caller identities that match a configured
 CI Publisher object.
 
+Canonical CI integration docs:
+- `docs/integrations/ci/overview.md`
+- `docs/integrations/ci/validation.md`
+
 ### Add CI publishers
 
 1. Call `GET /v1/admin/system/ci-publishers` as a Platform Admin.

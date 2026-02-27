@@ -14,6 +14,10 @@ Authentication model:
 - ci token minted using Auth0 client_credentials (M2M).
 - Demo artifact publisher workflow follows same CI idempotency pattern.
 
+For canonical CI build registration integration docs, see:
+- `docs/integrations/ci/overview.md`
+- `docs/integrations/ci/validation.md`
+
 ---------------------------------------------------------------------
 
 ## Prerequisites

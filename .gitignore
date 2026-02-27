@@ -16,6 +16,7 @@ __pycache__/
 **/*.tar.gz
 **/*.tgz
 ui/dist/
+docs/generated/
 
 # CDK artifacts
 cdk/cdk.out/

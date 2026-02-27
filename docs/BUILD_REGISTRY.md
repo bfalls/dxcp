@@ -3,6 +3,13 @@
 This document defines the governance model for build registration and deploy eligibility in DXCP.
 It is normative for DXCP v1.
 
+Canonical integration guidance lives in:
+- `docs/integrations/ci/overview.md`
+- `docs/integrations/ci/validation.md`
+
+Recommended registration entrypoint:
+- `scripts/ci/register_build.py`
+
 ## Purpose
 
 DXCP is the source of truth for build eligibility and deployment eligibility.

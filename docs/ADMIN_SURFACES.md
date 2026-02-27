@@ -150,6 +150,8 @@ Operator notes:
 - Updates apply to runtime authorization immediately in the API process.
 - `POST /v1/builds/upload-capability`, `POST /v1/builds`, and `POST /v1/builds/register`
   require caller identity to be present in `ci_publishers`.
+- CI integration onboarding, helper usage, and validation checklist:
+  `docs/integrations/ci/overview.md`
 
 ---
 

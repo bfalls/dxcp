@@ -37,6 +37,13 @@ This script:
 - requests an upload capability
 - registers the build so it appears in the UI
 
+The GitHub Actions demo publish workflow registers builds through:
+- `scripts/ci/register_build.py`
+
+CI templates and integration docs:
+- `docs/integrations/ci/overview.md`
+- `docs/integrations/ci/github-actions-build-register.yml`
+
 ## Register existing artifact
 
 DXCP auto-registers existing artifacts during deploy when it finds:
