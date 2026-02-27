@@ -303,6 +303,48 @@ class Storage:
             """
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_environments (
+                environment_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                is_enabled INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS delivery_group_environment_policy (
+                delivery_group_id TEXT NOT NULL,
+                environment_id TEXT NOT NULL,
+                is_enabled INTEGER NOT NULL,
+                order_index INTEGER NOT NULL,
+                PRIMARY KEY (delivery_group_id, environment_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS service_environment_routing (
+                service_id TEXT NOT NULL,
+                environment_id TEXT NOT NULL,
+                recipe_id TEXT NOT NULL,
+                PRIMARY KEY (service_id, environment_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_environments_environment_id ON admin_environments(environment_id)"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_dg_env_policy_unique ON delivery_group_environment_policy(delivery_group_id, environment_id)"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_service_env_routing_unique ON service_environment_routing(service_id, environment_id)"
+        )
         conn.commit()
         conn.close()
 
@@ -959,6 +1001,186 @@ class Storage:
             if created is None:
                 created = recipe
         return created
+
+    def list_admin_environments(self) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM admin_environments ORDER BY environment_id ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "environment_id": row["environment_id"],
+                "display_name": row["display_name"],
+                "type": row["type"],
+                "is_enabled": bool(row["is_enabled"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def get_admin_environment(self, environment_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM admin_environments WHERE environment_id = ?",
+            (environment_id,),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "environment_id": row["environment_id"],
+            "display_name": row["display_name"],
+            "type": row["type"],
+            "is_enabled": bool(row["is_enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def insert_admin_environment(self, environment: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO admin_environments (
+                environment_id, display_name, type, is_enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                environment["environment_id"],
+                environment["display_name"],
+                environment["type"],
+                1 if environment.get("is_enabled", True) else 0,
+                environment["created_at"],
+                environment["updated_at"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return environment
+
+    def update_admin_environment(self, environment: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE admin_environments
+            SET display_name = ?, type = ?, is_enabled = ?, updated_at = ?
+            WHERE environment_id = ?
+            """,
+            (
+                environment["display_name"],
+                environment["type"],
+                1 if environment.get("is_enabled", True) else 0,
+                environment["updated_at"],
+                environment["environment_id"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return environment
+
+    def list_delivery_group_environment_policy(self, delivery_group_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT p.delivery_group_id, p.environment_id, p.is_enabled, p.order_index,
+                   e.display_name, e.type
+            FROM delivery_group_environment_policy p
+            LEFT JOIN admin_environments e ON e.environment_id = p.environment_id
+            WHERE p.delivery_group_id = ?
+            ORDER BY p.order_index ASC, p.environment_id ASC
+            """,
+            (delivery_group_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "delivery_group_id": row["delivery_group_id"],
+                "environment_id": row["environment_id"],
+                "is_enabled": bool(row["is_enabled"]),
+                "order_index": row["order_index"],
+                "display_name": row["display_name"],
+                "type": row["type"],
+            }
+            for row in rows
+        ]
+
+    def upsert_delivery_group_environment_policy(self, row: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO delivery_group_environment_policy (
+                delivery_group_id, environment_id, is_enabled, order_index
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(delivery_group_id, environment_id) DO UPDATE SET
+                is_enabled = excluded.is_enabled,
+                order_index = excluded.order_index
+            """,
+            (
+                row["delivery_group_id"],
+                row["environment_id"],
+                1 if row.get("is_enabled", True) else 0,
+                int(row["order_index"]),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return row
+
+    def list_service_environment_routing(self, service_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT r.service_id, r.environment_id, r.recipe_id,
+                   e.display_name, e.type
+            FROM service_environment_routing r
+            LEFT JOIN admin_environments e ON e.environment_id = r.environment_id
+            WHERE r.service_id = ?
+            ORDER BY r.environment_id ASC
+            """,
+            (service_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "service_id": row["service_id"],
+                "environment_id": row["environment_id"],
+                "recipe_id": row["recipe_id"],
+                "display_name": row["display_name"],
+                "type": row["type"],
+            }
+            for row in rows
+        ]
+
+    def upsert_service_environment_routing(self, row: dict) -> dict:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO service_environment_routing (
+                service_id, environment_id, recipe_id
+            ) VALUES (?, ?, ?)
+            ON CONFLICT(service_id, environment_id) DO UPDATE SET
+                recipe_id = excluded.recipe_id
+            """,
+            (
+                row["service_id"],
+                row["environment_id"],
+                row["recipe_id"],
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return row
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()
@@ -1652,6 +1874,134 @@ class DynamoStorage:
         }
         self.table.put_item(Item=item)
         return environment
+
+    def list_admin_environments(self) -> List[dict]:
+        response = self.table.scan(FilterExpression=Attr("pk").eq("ADMIN_ENVIRONMENT"))
+        items = response.get("Items", [])
+        rows = [
+            {
+                "environment_id": item.get("environment_id"),
+                "display_name": item.get("display_name"),
+                "type": item.get("type"),
+                "is_enabled": bool(item.get("is_enabled", True)),
+                "created_at": item.get("created_at"),
+                "updated_at": item.get("updated_at"),
+            }
+            for item in items
+        ]
+        rows.sort(key=lambda row: row.get("environment_id", ""))
+        return rows
+
+    def get_admin_environment(self, environment_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "ADMIN_ENVIRONMENT", "sk": environment_id})
+        item = response.get("Item")
+        if not item:
+            return None
+        return {
+            "environment_id": item.get("environment_id"),
+            "display_name": item.get("display_name"),
+            "type": item.get("type"),
+            "is_enabled": bool(item.get("is_enabled", True)),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+        }
+
+    def insert_admin_environment(self, environment: dict) -> dict:
+        item = {
+            "pk": "ADMIN_ENVIRONMENT",
+            "sk": environment["environment_id"],
+            "environment_id": environment["environment_id"],
+            "display_name": environment["display_name"],
+            "type": environment["type"],
+            "is_enabled": environment.get("is_enabled", True),
+            "created_at": environment["created_at"],
+            "updated_at": environment["updated_at"],
+        }
+        self.table.put_item(
+            Item=item,
+            ConditionExpression="attribute_not_exists(pk) AND attribute_not_exists(sk)",
+        )
+        return environment
+
+    def update_admin_environment(self, environment: dict) -> dict:
+        item = {
+            "pk": "ADMIN_ENVIRONMENT",
+            "sk": environment["environment_id"],
+            "environment_id": environment["environment_id"],
+            "display_name": environment["display_name"],
+            "type": environment["type"],
+            "is_enabled": environment.get("is_enabled", True),
+            "created_at": environment.get("created_at"),
+            "updated_at": environment["updated_at"],
+        }
+        self.table.put_item(Item=item)
+        return environment
+
+    def list_delivery_group_environment_policy(self, delivery_group_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("DG_ENV_POLICY") & Attr("delivery_group_id").eq(delivery_group_id)
+        )
+        items = response.get("Items", [])
+        rows = []
+        for item in items:
+            env_id = item.get("environment_id")
+            env = self.get_admin_environment(env_id) if env_id else None
+            rows.append(
+                {
+                    "delivery_group_id": item.get("delivery_group_id"),
+                    "environment_id": env_id,
+                    "is_enabled": bool(item.get("is_enabled", True)),
+                    "order_index": int(item.get("order_index", 0)),
+                    "display_name": env.get("display_name") if env else None,
+                    "type": env.get("type") if env else None,
+                }
+            )
+        rows.sort(key=lambda row: (row.get("order_index", 0), row.get("environment_id", "")))
+        return rows
+
+    def upsert_delivery_group_environment_policy(self, row: dict) -> dict:
+        item = {
+            "pk": "DG_ENV_POLICY",
+            "sk": f"{row['delivery_group_id']}#{row['environment_id']}",
+            "delivery_group_id": row["delivery_group_id"],
+            "environment_id": row["environment_id"],
+            "is_enabled": row.get("is_enabled", True),
+            "order_index": int(row["order_index"]),
+        }
+        self.table.put_item(Item=item)
+        return row
+
+    def list_service_environment_routing(self, service_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("SERVICE_ENV_ROUTING") & Attr("service_id").eq(service_id)
+        )
+        items = response.get("Items", [])
+        rows = []
+        for item in items:
+            env_id = item.get("environment_id")
+            env = self.get_admin_environment(env_id) if env_id else None
+            rows.append(
+                {
+                    "service_id": item.get("service_id"),
+                    "environment_id": env_id,
+                    "recipe_id": item.get("recipe_id"),
+                    "display_name": env.get("display_name") if env else None,
+                    "type": env.get("type") if env else None,
+                }
+            )
+        rows.sort(key=lambda row: row.get("environment_id", ""))
+        return rows
+
+    def upsert_service_environment_routing(self, row: dict) -> dict:
+        item = {
+            "pk": "SERVICE_ENV_ROUTING",
+            "sk": f"{row['service_id']}#{row['environment_id']}",
+            "service_id": row["service_id"],
+            "environment_id": row["environment_id"],
+            "recipe_id": row["recipe_id"],
+        }
+        self.table.put_item(Item=item)
+        return row
 
     def insert_delivery_group(self, group: dict) -> dict:
         item = {

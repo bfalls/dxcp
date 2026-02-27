@@ -36,6 +36,7 @@ const buildFetchMock = ({
   policySummaryResponse,
   versionsByService,
   environments,
+  adminEnvironments,
   uiExposureArtifactRefDisplay,
   uiExposureExternalLinksDisplay,
   buildCommitUrl,
@@ -74,6 +75,12 @@ const buildFetchMock = ({
     artifactRef: { display: uiExposureArtifactRefDisplay === true },
     externalLinks: { display: uiExposureExternalLinksDisplay === true }
   }
+  let adminEnvList =
+    adminEnvironments || [
+      { environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }
+    ]
+  const dgBindingsByGroup = new Map()
+  const routesByService = new Map()
   return async (url, options = {}) => {
     const parsed = new URL(url)
     const { pathname } = parsed
@@ -234,6 +241,85 @@ const buildFetchMock = ({
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
       })
+    }
+    if (pathname === '/v1/admin/environments' && (!options.method || options.method === 'GET')) {
+      return ok(adminEnvList)
+    }
+    if (pathname === '/v1/admin/environments' && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}')
+      if (adminEnvList.some((item) => item.environment_id === body.environment_id)) {
+        return ok({ code: 'ENVIRONMENT_EXISTS', message: 'Environment already exists' })
+      }
+      const created = {
+        environment_id: body.environment_id,
+        display_name: body.display_name,
+        type: body.type,
+        is_enabled: body.is_enabled === true
+      }
+      adminEnvList = [...adminEnvList, created]
+      return ok(created)
+    }
+    if (pathname.startsWith('/v1/admin/environments/') && options.method === 'PATCH') {
+      const environmentId = pathname.split('/').pop()
+      const body = JSON.parse(options.body || '{}')
+      adminEnvList = adminEnvList.map((item) =>
+        item.environment_id === environmentId
+          ? {
+              ...item,
+              display_name: body.display_name ?? item.display_name,
+              type: body.type ?? item.type,
+              is_enabled: body.is_enabled ?? item.is_enabled
+            }
+          : item
+      )
+      return ok(adminEnvList.find((item) => item.environment_id === environmentId) || {})
+    }
+    if (pathname.startsWith('/v1/admin/delivery-groups/') && pathname.endsWith('/environments') && (!options.method || options.method === 'GET')) {
+      const parts = pathname.split('/')
+      const groupId = parts[4]
+      return ok(dgBindingsByGroup.get(groupId) || [])
+    }
+    if (pathname.startsWith('/v1/admin/delivery-groups/') && pathname.includes('/environments/') && (options.method === 'PUT' || options.method === 'PATCH')) {
+      const parts = pathname.split('/')
+      const groupId = parts[4]
+      const environmentId = parts[6]
+      const body = JSON.parse(options.body || '{}')
+      const current = (dgBindingsByGroup.get(groupId) || []).filter((row) => row.environment_id !== environmentId)
+      const existing = (dgBindingsByGroup.get(groupId) || []).find((row) => row.environment_id === environmentId)
+      const row = {
+        delivery_group_id: groupId,
+        environment_id: environmentId,
+        is_enabled: body.is_enabled ?? existing?.is_enabled ?? true,
+        order_index: body.order_index ?? existing?.order_index ?? current.length,
+        display_name: adminEnvList.find((item) => item.environment_id === environmentId)?.display_name || environmentId,
+        type: adminEnvList.find((item) => item.environment_id === environmentId)?.type || 'non_prod'
+      }
+      const next = [...current, row].sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+      dgBindingsByGroup.set(groupId, next)
+      return ok(row)
+    }
+    if (pathname.startsWith('/v1/admin/services/') && pathname.endsWith('/environments') && (!options.method || options.method === 'GET')) {
+      const parts = pathname.split('/')
+      const serviceId = parts[4]
+      const routes = routesByService.get(serviceId) || {}
+      const rows = adminEnvList.map((env) => ({
+        service_id: serviceId,
+        environment_id: env.environment_id,
+        display_name: env.display_name,
+        type: env.type,
+        recipe_id: routes[env.environment_id] || null
+      }))
+      return ok(rows)
+    }
+    if (pathname.startsWith('/v1/admin/services/') && pathname.includes('/environments/') && (options.method === 'PUT' || options.method === 'PATCH')) {
+      const parts = pathname.split('/')
+      const serviceId = parts[4]
+      const environmentId = parts[6]
+      const body = JSON.parse(options.body || '{}')
+      const routes = { ...(routesByService.get(serviceId) || {}) }
+      routes[environmentId] = body.recipe_id
+      routesByService.set(serviceId, routes)
+      return ok({ service_id: serviceId, environment_id: environmentId, recipe_id: body.recipe_id })
     }
     if (pathname === '/v1/environments') {
       return ok(resolveEnvironments())
@@ -1513,6 +1599,83 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('button', { name: 'Save group' }))
     await waitForCondition(() => view.queryAllByText('Warn Group').length > 0)
     assert.ok(view.getAllByText('Warn Group').length > 0)
+  })
+
+  await runTest('Admin can create environment from Admin UI', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      adminEnvironments: [{ environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }]
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'Environments' }))
+    fireEvent.input(await view.findByLabelText('Environment id'), { target: { value: 'staging' } })
+    fireEvent.input(view.getByLabelText('Display name'), { target: { value: 'Staging' } })
+    fireEvent.click(view.getByTestId('admin-environment-save'))
+    await view.findByText('Environment created.')
+    await view.findByText('staging')
+  })
+
+  await runTest('Admin can bind environment to delivery group', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      adminEnvironments: [{ environment_id: 'staging', display_name: 'Staging', type: 'non_prod', is_enabled: true }]
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'DG Environment Policy' }))
+    fireEvent.change(await view.findByLabelText('Delivery group'), { target: { value: 'default' } })
+    fireEvent.click((await view.findAllByTestId('admin-dg-bind-save'))[0])
+    await view.findByText('Binding saved.')
+  })
+
+  await runTest('Admin can set service environment routing', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      adminEnvironments: [{ environment_id: 'staging', display_name: 'Staging', type: 'non_prod', is_enabled: true }]
+    })
+    const view = renderApp()
+
+    await view.findByText('PLATFORM_ADMIN')
+    fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+    fireEvent.click(view.getByRole('button', { name: 'Service Environment Routing' }))
+    fireEvent.change(await view.findByLabelText('Service'), { target: { value: 'demo-service' } })
+    fireEvent.change((await view.findAllByTestId('admin-service-route-save'))[0], { target: { value: 'default' } })
+    await view.findByText('Routing saved.')
   })
 
   await runTest('Admin cannot save when validation has errors', async () => {

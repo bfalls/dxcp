@@ -2929,7 +2929,13 @@ export default function App() {
 
   useEffect(() => {
     if (isPlatformAdmin) return
-    if (adminTab === 'audit' || adminTab === 'system-settings') {
+    if (
+      adminTab === 'audit' ||
+      adminTab === 'system-settings' ||
+      adminTab === 'environments' ||
+      adminTab === 'dg-environment-policy' ||
+      adminTab === 'service-environment-routing'
+    ) {
       setAdminTab('delivery-groups')
     }
     setAdminGroupMode('view')
@@ -4085,6 +4091,7 @@ export default function App() {
   }
 
   const adminPageProps = {
+    api,
     adminReadOnly,
     adminTab,
     setAdminTab,
@@ -4195,7 +4202,8 @@ export default function App() {
     systemMutationsDisabledError,
     systemMutationsDisabledNote,
     loadSystemMutationsDisabled,
-    saveSystemMutationsDisabled
+    saveSystemMutationsDisabled,
+    services
   }
 
   const infoItems = []

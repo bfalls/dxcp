@@ -1427,6 +1427,29 @@ def _validate_recipe_payload(payload: dict, recipe_id: Optional[str] = None) -> 
     return None
 
 
+ENVIRONMENT_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _require_admin_read(actor: Actor, action: str) -> Optional[JSONResponse]:
+    return require_role(actor, {Role.PLATFORM_ADMIN}, action)
+
+
+def _validate_admin_environment_id(environment_id: str) -> Optional[JSONResponse]:
+    if not isinstance(environment_id, str) or not ENVIRONMENT_ID_RE.fullmatch(environment_id.strip()):
+        return error_response(
+            400,
+            "INVALID_ENVIRONMENT_ID",
+            "environment_id must match ^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        )
+    return None
+
+
+def _validate_environment_type(value: Any) -> Optional[JSONResponse]:
+    if value not in {"non_prod", "prod"}:
+        return error_response(400, "INVALID_ENVIRONMENT_TYPE", "type must be one of: non_prod, prod")
+    return None
+
+
 def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
     if recipe.get("spinnaker_application"):
         payload["spinnakerApplication"] = recipe.get("spinnaker_application")
@@ -2492,6 +2515,239 @@ def list_environments(request: Request, authorization: Optional[str] = Header(No
     allowed_group_ids = {group.get("id") for group in _delivery_groups_for_actor(actor)}
     filtered = [env for env in environments if env.get("delivery_group_id") in allowed_group_ids]
     return [Environment(**env).dict() for env in filtered]
+
+
+@app.get("/v1/admin/environments")
+def list_admin_environments(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = _require_admin_read(actor, "view admin environments")
+    if role_error:
+        return role_error
+    return storage.list_admin_environments()
+
+
+@app.post("/v1/admin/environments", status_code=201)
+def create_admin_environment(payload: dict, request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create admin environments")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "admin_environment_create")
+
+    environment_id = (payload.get("environment_id") or "").strip()
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    if storage.get_admin_environment(environment_id):
+        return error_response(409, "ENVIRONMENT_EXISTS", "Environment already exists")
+
+    display_name = (payload.get("display_name") or "").strip()
+    if not display_name:
+        return error_response(400, "INVALID_REQUEST", "display_name is required")
+    type_value = payload.get("type")
+    type_error = _validate_environment_type(type_value)
+    if type_error:
+        return type_error
+    is_enabled = payload.get("is_enabled")
+    if not isinstance(is_enabled, bool):
+        return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+
+    now = utc_now()
+    row = {
+        "environment_id": environment_id,
+        "display_name": display_name,
+        "type": type_value,
+        "is_enabled": is_enabled,
+        "created_at": now,
+        "updated_at": now,
+    }
+    storage.insert_admin_environment(row)
+    return row
+
+
+@app.patch("/v1/admin/environments/{environment_id}")
+def patch_admin_environment(
+    environment_id: str,
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update admin environments")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "admin_environment_update")
+
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    existing = storage.get_admin_environment(environment_id)
+    if not existing:
+        return error_response(404, "NOT_FOUND", "Environment not found")
+
+    next_display_name = existing.get("display_name")
+    if "display_name" in payload:
+        next_display_name = (payload.get("display_name") or "").strip()
+        if not next_display_name:
+            return error_response(400, "INVALID_REQUEST", "display_name must be non-empty")
+
+    next_type = existing.get("type")
+    if "type" in payload:
+        next_type = payload.get("type")
+        type_error = _validate_environment_type(next_type)
+        if type_error:
+            return type_error
+
+    next_enabled = existing.get("is_enabled", True)
+    if "is_enabled" in payload:
+        next_enabled = payload.get("is_enabled")
+        if not isinstance(next_enabled, bool):
+            return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+
+    row = {
+        "environment_id": environment_id,
+        "display_name": next_display_name,
+        "type": next_type,
+        "is_enabled": next_enabled,
+        "created_at": existing.get("created_at"),
+        "updated_at": utc_now(),
+    }
+    storage.update_admin_environment(row)
+    return row
+
+
+@app.get("/v1/admin/delivery-groups/{dg}/environments")
+def list_admin_delivery_group_environment_policy(
+    dg: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = _require_admin_read(actor, "view delivery group environment policy")
+    if role_error:
+        return role_error
+    if not storage.get_delivery_group(dg):
+        return error_response(404, "NOT_FOUND", "Delivery group not found")
+    return storage.list_delivery_group_environment_policy(dg)
+
+
+@app.put("/v1/admin/delivery-groups/{dg}/environments/{environment_id}")
+@app.patch("/v1/admin/delivery-groups/{dg}/environments/{environment_id}")
+def upsert_admin_delivery_group_environment_policy(
+    dg: str,
+    environment_id: str,
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update delivery group environment policy")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "admin_delivery_group_environment_policy_update")
+
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    if not storage.get_delivery_group(dg):
+        return error_response(404, "NOT_FOUND", "Delivery group not found")
+    if not storage.get_admin_environment(environment_id):
+        return error_response(404, "NOT_FOUND", "Environment not found")
+
+    existing_rows = storage.list_delivery_group_environment_policy(dg)
+    existing = next((row for row in existing_rows if row.get("environment_id") == environment_id), None)
+    is_enabled = payload.get("is_enabled", existing.get("is_enabled", True) if existing else True)
+    order_index = payload.get("order_index", existing.get("order_index", 0) if existing else len(existing_rows))
+
+    if not isinstance(is_enabled, bool):
+        return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+    if isinstance(order_index, bool) or not isinstance(order_index, int) or order_index < 0:
+        return error_response(400, "INVALID_REQUEST", "order_index must be an integer >= 0")
+
+    row = {
+        "delivery_group_id": dg,
+        "environment_id": environment_id,
+        "is_enabled": is_enabled,
+        "order_index": order_index,
+    }
+    storage.upsert_delivery_group_environment_policy(row)
+    return row
+
+
+@app.get("/v1/admin/services/{service}/environments")
+def list_admin_service_environment_routing(
+    service: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = _require_admin_read(actor, "view service environment routing")
+    if role_error:
+        return role_error
+    if not storage.get_service(service):
+        return error_response(404, "NOT_FOUND", "Service not found")
+
+    routes = storage.list_service_environment_routing(service)
+    route_map = {row.get("environment_id"): row for row in routes}
+    response = []
+    for env in storage.list_admin_environments():
+        env_id = env.get("environment_id")
+        route = route_map.get(env_id)
+        response.append(
+            {
+                "service_id": service,
+                "environment_id": env_id,
+                "display_name": env.get("display_name"),
+                "type": env.get("type"),
+                "recipe_id": route.get("recipe_id") if route else None,
+            }
+        )
+    return response
+
+
+@app.put("/v1/admin/services/{service}/environments/{environment_id}")
+@app.patch("/v1/admin/services/{service}/environments/{environment_id}")
+def upsert_admin_service_environment_routing(
+    service: str,
+    environment_id: str,
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update service environment routing")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "admin_service_environment_routing_update")
+
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    if not storage.get_service(service):
+        return error_response(404, "NOT_FOUND", "Service not found")
+    if not storage.get_admin_environment(environment_id):
+        return error_response(404, "NOT_FOUND", "Environment not found")
+
+    recipe_id = (payload.get("recipe_id") or "").strip()
+    if not recipe_id:
+        return error_response(400, "INVALID_REQUEST", "recipe_id is required")
+    if not storage.get_recipe(recipe_id):
+        return error_response(404, "NOT_FOUND", "Recipe not found")
+
+    row = {
+        "service_id": service,
+        "environment_id": environment_id,
+        "recipe_id": recipe_id,
+    }
+    storage.upsert_service_environment_routing(row)
+    return row
 
 
 @app.get("/v1/delivery-groups")

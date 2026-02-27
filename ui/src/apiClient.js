@@ -70,5 +70,16 @@ export function createApiClient({ baseUrl, getToken }) {
     return res.json()
   }
 
-  return { get, post, put }
+  async function patch(path, body) {
+    const headers = await buildHeaders()
+    headers['Content-Type'] = 'application/json'
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body)
+    })
+    return res.json()
+  }
+
+  return { get, post, put, patch }
 }

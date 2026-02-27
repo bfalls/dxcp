@@ -24,6 +24,7 @@ function normalizedOwnersPreview(ownerValue) {
 }
 
 export default function AdminPage({
+  api,
   adminReadOnly,
   adminTab,
   setAdminTab,
@@ -130,7 +131,8 @@ export default function AdminPage({
   whoamiLoading,
   whoamiError,
   loadWhoAmI,
-  copyAccessTokenToClipboard
+  copyAccessTokenToClipboard,
+  services
 }) {
   const [copyTokenBusy, setCopyTokenBusy] = React.useState(false)
   const [copyTokenNote, setCopyTokenNote] = React.useState('')
@@ -139,6 +141,24 @@ export default function AdminPage({
   const [killSwitchPhrase, setKillSwitchPhrase] = React.useState('')
   const [killSwitchReason, setKillSwitchReason] = React.useState('')
   const [killSwitchStepConfirmed, setKillSwitchStepConfirmed] = React.useState(false)
+  const [foundationEnvRows, setFoundationEnvRows] = React.useState([])
+  const [foundationEnvDraft, setFoundationEnvDraft] = React.useState({
+    environment_id: '',
+    display_name: '',
+    type: 'non_prod',
+    is_enabled: true
+  })
+  const [foundationEnvEditingId, setFoundationEnvEditingId] = React.useState('')
+  const [foundationEnvError, setFoundationEnvError] = React.useState('')
+  const [foundationEnvNote, setFoundationEnvNote] = React.useState('')
+  const [foundationGroupId, setFoundationGroupId] = React.useState('')
+  const [foundationGroupBindings, setFoundationGroupBindings] = React.useState([])
+  const [foundationPolicyError, setFoundationPolicyError] = React.useState('')
+  const [foundationPolicyNote, setFoundationPolicyNote] = React.useState('')
+  const [foundationServiceId, setFoundationServiceId] = React.useState('')
+  const [foundationServiceRoutes, setFoundationServiceRoutes] = React.useState([])
+  const [foundationRoutingError, setFoundationRoutingError] = React.useState('')
+  const [foundationRoutingNote, setFoundationRoutingNote] = React.useState('')
 
   const handleCopyAccessToken = async () => {
     setCopyTokenBusy(true)
@@ -256,6 +276,172 @@ export default function AdminPage({
     return counts.map(([label, count]) => `${label}:${count}`).join(' ')
   }
 
+  const loadFoundationEnvironments = React.useCallback(async () => {
+    if (!isPlatformAdmin) return
+    const result = await api.get('/admin/environments', { bypassCache: true, cacheTtlMs: 0 })
+    if (Array.isArray(result)) {
+      setFoundationEnvRows(result)
+      return
+    }
+    setFoundationEnvError(result?.message || 'Failed to load environments.')
+  }, [api, isPlatformAdmin])
+
+  const loadFoundationGroupBindings = React.useCallback(
+    async (groupId) => {
+      if (!isPlatformAdmin || !groupId) return
+      const result = await api.get(`/admin/delivery-groups/${encodeURIComponent(groupId)}/environments`, {
+        bypassCache: true,
+        cacheTtlMs: 0
+      })
+      if (Array.isArray(result)) {
+        setFoundationGroupBindings(result)
+        return
+      }
+      setFoundationPolicyError(result?.message || 'Failed to load delivery group bindings.')
+    },
+    [api, isPlatformAdmin]
+  )
+
+  const loadFoundationServiceRoutes = React.useCallback(
+    async (serviceId) => {
+      if (!isPlatformAdmin || !serviceId) return
+      const result = await api.get(`/admin/services/${encodeURIComponent(serviceId)}/environments`, {
+        bypassCache: true,
+        cacheTtlMs: 0
+      })
+      if (Array.isArray(result)) {
+        setFoundationServiceRoutes(result)
+        return
+      }
+      setFoundationRoutingError(result?.message || 'Failed to load service routing.')
+    },
+    [api, isPlatformAdmin]
+  )
+
+  React.useEffect(() => {
+    if (!isPlatformAdmin) return
+    if (adminTab === 'environments' || adminTab === 'dg-environment-policy' || adminTab === 'service-environment-routing') {
+      setFoundationEnvError('')
+      if (adminTab === 'environments') {
+        setFoundationEnvNote('')
+      }
+      loadFoundationEnvironments()
+    }
+  }, [adminTab, isPlatformAdmin, loadFoundationEnvironments])
+
+  React.useEffect(() => {
+    if (!isPlatformAdmin || adminTab !== 'dg-environment-policy' || !foundationGroupId) return
+    setFoundationPolicyError('')
+    setFoundationPolicyNote('')
+    loadFoundationGroupBindings(foundationGroupId)
+  }, [adminTab, isPlatformAdmin, foundationGroupId, loadFoundationGroupBindings])
+
+  React.useEffect(() => {
+    if (!isPlatformAdmin || adminTab !== 'service-environment-routing' || !foundationServiceId) return
+    setFoundationRoutingError('')
+    setFoundationRoutingNote('')
+    loadFoundationServiceRoutes(foundationServiceId)
+  }, [adminTab, isPlatformAdmin, foundationServiceId, loadFoundationServiceRoutes])
+
+  const sortedFoundationEnvironments = React.useMemo(
+    () => foundationEnvRows.slice().sort((a, b) => String(a.environment_id || '').localeCompare(String(b.environment_id || ''))),
+    [foundationEnvRows]
+  )
+
+  const handleFoundationEnvDraftChange = (field, value) => {
+    setFoundationEnvDraft((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const startFoundationCreate = () => {
+    setFoundationEnvEditingId('')
+    setFoundationEnvError('')
+    setFoundationEnvDraft({
+      environment_id: '',
+      display_name: '',
+      type: 'non_prod',
+      is_enabled: true
+    })
+  }
+
+  const startFoundationEdit = (row) => {
+    setFoundationEnvEditingId(row.environment_id)
+    setFoundationEnvError('')
+    setFoundationEnvNote('')
+    setFoundationEnvDraft({
+      environment_id: row.environment_id,
+      display_name: row.display_name || '',
+      type: row.type || 'non_prod',
+      is_enabled: row.is_enabled === true
+    })
+  }
+
+  const saveFoundationEnvironment = async () => {
+    if (adminReadOnly) return
+    setFoundationEnvError('')
+    setFoundationEnvNote('')
+    const payload = {
+      environment_id: String(foundationEnvDraft.environment_id || '').trim(),
+      display_name: String(foundationEnvDraft.display_name || '').trim(),
+      type: foundationEnvDraft.type === 'prod' ? 'prod' : 'non_prod',
+      is_enabled: foundationEnvDraft.is_enabled === true
+    }
+    if (!payload.environment_id || !payload.display_name) {
+      setFoundationEnvError('Environment id and display name are required.')
+      return
+    }
+    const result = foundationEnvEditingId
+      ? await api.patch(`/admin/environments/${encodeURIComponent(foundationEnvEditingId)}`, {
+          display_name: payload.display_name,
+          type: payload.type,
+          is_enabled: payload.is_enabled
+        })
+      : await api.post('/admin/environments', payload)
+    if (result?.code) {
+      setFoundationEnvError(`${result.code}: ${result.message}`)
+      return
+    }
+    const note = foundationEnvEditingId ? 'Environment updated.' : 'Environment created.'
+    startFoundationCreate()
+    setFoundationEnvNote(note)
+    await loadFoundationEnvironments()
+  }
+
+  const saveFoundationBinding = async (environmentId, updates) => {
+    if (!foundationGroupId) return
+    const result = await api.put(
+      `/admin/delivery-groups/${encodeURIComponent(foundationGroupId)}/environments/${encodeURIComponent(environmentId)}`,
+      updates
+    )
+    if (result?.code) {
+      setFoundationPolicyError(`${result.code}: ${result.message}`)
+      return
+    }
+    setFoundationPolicyError('')
+    setFoundationPolicyNote('Binding saved.')
+    await loadFoundationGroupBindings(foundationGroupId)
+  }
+
+  const moveFoundationBinding = async (row, direction) => {
+    const current = Number(row.order_index) || 0
+    const next = direction === 'up' ? Math.max(0, current - 1) : current + 1
+    await saveFoundationBinding(row.environment_id, { is_enabled: row.is_enabled === true, order_index: next })
+  }
+
+  const saveFoundationRoute = async (environmentId, recipeId) => {
+    if (!foundationServiceId || !recipeId) return
+    const result = await api.put(
+      `/admin/services/${encodeURIComponent(foundationServiceId)}/environments/${encodeURIComponent(environmentId)}`,
+      { recipe_id: recipeId }
+    )
+    if (result?.code) {
+      setFoundationRoutingError(`${result.code}: ${result.message}`)
+      return
+    }
+    setFoundationRoutingError('')
+    setFoundationRoutingNote('Routing saved.')
+    await loadFoundationServiceRoutes(foundationServiceId)
+  }
+
   return (
     <div className="shell two-column">
       <div className="page-header-zone">
@@ -277,6 +463,30 @@ export default function AdminPage({
           >
             Recipes
           </button>
+          {isPlatformAdmin && (
+            <button
+              className={adminTab === 'environments' ? 'active' : ''}
+              onClick={() => setAdminTab('environments')}
+            >
+              Environments
+            </button>
+          )}
+          {isPlatformAdmin && (
+            <button
+              className={adminTab === 'dg-environment-policy' ? 'active' : ''}
+              onClick={() => setAdminTab('dg-environment-policy')}
+            >
+              DG Environment Policy
+            </button>
+          )}
+          {isPlatformAdmin && (
+            <button
+              className={adminTab === 'service-environment-routing' ? 'active' : ''}
+              onClick={() => setAdminTab('service-environment-routing')}
+            >
+              Service Environment Routing
+            </button>
+          )}
           {isPlatformAdmin && (
             <button
               className={adminTab === 'audit' ? 'active' : ''}
@@ -985,6 +1195,213 @@ export default function AdminPage({
             )}
           </SectionCard>
         </>
+      )}
+      {adminTab === 'environments' && isPlatformAdmin && (
+        <>
+          <SectionCard>
+            <h2>Environments</h2>
+            {sortedFoundationEnvironments.length === 0 && <div className="helper">No environments configured.</div>}
+            {sortedFoundationEnvironments.length > 0 && (
+              <div className="list space-12">
+                {sortedFoundationEnvironments.map((row) => (
+                  <div className="list-item admin-group" key={row.environment_id}>
+                    <div>
+                      <strong>{row.display_name}</strong>
+                      <div className="helper">{row.environment_id}</div>
+                    </div>
+                    <div>{row.type}</div>
+                    <div>{row.is_enabled ? 'Enabled' : 'Disabled'}</div>
+                    <div>
+                      <button className="button secondary" onClick={() => startFoundationEdit(row)}>
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+          <SectionCard>
+            <h2>{foundationEnvEditingId ? 'Edit environment' : 'Create environment'}</h2>
+            <div className="field">
+              <label htmlFor="admin-foundation-environment-id">Environment id</label>
+              <input
+                id="admin-foundation-environment-id"
+                data-testid="admin-environment-id-input"
+                value={foundationEnvDraft.environment_id}
+                onChange={(e) => handleFoundationEnvDraftChange('environment_id', e.target.value)}
+                onInput={(e) => handleFoundationEnvDraftChange('environment_id', e.target.value)}
+                disabled={Boolean(foundationEnvEditingId)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="admin-foundation-environment-display-name">Display name</label>
+              <input
+                id="admin-foundation-environment-display-name"
+                value={foundationEnvDraft.display_name}
+                onChange={(e) => handleFoundationEnvDraftChange('display_name', e.target.value)}
+                onInput={(e) => handleFoundationEnvDraftChange('display_name', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="admin-foundation-environment-type">Type</label>
+              <select
+                id="admin-foundation-environment-type"
+                value={foundationEnvDraft.type}
+                onChange={(e) => handleFoundationEnvDraftChange('type', e.target.value)}
+              >
+                <option value="non_prod">non_prod</option>
+                <option value="prod">prod</option>
+              </select>
+            </div>
+            <label className="check-item">
+              <input
+                type="checkbox"
+                checked={foundationEnvDraft.is_enabled === true}
+                onChange={(e) => handleFoundationEnvDraftChange('is_enabled', e.target.checked)}
+              />
+              <span>Enabled</span>
+            </label>
+            {foundationEnvError && <div className="helper space-8">{foundationEnvError}</div>}
+            {foundationEnvNote && <div className="helper space-8">{foundationEnvNote}</div>}
+            <div style={{ display: 'flex', gap: '8px' }} className="space-12">
+              <button className="button" onClick={saveFoundationEnvironment} data-testid="admin-environment-save">
+                {foundationEnvEditingId ? 'Save environment' : 'Create environment'}
+              </button>
+              <button className="button secondary" onClick={startFoundationCreate}>
+                Reset
+              </button>
+            </div>
+          </SectionCard>
+        </>
+      )}
+      {adminTab === 'dg-environment-policy' && isPlatformAdmin && (
+        <SectionCard>
+          <h2>Delivery Group Environment Policy</h2>
+          <div className="field">
+            <label htmlFor="admin-foundation-dg-select">Delivery group</label>
+            <select
+              id="admin-foundation-dg-select"
+              value={foundationGroupId}
+              onChange={(e) => setFoundationGroupId(e.target.value)}
+            >
+              <option value="">Select delivery group</option>
+              {deliveryGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {foundationGroupId && (
+            <>
+              <div className="list space-8">
+                {sortedFoundationEnvironments.map((env) => {
+                  const current = foundationGroupBindings.find((row) => row.environment_id === env.environment_id)
+                  const enabled = current ? current.is_enabled === true : false
+                  const orderIndex = current ? current.order_index : foundationGroupBindings.length
+                  return (
+                    <div className="list-item admin-detail" key={`${foundationGroupId}-${env.environment_id}`}>
+                      <div>{env.display_name}</div>
+                      <div className="helper">{env.environment_id}</div>
+                      <div>{enabled ? `Enabled (${orderIndex})` : 'Not bound'}</div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="button secondary"
+                          onClick={() =>
+                            saveFoundationBinding(env.environment_id, {
+                              is_enabled: true,
+                              order_index: orderIndex
+                            })
+                          }
+                          data-testid="admin-dg-bind-save"
+                        >
+                          Enable
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() =>
+                            saveFoundationBinding(env.environment_id, {
+                              is_enabled: false,
+                              order_index: orderIndex
+                            })
+                          }
+                        >
+                          Disable
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => current && moveFoundationBinding(current, 'up')}
+                          disabled={!current}
+                        >
+                          Up
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => current && moveFoundationBinding(current, 'down')}
+                          disabled={!current}
+                        >
+                          Down
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {foundationPolicyError && <div className="helper space-8">{foundationPolicyError}</div>}
+              {foundationPolicyNote && <div className="helper space-8">{foundationPolicyNote}</div>}
+            </>
+          )}
+        </SectionCard>
+      )}
+      {adminTab === 'service-environment-routing' && isPlatformAdmin && (
+        <SectionCard>
+          <h2>Service Environment Routing</h2>
+          <div className="field">
+            <label htmlFor="admin-foundation-service-select">Service</label>
+            <select
+              id="admin-foundation-service-select"
+              value={foundationServiceId}
+              onChange={(e) => setFoundationServiceId(e.target.value)}
+            >
+              <option value="">Select service</option>
+              {(services || []).map((svc) => (
+                <option key={svc.service_name} value={svc.service_name}>
+                  {svc.service_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {foundationServiceId && (
+            <>
+              <div className="list space-8">
+                {(foundationServiceRoutes || []).map((row) => (
+                  <div className="list-item admin-detail" key={`${foundationServiceId}-${row.environment_id}`}>
+                    <div>{row.display_name || row.environment_id}</div>
+                    <div className="helper">{row.environment_id}</div>
+                    <div>{row.recipe_id || 'Not configured'}</div>
+                    <div>
+                      <select
+                        value={row.recipe_id || ''}
+                        onChange={(e) => saveFoundationRoute(row.environment_id, e.target.value)}
+                        data-testid="admin-service-route-save"
+                      >
+                        <option value="">Select recipe</option>
+                        {(recipes || []).map((recipe) => (
+                          <option key={recipe.id} value={recipe.id}>
+                            {recipe.name || recipe.id}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {foundationRoutingError && <div className="helper space-8">{foundationRoutingError}</div>}
+              {foundationRoutingNote && <div className="helper space-8">{foundationRoutingNote}</div>}
+            </>
+          )}
+        </SectionCard>
       )}
       {adminTab === 'audit' && isPlatformAdmin && (
         <SectionCard>
