@@ -26,6 +26,7 @@ export type RunContext = {
   service: string;
   environment: string;
   recipeId: string;
+  temporaryRecipeIds: string[];
   runVersion: string;
   conflictVersion: string;
   runMinor: number;

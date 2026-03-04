@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
   announceStep,
+  apiRequest,
   assert,
   buildRunContext,
   decodeJwtClaims,
@@ -51,6 +52,10 @@ const { ANSI, formatTag } = require("../ansi.cjs") as {
 };
 
 type ResultKind = "success" | "failure" | "information";
+type RecipeCleanupFailure = {
+  recipeId: string;
+  message: string;
+};
 
 function hasArg(name: string): boolean {
   return process.argv.includes(name);
@@ -88,6 +93,64 @@ function evaluateTimingsResult(context: RunContext): { kind: ResultKind; message
     return { kind: "success", message: `timings: ${ended}/${started} steps completed` };
   }
   return { kind: "failure", message: `timings: ${ended}/${started} steps completed` };
+}
+
+async function readResponsePayloadSafe(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function stringifyPayload(payload: any): string {
+  if (typeof payload === "string") {
+    return payload;
+  }
+  if (payload === null || typeof payload === "undefined") {
+    return "null";
+  }
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+async function cleanupTemporaryRecipes(context: RunContext, adminToken: string): Promise<RecipeCleanupFailure[]> {
+  const uniqueRecipeIds = [...new Set(context.temporaryRecipeIds)];
+  const failures: RecipeCleanupFailure[] = [];
+  for (const recipeId of uniqueRecipeIds) {
+    const response = await apiRequest("DELETE", `/v1/admin/recipes/${encodeURIComponent(recipeId)}`, adminToken);
+    if (response.status === 204) {
+      console.log(`[INFO] Cleanup recipe deleted: ${recipeId}`);
+      continue;
+    }
+    const payload = await readResponsePayloadSafe(response);
+    if (response.status === 404) {
+      console.log(`[INFO] Cleanup recipe already missing: ${recipeId}`);
+      continue;
+    }
+    if (response.status === 409) {
+      failures.push({
+        recipeId,
+        message:
+          `cleanup delete returned 409 RECIPE_IN_USE for recipe=${recipeId}; ` +
+          "check service_environment_routing and delivery group allowed_recipes references; " +
+          `body=${stringifyPayload(payload)}`,
+      });
+      continue;
+    }
+    failures.push({
+      recipeId,
+      message: `cleanup delete failed for recipe=${recipeId} status=${response.status}; body=${stringifyPayload(payload)}`,
+    });
+  }
+  return failures;
 }
 
 function evaluateDeploymentField(context: RunContext, key: "deploymentId" | "deploymentFinalState" | "deploymentFinalOutcome"): ResultKind {
@@ -158,6 +221,7 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
     service: context.service,
     environment: context.environment,
     recipeId: context.recipeId,
+    temporaryRecipeIds: context.temporaryRecipeIds,
     deploymentId: context.deployment.id ?? null,
     deploymentFinalState: context.deployment.finalState ?? null,
     deploymentFinalOutcome: context.deployment.finalOutcome ?? null,
@@ -404,6 +468,8 @@ async function main(): Promise<number> {
 
   announceStep("Executing Phase 3 governance API assertions (fail-fast)");
   let preparedArtifact: PreparedArtifact | undefined;
+  let executionFailure: unknown;
+  let recipeCleanupFailures: RecipeCleanupFailure[] = [];
   try {
     await stepR_roleAuthorizationChecks(context, tokens, claimsByRole);
     await stepA_proveCiGateNegative(context, tokens.owner, tokens.ci, tokens.admin);
@@ -418,10 +484,30 @@ async function main(): Promise<number> {
     await stepH_guardrailSpotChecks(context, tokens.owner);
     await stepJ_mutationKillSwitch(context, tokens.admin, tokens.owner, tokens.ci);
     await stepK_adminConfigAuditConformance(context, tokens.admin);
+  } catch (error) {
+    executionFailure = error;
   } finally {
     if (preparedArtifact) {
       await cleanupPreparedArtifact(preparedArtifact);
     }
+    recipeCleanupFailures = await cleanupTemporaryRecipes(context, tokens.admin);
+  }
+
+  if (executionFailure) {
+    if (recipeCleanupFailures.length > 0) {
+      const cleanupMessage = recipeCleanupFailures.map((entry) => `- ${entry.message}`).join("\n");
+      throw new Error(
+        `Govtest run failed before cleanup completed.\nPrimary failure: ${
+          executionFailure instanceof Error ? executionFailure.message : String(executionFailure)
+        }\nCleanup failures:\n${cleanupMessage}`,
+      );
+    }
+    throw executionFailure;
+  }
+
+  if (recipeCleanupFailures.length > 0) {
+    const cleanupMessage = recipeCleanupFailures.map((entry) => `- ${entry.message}`).join("\n");
+    fail(`Govtest cleanup failed:\n${cleanupMessage}`);
   }
 
   const failedGuardrails = context.guardrails.checks.filter((c) => c.status === "FAILED");

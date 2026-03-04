@@ -54,7 +54,7 @@ async function updateDeliveryGroupAllowedRecipes(
   return assertStatus(response, 200, `E: PUT /v1/delivery-groups/${group.id}`);
 }
 
-async function ensureTemporaryRecipe(adminToken: string, recipeId: string, runId: string): Promise<void> {
+async function ensureTemporaryRecipe(adminToken: string, recipeId: string, runId: string): Promise<boolean> {
   const recipe = {
     id: recipeId,
     name: `Govtest Decision 7 ${runId}`,
@@ -70,10 +70,11 @@ async function ensureTemporaryRecipe(adminToken: string, recipeId: string, runId
   if (response.status === 409) {
     const payload = await decodeJson(response);
     if (payload?.code === "RECIPE_EXISTS") {
-      return;
+      return false;
     }
   }
   await assertStatus(response, 200, "E: POST /v1/recipes (decision-7 temporary recipe)");
+  return true;
 }
 
 export async function stepE_deployEnforcementUnregisteredVersion(
@@ -124,7 +125,10 @@ export async function stepE_deployEnforcementUnregisteredVersion(
   await assertStatus(deploy, 400, "E: POST /v1/deployments (unregistered)", "VERSION_NOT_FOUND");
 
   const temporaryRecipeId = `govtest-decision7-${context.runId}`;
-  await ensureTemporaryRecipe(adminToken, temporaryRecipeId, context.runId);
+  const temporaryRecipeCreated = await ensureTemporaryRecipe(adminToken, temporaryRecipeId, context.runId);
+  if (temporaryRecipeCreated && !context.temporaryRecipeIds.includes(temporaryRecipeId)) {
+    context.temporaryRecipeIds.push(temporaryRecipeId);
+  }
 
   const group = await getDeliveryGroupForService(adminToken, context.service);
   const originalAllowedRecipes = Array.isArray(group.allowed_recipes) ? [...group.allowed_recipes] : [];

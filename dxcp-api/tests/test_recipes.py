@@ -345,7 +345,14 @@ async def test_admin_recipe_delete_succeeds_for_unreferenced_recipe(tmp_path: Pa
             "/v1/recipes/extra",
             headers=auth_header(["dxcp-platform-admins"]),
         )
+        recipes = await client.get(
+            "/v1/recipes",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
     assert fetch.status_code == 404
+    assert recipes.status_code == 200
+    ids = {item["id"] for item in recipes.json()}
+    assert "extra" not in ids
 
 
 async def test_admin_recipe_delete_conflicts_when_routing_references_recipe(tmp_path: Path, monkeypatch):
@@ -379,6 +386,7 @@ async def test_admin_recipe_delete_conflicts_when_routing_references_recipe(tmp_
     assert body["code"] == "RECIPE_IN_USE"
     assert body["details"]["reference_type"] == "service_environment_routing"
     assert body["details"]["reference_count"] == 1
+    assert body["details"]["references"] == [{"service_id": "demo-service", "environment_id": "sandbox"}]
 
 
 async def test_admin_recipe_delete_conflicts_when_delivery_group_references_recipe(tmp_path: Path, monkeypatch):
@@ -412,6 +420,7 @@ async def test_admin_recipe_delete_conflicts_when_delivery_group_references_reci
     assert body["code"] == "RECIPE_IN_USE"
     assert body["details"]["reference_type"] == "delivery_group_allowed_recipes"
     assert body["details"]["reference_count"] == 1
+    assert body["details"]["references"] == [{"delivery_group_id": "default"}]
 
 
 async def test_admin_recipe_delete_reports_routing_first_when_multiple_references_exist(tmp_path: Path, monkeypatch):
@@ -452,6 +461,70 @@ async def test_admin_recipe_delete_reports_routing_first_when_multiple_reference
     body = response.json()
     assert body["code"] == "RECIPE_IN_USE"
     assert body["details"]["reference_type"] == "service_environment_routing"
+
+
+async def test_history_remains_readable_after_recipe_delete(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        group = main.storage.get_delivery_group("default")
+        assert group is not None
+        original_allowed = list(group.get("allowed_recipes") or [])
+        group["allowed_recipes"] = sorted(set(original_allowed + ["extra"]))
+        if hasattr(main.storage, "update_delivery_group"):
+            main.storage.update_delivery_group(group)
+        else:
+            main.storage.insert_delivery_group(group)
+
+        deploy = await client.post(
+            "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-history-delete", **auth_header(["dxcp-platform-admins"])},
+            json=_deployment_payload("extra"),
+        )
+        assert deploy.status_code == 201
+        deployment_id = deploy.json()["id"]
+
+        group["allowed_recipes"] = original_allowed
+        if hasattr(main.storage, "update_delivery_group"):
+            main.storage.update_delivery_group(group)
+        else:
+            main.storage.insert_delivery_group(group)
+
+        deleted = await client.delete(
+            "/v1/admin/recipes/extra",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        assert deleted.status_code == 204
+
+        deployment_detail = await client.get(
+            f"/v1/deployments/{deployment_id}",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        deployment_list = await client.get(
+            "/v1/deployments?service=demo-service&environment=sandbox",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        timeline = await client.get(
+            f"/v1/deployments/{deployment_id}/timeline",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        failures = await client.get(
+            f"/v1/deployments/{deployment_id}/failures",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert deployment_detail.status_code == 200
+    detail_body = deployment_detail.json()
+    assert detail_body["recipeId"] == "extra"
+    assert detail_body["recipeRevision"] == 1
+    assert detail_body["effectiveBehaviorSummary"] == "Extra deploy recipe for tests."
+
+    assert deployment_list.status_code == 200
+    listed_ids = {item["id"] for item in deployment_list.json()}
+    assert deployment_id in listed_ids
+
+    assert timeline.status_code == 200
+    assert isinstance(timeline.json(), list)
+    assert failures.status_code == 200
+    assert isinstance(failures.json(), list)
 
 
 async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkeypatch):
