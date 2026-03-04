@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import HTTPException as FastAPIHTTPException, RequestValidationError
 try:
     import boto3
@@ -1133,6 +1133,7 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "ROLE_FORBIDDEN",
         "AUTHZ_ROLE_REQUIRED",
         "UNAUTHORIZED",
+        "RECIPE_IN_USE",
     }
     if error_code in user_error_codes:
         return "USER_ERROR"
@@ -1691,6 +1692,35 @@ def _recipe_public_view(actor: Actor, recipe: dict) -> dict:
         payload.pop("deploy_pipeline", None)
         payload.pop("rollback_pipeline", None)
     return payload
+
+
+def _recipe_in_use_response(recipe_id: str, reference_type: str, references: list[dict]) -> JSONResponse:
+    details = {
+        "recipe_id": recipe_id,
+        "reference_type": reference_type,
+        "reference_count": len(references),
+    }
+    if reference_type == "service_environment_routing":
+        details["references"] = [
+            {
+                "service_id": reference.get("service_id"),
+                "environment_id": reference.get("environment_id"),
+            }
+            for reference in references[:5]
+        ]
+    elif reference_type == "delivery_group_allowed_recipes":
+        details["references"] = [
+            {
+                "delivery_group_id": reference.get("id"),
+            }
+            for reference in references[:5]
+        ]
+    return error_response(
+        409,
+        "RECIPE_IN_USE",
+        f"Recipe {recipe_id} is still referenced by {reference_type}",
+        details=details,
+    )
 
 
 def _normalize_fingerprint_value(value: Any) -> Any:
@@ -3106,6 +3136,43 @@ def update_recipe(
         f"Recipe {payload['id']} updated",
     )
     return Recipe(**payload).dict()
+
+
+@app.delete("/v1/admin/recipes/{recipe_id}", status_code=204)
+def delete_admin_recipe(
+    recipe_id: str,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "delete recipes")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "recipe_delete")
+
+    existing = storage.get_recipe(recipe_id)
+    if not existing:
+        return error_response(404, "NOT_FOUND", "Recipe not found")
+
+    routing_references = storage.list_service_environment_routing_by_recipe(recipe_id)
+    if routing_references:
+        return _recipe_in_use_response(recipe_id, "service_environment_routing", routing_references)
+
+    delivery_group_references = storage.list_delivery_groups_by_allowed_recipe(recipe_id)
+    if delivery_group_references:
+        return _recipe_in_use_response(recipe_id, "delivery_group_allowed_recipes", delivery_group_references)
+
+    storage.delete_recipe(recipe_id)
+    _record_audit_event(
+        actor,
+        "ADMIN_DELETE",
+        "Recipe",
+        recipe_id,
+        AuditOutcome.SUCCESS,
+        f"Recipe {recipe_id} deleted",
+    )
+    return Response(status_code=204)
 
 
 @app.get("/v1/recipes")

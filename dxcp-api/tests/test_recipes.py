@@ -323,6 +323,137 @@ async def test_recipe_audit_fields_on_create_and_update(tmp_path: Path, monkeypa
     assert updated["engine_type"] == "SPINNAKER"
 
 
+async def test_admin_recipe_delete_requires_platform_admin(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.delete(
+            "/v1/admin/recipes/default",
+            headers=auth_header(["dxcp-observers"]),
+        )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+async def test_admin_recipe_delete_succeeds_for_unreferenced_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+        response = await client.delete(
+            "/v1/admin/recipes/extra",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        assert response.status_code == 204
+
+        fetch = await client.get(
+            "/v1/recipes/extra",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert fetch.status_code == 404
+
+
+async def test_admin_recipe_delete_conflicts_when_routing_references_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        main.storage.insert_recipe(
+            {
+                "id": "route-ref",
+                "name": "Route Ref Recipe",
+                "description": "Recipe referenced by routing",
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Route reference recipe summary.",
+                "status": "active",
+            }
+        )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "route-ref",
+            }
+        )
+        response = await client.delete(
+            "/v1/admin/recipes/route-ref",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "RECIPE_IN_USE"
+    assert body["details"]["reference_type"] == "service_environment_routing"
+    assert body["details"]["reference_count"] == 1
+
+
+async def test_admin_recipe_delete_conflicts_when_delivery_group_references_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        main.storage.insert_recipe(
+            {
+                "id": "dg-ref",
+                "name": "DG Ref Recipe",
+                "description": "Recipe referenced by delivery group",
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Delivery group reference recipe summary.",
+                "status": "active",
+            }
+        )
+        group = main.storage.get_delivery_group("default")
+        assert group is not None
+        group["allowed_recipes"] = ["default", "deprecated", "dg-ref"]
+        if hasattr(main.storage, "update_delivery_group"):
+            main.storage.update_delivery_group(group)
+        else:
+            main.storage.insert_delivery_group(group)
+        response = await client.delete(
+            "/v1/admin/recipes/dg-ref",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "RECIPE_IN_USE"
+    assert body["details"]["reference_type"] == "delivery_group_allowed_recipes"
+    assert body["details"]["reference_count"] == 1
+
+
+async def test_admin_recipe_delete_reports_routing_first_when_multiple_references_exist(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        main.storage.insert_recipe(
+            {
+                "id": "both-ref",
+                "name": "Both Ref Recipe",
+                "description": "Recipe referenced by routing and delivery group",
+                "spinnaker_application": "demo-app",
+                "deploy_pipeline": "demo-deploy",
+                "rollback_pipeline": "rollback-demo-service",
+                "recipe_revision": 1,
+                "effective_behavior_summary": "Both references recipe summary.",
+                "status": "active",
+            }
+        )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "both-ref",
+            }
+        )
+        group = main.storage.get_delivery_group("default")
+        assert group is not None
+        group["allowed_recipes"] = ["default", "deprecated", "both-ref"]
+        if hasattr(main.storage, "update_delivery_group"):
+            main.storage.update_delivery_group(group)
+        else:
+            main.storage.insert_delivery_group(group)
+
+        response = await client.delete(
+            "/v1/admin/recipes/both-ref",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "RECIPE_IN_USE"
+    assert body["details"]["reference_type"] == "service_environment_routing"
+
+
 async def test_deployment_records_capture_recipe_snapshot(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(

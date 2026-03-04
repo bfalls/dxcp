@@ -728,6 +728,50 @@ class Storage:
             return None
         return self._row_to_recipe(row)
 
+    def delete_recipe(self, recipe_id: str) -> None:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM recipes WHERE id = ?", (recipe_id,))
+        conn.commit()
+        conn.close()
+
+    def list_service_environment_routing_by_recipe(self, recipe_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT service_id, environment_id, recipe_id
+            FROM service_environment_routing
+            WHERE recipe_id = ?
+            ORDER BY service_id ASC, environment_id ASC
+            """,
+            (recipe_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "service_id": row["service_id"],
+                "environment_id": row["environment_id"],
+                "recipe_id": row["recipe_id"],
+            }
+            for row in rows
+        ]
+
+    def list_delivery_groups_by_allowed_recipe(self, recipe_id: str) -> List[dict]:
+        groups = []
+        for group in self.list_delivery_groups():
+            allowed = group.get("allowed_recipes") or []
+            if recipe_id in allowed:
+                groups.append(
+                    {
+                        "id": group.get("id"),
+                        "name": group.get("name"),
+                    }
+                )
+        groups.sort(key=lambda row: row.get("id") or "")
+        return groups
+
     def _row_to_delivery_group(self, row: sqlite3.Row) -> dict:
         return {
             "id": row["id"],
@@ -2140,6 +2184,39 @@ class DynamoStorage:
             "updated_by": item.get("updated_by"),
             "last_change_reason": item.get("last_change_reason"),
         }
+
+    def delete_recipe(self, recipe_id: str) -> None:
+        self.table.delete_item(Key={"pk": "RECIPE", "sk": recipe_id})
+
+    def list_service_environment_routing_by_recipe(self, recipe_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("SERVICE_ENV_ROUTING") & Attr("recipe_id").eq(recipe_id)
+        )
+        items = response.get("Items", [])
+        rows = [
+            {
+                "service_id": item.get("service_id"),
+                "environment_id": item.get("environment_id"),
+                "recipe_id": item.get("recipe_id"),
+            }
+            for item in items
+        ]
+        rows.sort(key=lambda row: ((row.get("service_id") or ""), (row.get("environment_id") or "")))
+        return rows
+
+    def list_delivery_groups_by_allowed_recipe(self, recipe_id: str) -> List[dict]:
+        groups = []
+        for group in self.list_delivery_groups():
+            allowed = group.get("allowed_recipes") or []
+            if recipe_id in allowed:
+                groups.append(
+                    {
+                        "id": group.get("id"),
+                        "name": group.get("name"),
+                    }
+                )
+        groups.sort(key=lambda row: row.get("id") or "")
+        return groups
 
     def insert_recipe(self, recipe: dict) -> dict:
         recipe_revision = recipe.get("recipe_revision") or 1
