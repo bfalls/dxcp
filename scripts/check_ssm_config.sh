@@ -6,7 +6,7 @@ source "$ROOT_DIR/scripts/ssm_helpers.sh"
 
 prefix="${DXCP_CONFIG_PREFIX:-${DXCP_SSM_PREFIX:-/dxcp/config}}"
 
-required_params=(
+required_param_groups=(
   "${prefix}/oidc/issuer"
   "${prefix}/oidc/audience"
   "${prefix}/oidc/jwks_url"
@@ -14,11 +14,19 @@ required_params=(
   "${prefix}/ui/auth0_client_id"
   "${prefix}/api/cors_origins"
   "${prefix}/spinnaker/gate_url"
+  "${prefix}/spinnaker/mtls_cert_path"
+  "${prefix}/spinnaker/mtls_key_path"
 )
 
 missing=()
-for name in "${required_params[@]}"; do
+for name in "${required_param_groups[@]}"; do
   if ! param_exists "$name"; then
+    missing+=("$name")
+    continue
+  fi
+  value="$(get_ssm_param "$name" 2>/dev/null || true)"
+  value="$(echo "$value" | xargs)"
+  if [[ -z "$value" ]]; then
     missing+=("$name")
   fi
 done

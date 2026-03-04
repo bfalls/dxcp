@@ -12,6 +12,8 @@ export interface EnvIamAssumerStackProps extends StackProps {
   targetRoleArns: string[];
   trustedPrincipalArn?: string;
   localUserName?: string;
+  spinnakerSecretsBucketName?: string;
+  spinnakerSecretsObjectKey?: string;
 }
 
 export class EnvIamStack extends Stack {
@@ -175,6 +177,8 @@ export class EnvIamAssumerStack extends Stack {
 
   constructor(scope: Construct, id: string, props: EnvIamAssumerStackProps) {
     super(scope, id, props);
+    const secretsBucketName = props.spinnakerSecretsBucketName ?? `dxcp-secrets-${this.account}-${this.region}`;
+    const secretsObjectKey = props.spinnakerSecretsObjectKey ?? "dxcp/secrets.yml";
 
     const trustedPrincipal = props.trustedPrincipalArn
       ? new CompositePrincipal(new ArnPrincipal(`arn:aws:iam::${this.account}:root`), new ArnPrincipal(props.trustedPrincipalArn))
@@ -226,6 +230,13 @@ export class EnvIamAssumerStack extends Stack {
         effect: Effect.ALLOW,
         actions: ["sts:AssumeRole"],
         resources: props.targetRoleArns,
+      }),
+    );
+    localUser.addToPolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ["s3:GetObject"],
+        resources: [`arn:aws:s3:::${secretsBucketName}/${secretsObjectKey}`],
       }),
     );
 

@@ -34,6 +34,8 @@ cdk/cdk.context.json
 
 *.pem
 *.pub
+ops/certs/*
+!ops/certs/.gitignore
 ui/.env.local
 ui/playwright/.auth/
 ui/test-results/
@@ -45,3 +47,4 @@ cdk/*.log
 dxcp-api/.env
 dxcp-api/data/*.db
 integrations/backstage/packages/dxcp-plugin/dist/
+ops/k8s/

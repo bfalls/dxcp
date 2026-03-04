@@ -20,6 +20,15 @@ Windows PowerShell:
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8084/health
 ```
 
+## Gate auth mode requirements for DXCP API calls
+
+DXCP forwards the end-user bearer token to Gate for API calls. To support Fiat-based authorization on the propagated identity:
+
+- Gate must accept bearer JWTs for API requests (resource-server style validation).
+- Gate must not require browser redirect login for API endpoints used by DXCP.
+
+If Gate returns redirect responses (for example `302` to `/oauth2/authorization/...`) for API calls, DXCP engine calls will be blocked.
+
 ## Start Spinnaker locally
 
 Use your preferred local install (Docker or Kubernetes). Ensure Gate is reachable on `127.0.0.1:8084` and Deck is reachable on `localhost:9000`.
@@ -75,7 +84,7 @@ DXCP reads the Gate URL from config or environment variables.
 Option A: SSM (recommended)
 
 ```bash
-aws ssm put-parameter --name /dxcp/config/spinnaker_gate_url --type String --value http://127.0.0.1:8084 --overwrite
+aws ssm put-parameter --name /dxcp/config/spinnaker/gate_url --type String --value http://127.0.0.1:8084 --overwrite
 ```
 
 DXCP still needs the mode switch:
@@ -96,6 +105,23 @@ Windows PowerShell:
 ```powershell
 $env:DXCP_SPINNAKER_MODE = 'http'
 $env:DXCP_SPINNAKER_GATE_URL = 'http://127.0.0.1:8084'
+```
+
+### Recommended for DXCP runtime: machine-only mTLS endpoint
+
+Use a dedicated Gate endpoint for DXCP and require mTLS at Caddy. Keep the UI/OAuth endpoint unchanged.
+
+Runbook:
+- [ops/README-mtls.md](../ops/README-mtls.md)
+- [ops/caddy/Caddyfile.mtls.example](../ops/caddy/Caddyfile.mtls.example)
+
+DXCP runtime vars:
+
+```bash
+export DXCP_SPINNAKER_GATE_URL="https://gate-api.example.internal"
+export DXCP_SPINNAKER_MTLS_CERT_PATH="/app/certs/dxcp-client.crt"
+export DXCP_SPINNAKER_MTLS_KEY_PATH="/app/certs/dxcp-client.key"
+export DXCP_SPINNAKER_MTLS_CA_PATH="/app/certs/ca.crt" # optional
 ```
 
 ## ngrok (UI access without port forwarding)
@@ -135,8 +161,8 @@ If you also expose Gate through ngrok, set the optional Gate header values in DX
 SSM:
 
 ```bash
-aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_name --type String --value "<header-name>" --overwrite
-aws ssm put-parameter --name /dxcp/config/spinnaker_gate_header_value --type SecureString --value "<header-value>" --overwrite
+aws ssm put-parameter --name /dxcp/config/spinnaker/gate_header_name --type String --value "<header-name>" --overwrite
+aws ssm put-parameter --name /dxcp/config/spinnaker/gate_header_value --type SecureString --value "<header-value>" --overwrite
 ```
 
 Environment variables:
@@ -156,7 +182,7 @@ $env:DXCP_SPINNAKER_GATE_HEADER_VALUE = '<header-value>'
 Notes:
 - The header is only sent if both name and value are configured.
 - DXCP logs whether a custom header is configured, but never logs the value.
-- DXCP always includes `ngrok-skip-browser-warning: 1` on Gate requests.
+- For production-like DXCP runtime use, prefer mTLS endpoint configuration over browser/OAuth endpoint routing.
 
 ## DXCP pipeline contract
 

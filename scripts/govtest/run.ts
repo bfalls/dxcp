@@ -20,6 +20,7 @@ import {
 } from "./common.ts";
 import type { RunContext } from "./types.ts";
 import { getUserAccessTokenViaCustomCredentials, getUserAccessTokenViaPlaywright } from "./ui_auth.ts";
+import { ensureOwnerDeliveryGroupAccess } from "../../ui/e2e/helpers/auth.ts";
 import { stepA_proveCiGateNegative } from "./steps/stepA_gate_negative.ts";
 import { stepB_configureCiPublishersAllowlist } from "./steps/stepB_configure_ci_publishers.ts";
 import { stepC_registerBuildHappyPath } from "./steps/stepC_register_build.ts";
@@ -32,6 +33,7 @@ import { stepI_ciDenialMatrixEnforcement } from "./steps/stepI_ci_denial_matrix.
 import { stepJ_mutationKillSwitch } from "./steps/stepJ_mutation_kill_switch.ts";
 import { stepK_adminConfigAuditConformance } from "./steps/stepK_admin_config_audit.ts";
 import { stepR_roleAuthorizationChecks } from "./steps/stepRole_authorization.ts";
+import { cleanupPreparedArtifact, prepareRunArtifact, type PreparedArtifact } from "./artifact_lifecycle.ts";
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
 const CONTRACT_SNAPSHOT_ARTIFACT = ".govtest.contract.snapshot.json";
@@ -347,6 +349,7 @@ async function main(): Promise<number> {
     owner: await getUserAccessTokenViaPlaywright("owner"),
     observer: await getUserAccessTokenViaPlaywright("observer"),
   };
+  await ensureOwnerDeliveryGroupAccess(tokens.admin, tokens.owner);
   const context = await buildRunContext(tokens);
   const strictConformance = isStrictConformance(context);
 
@@ -400,19 +403,26 @@ async function main(): Promise<number> {
   }
 
   announceStep("Executing Phase 3 governance API assertions (fail-fast)");
-
-  await stepR_roleAuthorizationChecks(context, tokens, claimsByRole);
-  await stepA_proveCiGateNegative(context, tokens.owner, tokens.ci, tokens.admin);
-  await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
-  await stepC_registerBuildHappyPath(context, tokens.ci);
-  await stepD_sameIdempotencyKeyDifferentBodyReturnsConflict(context, tokens.ci);
-  await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
-  await stepF_deployHappyPath(context, tokens.owner, tokens.observer, nonMemberOwnerToken);
-  await stepI_ciDenialMatrixEnforcement(context, tokens.ci, claimsByRole.ci as Record<string, unknown>);
-  await stepG_rollbackAfterDeploy(context, tokens.owner);
-  await stepH_guardrailSpotChecks(context, tokens.owner);
-  await stepJ_mutationKillSwitch(context, tokens.admin, tokens.owner, tokens.ci);
-  await stepK_adminConfigAuditConformance(context, tokens.admin);
+  let preparedArtifact: PreparedArtifact | undefined;
+  try {
+    await stepR_roleAuthorizationChecks(context, tokens, claimsByRole);
+    await stepA_proveCiGateNegative(context, tokens.owner, tokens.ci, tokens.admin);
+    await stepB_configureCiPublishersAllowlist(context, tokens.admin, tokens.ci);
+    preparedArtifact = await prepareRunArtifact(context);
+    await stepC_registerBuildHappyPath(context, tokens.ci);
+    await stepD_sameIdempotencyKeyDifferentBodyReturnsConflict(context, tokens.ci);
+    await stepE_deployEnforcementUnregisteredVersion(context, tokens.owner, tokens.admin);
+    await stepF_deployHappyPath(context, tokens.owner, tokens.observer, nonMemberOwnerToken);
+    await stepI_ciDenialMatrixEnforcement(context, tokens.ci, claimsByRole.ci as Record<string, unknown>);
+    await stepG_rollbackAfterDeploy(context, tokens.owner);
+    await stepH_guardrailSpotChecks(context, tokens.owner);
+    await stepJ_mutationKillSwitch(context, tokens.admin, tokens.owner, tokens.ci);
+    await stepK_adminConfigAuditConformance(context, tokens.admin);
+  } finally {
+    if (preparedArtifact) {
+      await cleanupPreparedArtifact(preparedArtifact);
+    }
+  }
 
   const failedGuardrails = context.guardrails.checks.filter((c) => c.status === "FAILED");
   const skippedContractGuardrails = context.guardrails.checks.filter(

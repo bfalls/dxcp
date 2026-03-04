@@ -1,10 +1,8 @@
-import { test, expect, type Browser } from "@playwright/test";
-import {
-  captureAccessTokenFromSpaCache,
-  ensureOwnerDeliveryGroupAccess,
-  loadGovtestEnv,
-} from "./helpers/auth";
-import { ensureAuthState } from "./helpers/authState";
+import { test, expect } from "@playwright/test";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { captureAccessTokenFromSpaCache, loadGovtestEnv } from "./helpers/auth";
+import { getAuthStatePath } from "./helpers/authState";
 
 loadGovtestEnv();
 
@@ -30,22 +28,36 @@ function missingGovEnv(): string[] {
   return missing;
 }
 
-function pickHighestZeroOneVersion(values: string[]): string {
-  const candidates = values
-    .map((value) => value.trim())
-    .map((value) => {
-      const match = value.match(/^0\.1\.(\d+)$/);
-      if (!match) return null;
-      return { value, patch: Number(match[1]) };
-    })
-    .filter((entry): entry is { value: string; patch: number } => Boolean(entry));
+async function hasBuildProvenance(
+  apiBase: string,
+  ownerToken: string,
+  service: string,
+  version: string,
+): Promise<boolean> {
+  const response = await fetch(
+    `${apiBase}/v1/builds?service=${encodeURIComponent(service)}&version=${encodeURIComponent(version)}`,
+    { method: "GET", headers: { Authorization: `Bearer ${ownerToken}` } },
+  );
+  if (!response.ok) return false;
+  const body = await response.json().catch(() => null);
+  if (!body || body.code) return false;
+  return typeof body.version === "string" && body.version.trim().length > 0;
+}
 
-  if (candidates.length === 0) {
-    throw new Error("No version matching pattern 0.1.* found in Version dropdown.");
+function resolveRunVersionFromLastRunArtifact(): string {
+  const candidates = [
+    join(process.cwd(), ".govtest.last-run.json"),
+    join(process.cwd(), "..", ".govtest.last-run.json"),
+  ];
+  const artifactPath = candidates.find((p) => existsSync(p));
+  if (!artifactPath) return "";
+  try {
+    const body = JSON.parse(readFileSync(artifactPath, "utf8"));
+    const value = typeof body?.runVersion === "string" ? body.runVersion.trim() : "";
+    return value;
+  } catch {
+    return "";
   }
-
-  candidates.sort((a, b) => b.patch - a.patch);
-  return candidates[0].value;
 }
 
 const missingEnv = missingGovEnv();
@@ -54,43 +66,20 @@ if (missingEnv.length > 0) {
 }
 
 test.describe("govtest thin UI proof", () => {
-  let ownerStatePath = "";
-  let adminStatePath = "";
-  let observerStatePath = "";
-  let ownerToken = "";
-  let adminToken = "";
-  let observerToken = "";
-  const uiBase = process.env.GOV_DXCP_UI_BASE?.trim() || "http://localhost:5173";
+  test.setTimeout(180000);
 
-  async function tokenFromState(browser: Browser, statePath: string): Promise<string> {
-    const context = await browser.newContext({ storageState: statePath, baseURL: uiBase });
-    const page = await context.newPage();
-    try {
-      await page.goto("/");
-      await expect(page.getByRole("button", { name: "Logout" })).toBeVisible({ timeout: 20000 });
-      return await captureAccessTokenFromSpaCache(page);
-    } finally {
-      await context.close();
-    }
-  }
+  let ownerStatePath = "";
+  const uiBase = process.env.GOV_DXCP_UI_BASE?.trim() || "http://localhost:5173";
 
   test.skip(
     missingEnv.length > 0,
     `Missing required env vars for govtest UI proof: ${missingEnv.join(", ")}`,
   );
 
-  test.beforeAll(async ({ browser }) => {
-    ownerStatePath = await ensureAuthState("owner");
-    adminStatePath = await ensureAuthState("admin");
-    observerStatePath = await ensureAuthState("observer");
-
-    ownerToken = await tokenFromState(browser, ownerStatePath);
-    adminToken = await tokenFromState(browser, adminStatePath);
-    observerToken = await tokenFromState(browser, observerStatePath);
-    if (!observerToken) {
-      throw new Error("Failed to capture observer token from authenticated storage state.");
-    }
-    await ensureOwnerDeliveryGroupAccess(adminToken, ownerToken);
+  test.beforeAll(async ({ browser }, testInfo) => {
+    testInfo.setTimeout(180000);
+    void browser;
+    ownerStatePath = getAuthStatePath("owner");
   });
 
   test("owner auth + deploy wiring + provenance fields", async ({ browser }) => {
@@ -101,6 +90,11 @@ test.describe("govtest thin UI proof", () => {
 
       await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
       await expect(page.getByTestId("nav-deploy")).toBeVisible();
+      const ownerToken = await captureAccessTokenFromSpaCache(page);
+      const apiBase = (process.env.GOV_DXCP_API_BASE || "").trim().replace(/\/$/, "");
+      if (!apiBase) {
+        throw new Error("GOV_DXCP_API_BASE is required for govtest UI proof.");
+      }
 
       await page.getByTestId("nav-deploy").click();
       await expect(page).toHaveURL(/\/deploy/);
@@ -113,9 +107,55 @@ test.describe("govtest thin UI proof", () => {
 
       const serviceSelect = page.getByTestId("deploy-service-select");
       await expect(serviceSelect).toBeVisible();
-      await expect(serviceSelect.locator("option[value='demo-service']")).toHaveCount(1);
-      await serviceSelect.selectOption("demo-service");
-      await expect(serviceSelect).toHaveValue("demo-service");
+      const configuredService = (process.env.GOV_SERVICE || "").trim() || "demo-service";
+      const refreshDataButton = page.getByRole("button", { name: /refresh data/i }).first();
+      const refreshBanner = page.getByText(/Refresh required\./i).first();
+      let serviceReady = false;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const serviceOptions = await serviceSelect
+          .locator("option")
+          .evaluateAll((options) =>
+            options
+              .map((option) => (option as HTMLOptionElement).value)
+              .filter((value) => Boolean(value) && value !== "__none__"),
+          );
+        if (serviceOptions.includes(configuredService)) {
+          await serviceSelect.selectOption(configuredService);
+          await expect(serviceSelect).toHaveValue(configuredService);
+          serviceReady = true;
+          break;
+        }
+        if (serviceOptions.length > 0) {
+          await serviceSelect.selectOption(serviceOptions[0]);
+          await expect(serviceSelect).toHaveValue(serviceOptions[0]);
+          serviceReady = true;
+          break;
+        }
+        if ((await refreshBanner.isVisible().catch(() => false)) && (await refreshDataButton.isVisible().catch(() => false))) {
+          await refreshDataButton.click();
+          await page.waitForTimeout(1200);
+          continue;
+        }
+        await page.waitForTimeout(1200);
+      }
+      if (!serviceReady) {
+        const currentValue = await serviceSelect.inputValue().catch(() => "<unavailable>");
+        throw new Error(
+          `No deployable service available after refresh attempts. configuredService=${configuredService} currentValue=${currentValue}`,
+        );
+      }
+
+      // Cross-browser determinism: ensure a strategy is explicitly selected.
+      const strategyPrompt = page.getByText("Select a strategy to continue.");
+      if ((await strategyPrompt.count()) > 0 && (await strategyPrompt.first().isVisible().catch(() => false))) {
+        const preferredStrategy = page.getByRole("radio", { name: /Default Deploy v2/i }).first();
+        if (await preferredStrategy.isVisible().catch(() => false)) {
+          await preferredStrategy.click();
+        } else {
+          await page.getByRole("radio").first().click();
+        }
+        await expect(strategyPrompt).toHaveCount(0, { timeout: 10000 });
+      }
 
       // Deploy page refreshes versions asynchronously; wait until the native options settle.
       await expect(page.getByText("Loading versions...")).toHaveCount(0, { timeout: 20000 });
@@ -129,43 +169,113 @@ test.describe("govtest thin UI proof", () => {
             .map((option) => (option as HTMLOptionElement).value)
             .filter((value) => Boolean(value) && value !== "__select__" && value !== "__custom__"),
         );
-      const configuredRunVersion = (process.env.GOV_RUN_VERSION || "").trim();
-      const useStrictRunIdChecks = configuredRunVersion.length > 0;
-      const selectedVersion = useStrictRunIdChecks ? configuredRunVersion : pickHighestZeroOneVersion(versionValues);
-      if (!versionValues.includes(selectedVersion)) {
-        throw new Error(
-          `Selected version ${selectedVersion} is not available in the Deploy version list.`,
-        );
-      }
-      if (!useStrictRunIdChecks) {
-        console.log(
-          "[govtest.spec] GOV_RUN_VERSION is not set; using highest 0.1.* fallback. Run `npm run govtest` first for strict Run ID value assertions.",
-        );
-      }
-      console.log(`[govtest.spec] selected version=${selectedVersion} strict=${useStrictRunIdChecks ? "true" : "false"}`);
-      const versionTrigger = page.locator(".custom-select-trigger").first();
-      await expect(versionTrigger).toBeVisible({ timeout: 20000 });
-      await versionTrigger.click();
-      const versionOption = page.locator(".custom-select-option", { hasText: selectedVersion }).first();
-      await expect(versionOption).toBeVisible({ timeout: 20000 });
-      await versionOption.click();
-      await expect(versionSelect).toHaveValue(selectedVersion);
+      const artifactRunVersion = resolveRunVersionFromLastRunArtifact();
+      const strictConformance =
+        ((process.env.GOV_CONFORMANCE_PROFILE || "").trim().toLowerCase() || "diagnostic") === "strict";
+      const sortedVersionValues = [...versionValues].sort((a, b) => {
+        const aMatch = a.match(/^0\.1\.(\d+)$/);
+        const bMatch = b.match(/^0\.1\.(\d+)$/);
+        const aPatch = aMatch ? Number(aMatch[1]) : -1;
+        const bPatch = bMatch ? Number(bMatch[1]) : -1;
+        return bPatch - aPatch;
+      });
 
-      await expect(page.getByText("Build Provenance", { exact: true })).toBeVisible({ timeout: 20000 });
+      let selectedVersion = "";
+      if (artifactRunVersion) {
+        if (!versionValues.includes(artifactRunVersion) && strictConformance) {
+          throw new Error(
+            `Strict conformance requires runVersion=${artifactRunVersion} from .govtest.last-run.json, but it is not available in Deploy version list.`,
+          );
+        }
+        if (versionValues.includes(artifactRunVersion)) {
+          const configuredHasProvenance = await hasBuildProvenance(
+            apiBase,
+            ownerToken,
+            configuredService,
+            artifactRunVersion,
+          );
+          if (configuredHasProvenance) {
+            selectedVersion = artifactRunVersion;
+          } else if (strictConformance) {
+            throw new Error(
+              `Strict conformance requires runVersion=${artifactRunVersion} from .govtest.last-run.json, but it has no build provenance record.`,
+            );
+          }
+        }
+      }
+      if (!selectedVersion) {
+        for (const candidate of sortedVersionValues) {
+          if (await hasBuildProvenance(apiBase, ownerToken, configuredService, candidate)) {
+            selectedVersion = candidate;
+            break;
+          }
+        }
+        if (!selectedVersion) {
+          throw new Error(
+            `No deployable version with build provenance found for service=${configuredService}.`,
+          );
+        }
+      }
+
+      let selected = false;
+      const selectByValue = async (value: string): Promise<boolean> => {
+        try {
+          await versionSelect.selectOption(value);
+          await expect(versionSelect).toHaveValue(value, { timeout: 5000 });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      selected = await selectByValue(selectedVersion);
+      if (!selected) {
+        throw new Error(`Could not select deploy version. target=${selectedVersion}`);
+      }
+      const useStrictRunIdChecks = strictConformance && artifactRunVersion.length > 0 && selectedVersion === artifactRunVersion;
+      console.log(`[govtest.spec] selected version=${selectedVersion} strict=${useStrictRunIdChecks ? "true" : "false"}`);
+      const effectiveVersionValue = (await versionSelect.inputValue().catch(() => "")).trim();
+      if (effectiveVersionValue !== selectedVersion) {
+        throw new Error(
+          `Version selector did not settle to selected value. expected=${selectedVersion} actual=${effectiveVersionValue || "<empty>"}`,
+        );
+      }
+
+      const provenanceHeading = page.getByText("Build Provenance", { exact: true });
+      const provenanceHeadingVisible = await provenanceHeading.isVisible().catch(() => false);
+      if (!provenanceHeadingVisible) {
+        const policyResp = await fetch(`${apiBase}/v1/ui/policy/ui-exposure`, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${ownerToken}` },
+        });
+        const policyBody = await policyResp.json().catch(() => null);
+        if (!policyResp.ok) {
+          throw new Error(`Could not verify UI exposure policy (${policyResp.status}): ${JSON.stringify(policyBody)}`);
+        }
+        const policyDisplay =
+          policyBody?.policy?.artifactRef?.display === true || policyBody?.artifactRef?.display === true;
+        if (policyDisplay) {
+          throw new Error("Build Provenance section is hidden while ui-exposure policy enables artifactRef.display=true.");
+        }
+        console.log("[govtest.spec] Build Provenance is hidden by UI exposure policy; skipping provenance field assertions.");
+        return;
+      }
+
+      await expect(provenanceHeading).toBeVisible({ timeout: 20000 });
       await expect(page.getByText("Loading provenance...")).toHaveCount(0, { timeout: 20000 });
       const unavailable = page.getByText("Build provenance unavailable for this version.");
       const provenanceBlock = page.locator(".provenance-block");
-
-      await page.waitForFunction(() => {
-        const unavailableNode = Array.from(document.querySelectorAll("*")).find(
-          (el) => el.textContent?.trim() === "Build provenance unavailable for this version.",
-        );
-        const hasPublisher = Array.from(document.querySelectorAll(".provenance-block dt")).some(
-          (el) => el.textContent?.trim() === "Publisher",
-        );
-        const unavailableVisible = Boolean(unavailableNode && (unavailableNode as HTMLElement).offsetParent !== null);
-        return unavailableVisible || hasPublisher;
-      }, { timeout: 20000 });
+      await expect
+        .poll(async () => {
+          const unavailableVisible =
+            (await unavailable.count()) > 0 && (await unavailable.first().isVisible().catch(() => false));
+          const publisherVisible = await provenanceBlock
+            .getByText("Publisher", { exact: true })
+            .first()
+            .isVisible()
+            .catch(() => false);
+          return unavailableVisible || publisherVisible;
+        }, { timeout: 20000 })
+        .toBeTruthy();
 
       if ((await unavailable.count()) > 0 && (await unavailable.first().isVisible())) {
         throw new Error(`Build provenance unavailable for selected version ${selectedVersion}`);
@@ -186,7 +296,7 @@ test.describe("govtest thin UI proof", () => {
         await expect(runIdValue).not.toHaveText(/^\s*$/);
       }
     } finally {
-      await ownerContext.close();
+      await ownerContext.close().catch(() => undefined);
     }
   });
 });

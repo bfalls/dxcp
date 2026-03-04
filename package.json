@@ -1,6 +1,9 @@
 {
   "name": "dxcp",
   "private": true,
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.922.0"
+  },
   "scripts": {
     "govtest:dry": "node --experimental-strip-types scripts/govtest/run.ts --dry-run",
     "govtest:runtime": "node --experimental-strip-types scripts/govtest/run.ts",

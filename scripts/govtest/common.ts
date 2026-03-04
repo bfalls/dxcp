@@ -6,6 +6,7 @@ import { getCachedToken, putCachedToken } from "./token_cache.ts";
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
 const DEFAULT_ROLES_CLAIM = "https://dxcp.example/claims/roles";
+const DEFAULT_ARTIFACT_KEY_TEMPLATE = "demo-service/demo-service-{version}.zip";
 const VERSION_FETCH_MAX_ATTEMPTS = 5;
 const VERSION_FETCH_INITIAL_BACKOFF_MS = 1000;
 const RETRYABLE_VERSION_FETCH_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -334,6 +335,30 @@ async function fetchSeedArtifactRef(ownerToken: string, service: string, version
   return typeof payload?.artifactRef === "string" ? payload.artifactRef : undefined;
 }
 
+async function fetchLatestSucceededDeploymentVersion(
+  ownerToken: string,
+  service: string,
+  environment: string,
+): Promise<string | undefined> {
+  const path = `/v1/deployments?service=${encodeURIComponent(service)}&environment=${encodeURIComponent(environment)}`;
+  const response = await apiRequest("GET", path, ownerToken);
+  const payload = await decodeJson(response);
+  if (!response.ok) {
+    logInfo(`Deployment history lookup failed for ${service}/${environment}; build-version seed fallback will be used.`);
+    return undefined;
+  }
+  const items = Array.isArray(payload) ? payload : [];
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    if (item.state !== "SUCCEEDED") continue;
+    const version = extractVersionCandidate(item.version);
+    if (version) {
+      return version;
+    }
+  }
+  return undefined;
+}
+
 function computeRunVersion(versions: string[]): { runMinor: number; runVersion: string } {
   const targetMinor = 1;
   const patches: number[] = [];
@@ -360,15 +385,89 @@ function nextPatchVersion(version: string): string {
   return `0.${minor}.${patch + 1}`;
 }
 
+function parseS3ArtifactRef(artifactRef: string): { bucket: string; key: string } | undefined {
+  const trimmed = artifactRef.trim();
+  const match = trimmed.match(/^s3:\/\/([^/]+)\/(.+)$/i);
+  if (!match) return undefined;
+  return { bucket: match[1], key: match[2] };
+}
+
+function renderArtifactKey(template: string, service: string, version: string): string {
+  return template.replaceAll("{service}", service).replaceAll("{version}", version);
+}
+
+async function isVersionAlreadyRegistered(ownerToken: string, service: string, version: string): Promise<boolean> {
+  const path = `/v1/builds?service=${encodeURIComponent(service)}&version=${encodeURIComponent(version)}`;
+  const response = await apiRequest("GET", path, ownerToken);
+  if (!response.ok) {
+    return false;
+  }
+  const payload = await decodeJson(response);
+  return (
+    typeof payload?.version === "string" &&
+    payload.version.trim() === version &&
+    typeof payload?.service === "string" &&
+    payload.service.trim() === service
+  );
+}
+
+async function findUnregisteredVersion(params: {
+  ownerToken: string;
+  service: string;
+  minor: number;
+  startingPatch: number;
+  excludeVersions?: string[];
+  maxAttempts?: number;
+}): Promise<string> {
+  const maxAttempts = params.maxAttempts ?? 1000;
+  const excluded = new Set((params.excludeVersions ?? []).filter(Boolean));
+  let patch = params.startingPatch;
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const candidate = `0.${params.minor}.${patch}`;
+    if (!excluded.has(candidate)) {
+      const exists = await isVersionAlreadyRegistered(params.ownerToken, params.service, candidate);
+      if (!exists) {
+        return candidate;
+      }
+    }
+    patch += 1;
+  }
+  fail(
+    `Unable to find an unregistered version after ${maxAttempts} attempts (service=${params.service}, minor=${params.minor}, startingPatch=${params.startingPatch}).`,
+  );
+}
+
 export async function buildRunContext(tokens: Record<RoleName, string>): Promise<RunContext> {
   const conformanceProfile = resolveConformanceProfile();
   const service = optionalEnv("GOV_SERVICE") ?? "demo-service";
   const environment = optionalEnv("GOV_ENVIRONMENT") ?? "sandbox";
   const recipeId = optionalEnv("GOV_RECIPE_ID") ?? "default";
   const versions = await fetchVersions(tokens.owner, service);
-  const { runMinor, runVersion } = computeRunVersion(versions);
+  const computed = computeRunVersion(versions);
+  const runMinor = computed.runMinor;
+  const runVersion = await findUnregisteredVersion({
+    ownerToken: tokens.owner,
+    service,
+    minor: computed.runMinor,
+    startingPatch: Number(computed.runVersion.match(VERSION_RE)?.[2] ?? "1"),
+    excludeVersions: [],
+  });
+  const conflictVersion = nextPatchVersion(runVersion);
+  const unregisteredVersion = await findUnregisteredVersion({
+    ownerToken: tokens.owner,
+    service,
+    minor: runMinor,
+    startingPatch: 999,
+    excludeVersions: [runVersion, conflictVersion],
+  });
 
-  const seedVersion = versions.find((v) => VERSION_RE.test(v));
+  const latestSucceededVersion = await fetchLatestSucceededDeploymentVersion(tokens.owner, service, environment);
+  const seedVersion = latestSucceededVersion ?? versions.find((v) => VERSION_RE.test(v));
+  if (latestSucceededVersion) {
+    logInfo(`Using seed version from latest successful deployment: ${latestSucceededVersion}`);
+  } else {
+    logInfo("No successful deployment seed version found; falling back to versions endpoint ordering.");
+  }
   const seedArtifactRef = seedVersion ? await fetchSeedArtifactRef(tokens.owner, service, seedVersion) : undefined;
 
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -382,9 +481,9 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
     environment,
     recipeId,
     runVersion,
-    conflictVersion: nextPatchVersion(runVersion),
+    conflictVersion,
     runMinor,
-    unregisteredVersion: `0.${runMinor}.999`,
+    unregisteredVersion,
     idempotencyKeys: {
       gateNegative: `govtest-${runId}-gate-negative`,
       ciRegister: `govtest-${runId}-ci-register`,
@@ -414,9 +513,16 @@ export async function buildRunContext(tokens: Record<RoleName, string>): Promise
 }
 
 export function buildRegisterExistingPayload(context: RunContext, overrides?: Partial<Record<string, any>>): any {
-  const artifactRef =
-    context.discovered.seedArtifactRef ??
-    `s3://dxcp-test-bucket/${context.service}/${context.service}-${context.runVersion}.zip`;
+  const artifactKeyTemplate = optionalEnv("GOV_ARTIFACT_KEY_TEMPLATE") ?? DEFAULT_ARTIFACT_KEY_TEMPLATE;
+  const runArtifactKey = renderArtifactKey(artifactKeyTemplate, context.service, context.runVersion);
+  let artifactRef = optionalEnv("GOV_PREPARED_ARTIFACT_REF") ?? `s3://dxcp-test-bucket/${runArtifactKey}`;
+  const seedArtifactRef = context.discovered.seedArtifactRef;
+  if (!optionalEnv("GOV_PREPARED_ARTIFACT_REF") && typeof seedArtifactRef === "string" && seedArtifactRef.trim()) {
+    const parsed = parseS3ArtifactRef(seedArtifactRef);
+    if (parsed) {
+      artifactRef = `s3://${parsed.bucket}/${runArtifactKey}`;
+    }
+  }
 
   const base = {
     service: context.service,
@@ -468,9 +574,9 @@ export function printRunPlan(context: RunContext): void {
   console.log(`  recipeId: ${context.recipeId}`);
   console.log(`  versions_endpoint: ${context.discovered.versionsEndpoint}`);
   console.log(`  discovered_versions: ${context.discovered.discoveredVersions.length}`);
-  console.log(`  GOV_RUN_VERSION: ${context.runVersion}`);
-  console.log(`  GOV_CONFLICT_VERSION: ${context.conflictVersion}`);
-  console.log(`  GOV_UNREGISTERED_VERSION: ${context.unregisteredVersion}`);
+  console.log(`  runVersion: ${context.runVersion}`);
+  console.log(`  conflictVersion: ${context.conflictVersion}`);
+  console.log(`  unregisteredVersion: ${context.unregisteredVersion}`);
 }
 
 export function announceStep(label: string): void {

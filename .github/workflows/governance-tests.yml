@@ -58,6 +58,7 @@ jobs:
           GOV_NON_MEMBER_OWNER_PASSWORD: ${{ secrets.GOV_NON_MEMBER_OWNER_PASSWORD }}
           GOV_CI_CLIENT_ID: ${{ vars.GOV_CI_CLIENT_ID }}
           GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
+          GOV_BASELINE_ARTIFACT_VERSION: ${{ vars.GOV_BASELINE_ARTIFACT_VERSION }}
           CI: "true"
         shell: bash
         run: |

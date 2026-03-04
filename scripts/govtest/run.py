@@ -287,7 +287,7 @@ def _print_plan(context: RunContext) -> None:
     print(f"  discovered_versions: {context.source_count}")
     print(f"  target_minor: {TARGET_MINOR}")
     print(f"  max_patch: {context.max_patch}")
-    print(f"  GOV_RUN_VERSION: {context.gov_run_version}")
+    print(f"  runVersion: {context.gov_run_version}")
     print("  token_usage:")
     print(f"    - ui_read: {context.token_sources.get('ui_read', 'n/a')}")
     print(f"    - admin_write: {context.token_sources.get('admin_write', 'n/a')}")

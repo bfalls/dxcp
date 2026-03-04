@@ -1,5 +1,15 @@
 import type { RunContext } from "../types.ts";
-import { announceStep, apiRequest, assert, assertStatus, buildDeploymentIntent, markStepEnd, markStepStart, optionalEnv } from "../common.ts";
+import {
+  announceStep,
+  apiRequest,
+  assert,
+  assertStatus,
+  buildDeploymentIntent,
+  decodeJson,
+  markStepEnd,
+  markStepStart,
+  optionalEnv,
+} from "../common.ts";
 
 const TERMINAL_STATES = new Set(["SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"]);
 
@@ -20,21 +30,23 @@ export async function stepF_deployHappyPath(
   nonMemberOwnerToken?: string,
 ): Promise<void> {
   const step = "F";
-  announceStep("F) Deploy happy path for GOV_RUN_VERSION plus polling to terminal state");
+  announceStep("F) Deploy happy path for runVersion plus polling to terminal state");
   markStepStart(context, step);
 
   const timeoutSeconds = toInt(optionalEnv("GOV_DEPLOY_TIMEOUT_SECONDS"), 300);
   const pollSeconds = toInt(optionalEnv("GOV_DEPLOY_POLL_SECONDS"), 5);
+  const validateIntent = buildDeploymentIntent(context, context.runVersion);
+  const deployIntent = buildDeploymentIntent(context, context.runVersion);
 
   const validate = await apiRequest("POST", "/v1/deployments/validate", ownerToken, {
-    body: buildDeploymentIntent(context, context.runVersion),
+    body: validateIntent,
   });
   const validateBody = await assertStatus(validate, 200, "F: POST /v1/deployments/validate (registered)");
   assert(validateBody?.versionRegistered === true, "F: validate response did not confirm versionRegistered=true");
 
   const deploy = await apiRequest("POST", "/v1/deployments", ownerToken, {
     idempotencyKey: context.idempotencyKeys.deployRegistered,
-    body: buildDeploymentIntent(context, context.runVersion),
+    body: deployIntent,
   });
   const deployBody = await assertStatus(deploy, 201, "F: POST /v1/deployments (registered)");
 
@@ -73,8 +85,25 @@ export async function stepF_deployHappyPath(
       context.deployment.finalState = state;
       context.deployment.finalOutcome = outcome;
       if (state !== "SUCCEEDED") {
+        let failureSummary = "n/a";
+        try {
+          const failuresResp = await apiRequest(
+            "GET",
+            `/v1/deployments/${encodeURIComponent(deploymentId)}/failures`,
+            ownerToken,
+          );
+          const failuresBody = await decodeJson(failuresResp);
+          if (failuresResp.status === 200) {
+            failureSummary = JSON.stringify(failuresBody);
+          } else {
+            failureSummary = `failed to fetch failures: status=${failuresResp.status} body=${JSON.stringify(failuresBody)}`;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          failureSummary = `failed to fetch failures: ${message}`;
+        }
         throw new Error(
-          `F: deployment reached terminal state=${state}, outcome=${outcome ?? "null"} (deploymentId=${deploymentId})`,
+          `F: deployment reached terminal state=${state}, outcome=${outcome ?? "null"} (deploymentId=${deploymentId}); failures=${failureSummary}`,
         );
       }
       markStepEnd(context, step);

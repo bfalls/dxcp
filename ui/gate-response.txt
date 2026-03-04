@@ -1,0 +1,21 @@
+HTTP/1.1 302 Found
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Headers: x-requested-with, content-type, authorization, X-RateLimit-App, X-Spinnaker-Priority
+Access-Control-Allow-Methods: POST, GET, OPTIONS, DELETE, PUT, PATCH
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: X-AUTH-REDIRECT-URL
+Access-Control-Max-Age: 3600
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Content-Length: 0
+Date: Sat, 28 Feb 2026 04:56:33 GMT
+Expires: 0
+Location: https://lavonna-unprefaced-belva.ngrok-free.dev/oauth2/authorization/other
+Ngrok-Agent-Ips: 204.57.253.58
+Pragma: no-cache
+Set-Cookie: SESSION=MDBlNzEzODEtMzY1Ny00N2Q0LWE4OGItNTRiNDY1YmFjZDA1; Path=/; Secure; HttpOnly
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+Via: 1.1 Caddy
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-Xss-Protection: 0
+

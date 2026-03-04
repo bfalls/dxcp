@@ -152,3 +152,45 @@ async def test_engine_unavailable_diagnostics_omit_engine_host_for_non_admin(tmp
     assert diagnostics["upstream_status"] == 502
     assert diagnostics.get("request_id")
     assert "engine_host" not in diagnostics
+
+
+async def test_engine_redirect_classified_as_misconfigured(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (_, main):
+        main.SETTINGS.demo_mode = True
+        main.SETTINGS.spinnaker_base_url = "https://gate.spinnaker.ddnsfree.com:9443"
+        actor = main.Actor(actor_id="owner-1", role=main.Role.DELIVERY_OWNER)
+        response = main._engine_error_response(
+            actor,
+            "Unable to start deployment",
+            RuntimeError(
+                "Spinnaker redirect blocked (HTTP 302); "
+                "gate_base_url=https://gate.spinnaker.ddnsfree.com:9443; "
+                "request_path=/applications; "
+                "location=https://auth.example.com/login; "
+                "requestId=gate-req-123"
+            ),
+        )
+    assert response.status_code == 502
+    body = json.loads(response.body.decode("utf-8"))
+    assert body["code"] == "ENGINE_MISCONFIGURED"
+    assert body["error_code"] == "ENGINE_MISCONFIGURED"
+    assert "operator_hint" in body
+    assert "upstream_status=302" in body["operator_hint"]
+    assert "location=https://auth.example.com/login" in body["operator_hint"]
+    assert "gate_base_url=https://gate.spinnaker.ddnsfree.com:9443" in body["operator_hint"]
+    assert "request_path=/applications" in body["operator_hint"]
+    assert "upstream_request_id=gate-req-123" in body["operator_hint"]
+
+
+def test_derive_gate_user_prefers_custom_email_then_standard_then_sub(tmp_path: Path):
+    main = _load_main(tmp_path)
+    assert main._derive_gate_user_from_claims(
+        {
+            "https://dxcp.example/claims/email": "Custom@Example.com",
+            "email": "ignored@example.com",
+            "sub": "auth0|123",
+        }
+    ) == "custom@example.com"
+    assert main._derive_gate_user_from_claims({"email": "Owner@Example.com", "sub": "auth0|123"}) == "owner@example.com"
+    assert main._derive_gate_user_from_claims({"sub": "auth0|123"}) == "auth0|123"
+    assert main._derive_gate_user_from_claims({}) is None

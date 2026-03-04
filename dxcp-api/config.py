@@ -37,16 +37,85 @@ class Settings:
         self.allowed_content_types = [c.strip() for c in content_types.split(",") if c.strip()]
 
         self.spinnaker_mode = os.getenv("DXCP_SPINNAKER_MODE", "http")
-        self.spinnaker_base_url = self._get("spinnaker_gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
+        self.spinnaker_base_url = self._get("spinnaker/gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
         self.spinnaker_application = self._get(
             "spinnaker_application",
             "DXCP_SPINNAKER_APPLICATION",
             "",
             str,
         )
-        self.spinnaker_header_name = self._get("spinnaker_gate_header_name", "DXCP_SPINNAKER_GATE_HEADER_NAME", "", str)
+        self.spinnaker_header_name = self._get("spinnaker/gate_header_name", "DXCP_SPINNAKER_GATE_HEADER_NAME", "", str)
         self.spinnaker_header_value = self._get(
-            "spinnaker_gate_header_value", "DXCP_SPINNAKER_GATE_HEADER_VALUE", "", str
+            "spinnaker/gate_header_value", "DXCP_SPINNAKER_GATE_HEADER_VALUE", "", str
+        )
+        self.spinnaker_auth0_domain = self._get("spinnaker/auth0_domain", "DXCP_SPINNAKER_AUTH0_DOMAIN", "", str)
+        self.spinnaker_auth0_client_id = self._get(
+            "spinnaker/auth0_client_id",
+            "DXCP_SPINNAKER_AUTH0_CLIENT_ID",
+            "",
+            str,
+        )
+        self.spinnaker_auth0_client_secret = self._resolve_secret(
+            self._get(
+                "spinnaker/auth0_client_secret",
+                "DXCP_SPINNAKER_AUTH0_CLIENT_SECRET",
+                "",
+                str,
+            )
+        )
+        self.spinnaker_auth0_audience = self._get(
+            "spinnaker/auth0_audience",
+            "DXCP_SPINNAKER_AUTH0_AUDIENCE",
+            "",
+            str,
+        )
+        self.spinnaker_auth0_scope = self._get(
+            "spinnaker/auth0_scope",
+            "DXCP_SPINNAKER_AUTH0_SCOPE",
+            "",
+            str,
+        )
+        self.spinnaker_auth0_refresh_skew_seconds = self._get(
+            "spinnaker/auth0_refresh_skew_seconds",
+            "DXCP_SPINNAKER_AUTH0_REFRESH_SKEW_SECONDS",
+            60,
+            int,
+        )
+        self.spinnaker_mtls_cert_path = self._get(
+            "spinnaker/mtls_cert_path",
+            "DXCP_SPINNAKER_MTLS_CERT_PATH",
+            "",
+            str,
+        )
+        self.spinnaker_mtls_cert_path = self._first_non_empty(
+            os.getenv("DXCP_SPINNAKER_MTLS_CLIENT_CERT_PATH", ""),
+            self.spinnaker_mtls_cert_path,
+        )
+        self.spinnaker_mtls_key_path = self._get(
+            "spinnaker/mtls_key_path",
+            "DXCP_SPINNAKER_MTLS_KEY_PATH",
+            "",
+            str,
+        )
+        self.spinnaker_mtls_key_path = self._first_non_empty(
+            os.getenv("DXCP_SPINNAKER_MTLS_CLIENT_KEY_PATH", ""),
+            self.spinnaker_mtls_key_path,
+        )
+        self.spinnaker_mtls_ca_path = self._get(
+            "spinnaker/mtls_ca_path",
+            "DXCP_SPINNAKER_MTLS_CA_PATH",
+            "",
+            str,
+        )
+        self.spinnaker_mtls_ca_path = self._first_non_empty(
+            os.getenv("DXCP_SPINNAKER_MTLS_CA_CERT_PATH", ""),
+            self.spinnaker_mtls_ca_path,
+        )
+        self.spinnaker_mtls_server_name = self._get(
+            "spinnaker/mtls_server_name",
+            "DXCP_SPINNAKER_MTLS_SERVER_NAME",
+            "",
+            str,
         )
         self.engine_lambda_url = self._get("engine/lambda/url", "DXCP_ENGINE_LAMBDA_URL", "", str)
         self.engine_lambda_token = self._resolve_secret(
@@ -108,6 +177,13 @@ class Settings:
     def _as_bool(self, value: object) -> bool:
         text = str(value or "").strip().lower()
         return text in {"1", "true", "yes", "on"}
+
+    def _first_non_empty(self, *values: object) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
 
     def _get(self, ssm_key: str, env_key: str, default, parser: Callable) -> Optional[object]:
         if env_key in os.environ:

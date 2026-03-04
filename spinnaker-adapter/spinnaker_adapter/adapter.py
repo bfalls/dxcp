@@ -1,11 +1,17 @@
 import json
 import logging
+import ssl
 import time
 import uuid
+import base64
+from http.client import HTTPSConnection
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener, urlopen
 
 from spinnaker_adapter.redaction import redact_text, redact_url
 from spinnaker_adapter.artifact_ref import parse_s3_artifact_ref
@@ -25,6 +31,16 @@ class SpinnakerAdapter:
         request_timeout_seconds: Optional[float] = None,
         header_name: str = "",
         header_value: str = "",
+        auth0_domain: str = "",
+        auth0_client_id: str = "",
+        auth0_client_secret: str = "",
+        auth0_audience: str = "",
+        auth0_scope: str = "",
+        auth0_refresh_skew_seconds: int = 60,
+        mtls_cert_path: str = "",
+        mtls_key_path: str = "",
+        mtls_ca_path: str = "",
+        mtls_server_name: str = "",
         request_id_provider: Optional[Callable[[], str]] = None,
     ) -> None:
         self.base_url = base_url
@@ -35,27 +51,83 @@ class SpinnakerAdapter:
         self.request_timeout_seconds = request_timeout_seconds
         self.header_name = header_name.strip() if header_name else ""
         self.header_value = header_value
+        self.auth0_domain = (auth0_domain or "").strip()
+        self.auth0_client_id = (auth0_client_id or "").strip()
+        self.auth0_client_secret = auth0_client_secret or ""
+        self.auth0_audience = (auth0_audience or "").strip()
+        self.auth0_scope = (auth0_scope or "").strip()
+        self.auth0_refresh_skew_seconds = max(0, int(auth0_refresh_skew_seconds or 0))
+        self.mtls_cert_path = (mtls_cert_path or "").strip()
+        self.mtls_key_path = (mtls_key_path or "").strip()
+        self.mtls_ca_path = (mtls_ca_path or "").strip()
+        self.mtls_server_name = (mtls_server_name or "").strip()
+        self._cached_access_token = ""
+        self._cached_access_token_exp_epoch = 0
+        self._auth_header_override: ContextVar[Optional[tuple[str, str]]] = ContextVar(
+            "spinnaker_auth_header_override",
+            default=None,
+        )
         self.request_id_provider = request_id_provider
         self._executions: Dict[str, dict] = {}
         self._logger = logging.getLogger("dxcp.spinnaker")
         self._obs_logger = logging.getLogger("dxcp.obs")
+        self._gate_ssl_context = self._build_gate_ssl_context()
+        self._logger.info("spinnaker.auth mode=%s", self._auth_mode_label())
 
-    def trigger_deploy(self, intent: dict, idempotency_key: str) -> dict:
+    def trigger_deploy(
+        self,
+        intent: dict,
+        idempotency_key: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
-        return self._http_trigger("deploy", intent, idempotency_key)
+        return self._http_trigger(
+            "deploy",
+            intent,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
 
-    def trigger_rollback(self, deployment: dict, idempotency_key: str) -> dict:
+    def trigger_rollback(
+        self,
+        deployment: dict,
+        idempotency_key: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
-        return self._http_trigger("rollback", deployment, idempotency_key)
+        return self._http_trigger(
+            "rollback",
+            deployment,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
 
-    def get_execution(self, execution_id: str) -> dict:
+    def get_execution(
+        self,
+        execution_id: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
-        return self._http_get_execution(execution_id)
+        return self._http_get_execution(
+            execution_id,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
 
-    def check_health(self, timeout_seconds: Optional[float] = None) -> dict:
+    def check_health(
+        self,
+        timeout_seconds: Optional[float] = None,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         if not self.base_url:
@@ -66,28 +138,51 @@ class SpinnakerAdapter:
             url,
             operation="check_health",
             timeout_seconds=timeout_seconds,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
         )
         return {"status": "UP" if 200 <= status_code < 300 else "DOWN", "details": response}
 
-    def list_applications(self) -> List[dict]:
+    def list_applications(
+        self,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> List[dict]:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         # Expand application details so tag metadata is included for filtering.
         url = f"{self.base_url.rstrip('/')}/applications?expand=true"
-        payload, _, _ = self._request_json("GET", url, operation="list_applications")
+        payload, _, _ = self._request_json(
+            "GET",
+            url,
+            operation="list_applications",
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         if isinstance(payload, list):
             return payload
         return []
 
-    def list_pipeline_configs(self, application: str) -> List[dict]:
+    def list_pipeline_configs(
+        self,
+        application: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> List[dict]:
         if self.mode == "stub":
             raise RuntimeError("Spinnaker stub mode disabled; set DXCP_SPINNAKER_MODE=http")
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/applications/{application}/pipelineConfigs"
-        payload, _, _ = self._request_json("GET", url, operation="list_pipeline_configs")
+        payload, _, _ = self._request_json(
+            "GET",
+            url,
+            operation="list_pipeline_configs",
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         if isinstance(payload, list):
             return payload
         return []
@@ -120,7 +215,14 @@ class SpinnakerAdapter:
             "executionUrl": execution["execution_url"],
         }
 
-    def _http_trigger(self, kind: str, payload: dict, idempotency_key: str) -> dict:
+    def _http_trigger(
+        self,
+        kind: str,
+        payload: dict,
+        idempotency_key: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         application = payload.get("spinnakerApplication") or self.application
@@ -133,17 +235,42 @@ class SpinnakerAdapter:
 
         trigger = {
             "type": "manual",
-            "user": "dxcp",
+            "user": self._resolve_trigger_user(
+                user_bearer_token=user_bearer_token,
+                user_principal=user_principal,
+            ),
             "parameters": params,
         }
         if idempotency_key:
             trigger["idempotencyKey"] = idempotency_key
 
         url = f"{self.base_url.rstrip('/')}/pipelines/{application}/{pipeline}"
-        response, status_code, headers = self._request_json("POST", url, trigger, operation=f"trigger_{kind}")
+        response, status_code, headers = self._request_json(
+            "POST",
+            url,
+            trigger,
+            operation=f"trigger_{kind}",
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         execution_id = self._extract_execution_id(response)
         if not execution_id:
             correlation_id = self._extract_correlation_id(response, headers)
+            response_snippet = ""
+            if isinstance(response, dict):
+                try:
+                    response_snippet = self._safe_snippet(json.dumps(response, separators=(",", ":"), default=str))
+                except Exception:
+                    response_snippet = self._safe_snippet(str(response))
+            self._logger.warning(
+                "spinnaker.trigger_missing_execution_id kind=%s status=%s app=%s pipeline=%s correlation_id=%s response=%s",
+                kind,
+                status_code,
+                application,
+                pipeline,
+                correlation_id or "none",
+                redact_text(response_snippet) if response_snippet else "none",
+            )
             detail = f"Spinnaker trigger failed: missing execution id (HTTP {status_code})"
             if correlation_id:
                 detail = f"{detail}; requestId={correlation_id}"
@@ -159,12 +286,23 @@ class SpinnakerAdapter:
         )
         return {"executionId": execution_id, "executionUrl": execution_url}
 
-    def _http_get_execution(self, execution_id: str) -> dict:
+    def _http_get_execution(
+        self,
+        execution_id: str,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> dict:
         if not self.base_url:
             raise RuntimeError("Spinnaker base URL is required for HTTP mode")
         url = f"{self.base_url.rstrip('/')}/pipelines/{execution_id}"
         try:
-            execution, _, _ = self._request_json("GET", url, operation="get_execution")
+            execution, _, _ = self._request_json(
+                "GET",
+                url,
+                operation="get_execution",
+                user_bearer_token=user_bearer_token,
+                user_principal=user_principal,
+            )
         except RuntimeError as exc:
             if "404" in str(exc):
                 return {"state": "UNKNOWN", "failures": [], "executionUrl": self._execution_url(execution_id)}
@@ -217,12 +355,46 @@ class SpinnakerAdapter:
         body: Optional[dict] = None,
         operation: str = "request",
         timeout_seconds: Optional[float] = None,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
     ) -> tuple[dict, int, dict]:
         data = None
-        headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
-        header_configured = bool(self.header_name and self.header_value)
-        if header_configured:
-            headers[self.header_name] = self.header_value
+        headers = {"Content-Type": "application/json"}
+        auth_header = self._auth_header_override.get() or self._spinnaker_auth_header()
+        auth_header_name = "none"
+        if auth_header:
+            auth_header_name, auth_header_value = auth_header
+            headers[auth_header_name] = auth_header_value
+        token = (user_bearer_token or "").strip()
+        # Trust boundary:
+        # - mTLS authenticates DXCP (machine identity) to machine Gate.
+        # - X-Spinnaker-User carries end-user attribution for governance/audit.
+        # End-user Authorization bearer tokens are not forwarded to machine Gate.
+        if token and not auth_header and self._gate_ssl_context is None:
+            headers["Authorization"] = f"Bearer {token}"
+        principal_override = (user_principal or "").strip()
+        if self._gate_ssl_context is not None and not principal_override:
+            raise RuntimeError(
+                "Spinnaker user attribution missing for machine Gate call: X-Spinnaker-User is required"
+            )
+        if principal_override:
+            spinnaker_user = principal_override
+        elif token:
+            spinnaker_user = self._principal_from_auth_header("Authorization", f"Bearer {token}")
+        else:
+            principal_header_name = "Authorization" if headers.get("Authorization") else auth_header_name
+            principal_header_value = headers.get("Authorization") or (auth_header[1] if auth_header else "")
+            spinnaker_user = self._principal_from_auth_header(principal_header_name, principal_header_value)
+        if spinnaker_user:
+            headers.setdefault("X-Spinnaker-User", spinnaker_user)
+        parsed_url = urlparse(url)
+        self._logger.info(
+            "spinnaker.request_context gate_base_url=%s method=%s path=%s principal=%s",
+            redact_url(self.base_url),
+            method,
+            parsed_url.path or "/",
+            redact_text(spinnaker_user),
+        )
         request_id = self.request_id_provider() if self.request_id_provider else ""
         if request_id:
             headers["X-Request-Id"] = request_id
@@ -238,10 +410,12 @@ class SpinnakerAdapter:
         )
         try:
             effective_timeout = self.request_timeout_seconds if timeout_seconds is None else timeout_seconds
-            if effective_timeout is None:
-                response_ctx = urlopen(request)
-            else:
-                response_ctx = urlopen(request, timeout=effective_timeout)
+            response_ctx = self._open_url(
+                request,
+                timeout_seconds=effective_timeout,
+                follow_redirects=False,
+                use_gate_tls=True,
+            )
             with response_ctx as response:
                 status_code = response.status
                 response_headers = dict(response.headers.items())
@@ -251,8 +425,24 @@ class SpinnakerAdapter:
             detail = exc.read().decode("utf-8") if exc.fp else ""
             response_headers = dict(exc.headers.items()) if exc.headers else {}
             correlation_id = self._extract_correlation_id({}, response_headers)
-            snippet = self._safe_snippet(detail)
-            message = f"Spinnaker HTTP {exc.code}: {snippet}" if snippet else f"Spinnaker HTTP {exc.code}"
+            if 300 <= exc.code < 400:
+                location = str(response_headers.get("Location") or "").strip()
+                redirect_class = self._redirect_location_classification(url, location)
+                message = f"Spinnaker redirect blocked (HTTP {exc.code})"
+                request_path = parsed_url.path or "/"
+                message = (
+                    f"{message}; gate_base_url={redact_url(self.base_url)}; request_path={request_path}"
+                )
+                if location:
+                    if location.lower().startswith("http://") or location.lower().startswith("https://"):
+                        message = f"{message}; location={redact_url(location)}"
+                    else:
+                        message = f"{message}; location={location}"
+                    if redirect_class:
+                        message = f"{message}; redirect_class={redirect_class}"
+            else:
+                snippet = self._safe_snippet(detail)
+                message = f"Spinnaker HTTP {exc.code}: {snippet}" if snippet else f"Spinnaker HTTP {exc.code}"
             if correlation_id:
                 message = f"{message}; requestId={correlation_id}"
             redacted_message = redact_text(message)
@@ -272,7 +462,7 @@ class SpinnakerAdapter:
                 redact_url(url),
                 exc.code,
                 latency_ms,
-                "configured" if header_configured else "none",
+                auth_header_name,
                 redacted_message,
             )
             raise RuntimeError(redacted_message) from exc
@@ -292,7 +482,7 @@ class SpinnakerAdapter:
                 method,
                 redact_url(url),
                 latency_ms,
-                "configured" if header_configured else "none",
+                auth_header_name,
                 redact_text(str(exc.reason)),
             )
             raise RuntimeError(redact_text(f"Spinnaker connection failed: {exc.reason}")) from exc
@@ -312,7 +502,7 @@ class SpinnakerAdapter:
             redact_url(url),
             status_code,
             latency_ms,
-            "configured" if header_configured else "none",
+            auth_header_name,
         )
         if not payload:
             return {}, status_code, response_headers
@@ -320,6 +510,333 @@ class SpinnakerAdapter:
             return json.loads(payload), status_code, response_headers
         except json.JSONDecodeError:
             return {}, status_code, response_headers
+
+    @contextmanager
+    def request_auth_header(self, header_name: str, header_value: str):
+        token = self._auth_header_override.set((header_name, header_value))
+        try:
+            yield
+        finally:
+            self._auth_header_override.reset(token)
+
+    def _spinnaker_auth_header(self) -> Optional[tuple[str, str]]:
+        has_explicit_header = bool(self.header_name and self.header_value)
+        has_any_auth0 = any(
+            [
+                self.auth0_domain,
+                self.auth0_client_id,
+                self.auth0_client_secret,
+                self.auth0_audience,
+            ]
+        )
+        # mTLS machine endpoints should rely on cert-based trust plus explicit user context,
+        # not bearer authorization forwarding.
+        if self._gate_ssl_context is not None:
+            if has_explicit_header and self.header_name.lower() != "authorization":
+                return self.header_name, self.header_value
+            return None
+        # Prefer managed Auth0 token minting when configured.
+        # This avoids stale/manual header values silently overriding rotation config.
+        if has_any_auth0:
+            if not all(
+                [
+                    self.auth0_domain,
+                    self.auth0_client_id,
+                    self.auth0_client_secret,
+                    self.auth0_audience,
+                ]
+            ):
+                raise RuntimeError("Spinnaker auth config incomplete: set all auth0 fields or none")
+            token = self._get_or_mint_gate_access_token()
+            header_name = self.header_name or "Authorization"
+            if header_name.lower() == "authorization":
+                return header_name, f"Bearer {token}"
+            # Some deployments terminate/authenticate upstream with a non-standard header.
+            # Preserve that contract when explicitly configured.
+            return header_name, token
+        if has_explicit_header:
+            return self.header_name, self.header_value
+        if not has_any_auth0:
+            return None
+        return None
+
+    def _auth_mode_label(self) -> str:
+        has_explicit_header = bool(self.header_name and self.header_value)
+        has_any_auth0 = any(
+            [
+                self.auth0_domain,
+                self.auth0_client_id,
+                self.auth0_client_secret,
+                self.auth0_audience,
+            ]
+        )
+        if has_any_auth0:
+            return "auth0"
+        if has_explicit_header:
+            return "static_header"
+        return "none"
+
+    def _resolve_trigger_user(
+        self,
+        user_bearer_token: Optional[str] = None,
+        user_principal: Optional[str] = None,
+    ) -> str:
+        explicit_principal = (user_principal or "").strip()
+        if explicit_principal:
+            return explicit_principal
+        token = (user_bearer_token or "").strip()
+        if token:
+            principal = self._principal_from_auth_header("Authorization", f"Bearer {token}")
+            if principal:
+                return principal
+        auth_header = self._auth_header_override.get() or self._spinnaker_auth_header()
+        if auth_header:
+            header_name, header_value = auth_header
+            if header_name.lower() == "x-spinnaker-user":
+                explicit_user = (header_value or "").strip()
+                if explicit_user:
+                    return explicit_user
+            principal = self._principal_from_auth_header(header_name, header_value)
+            if principal:
+                return principal
+        return "dxcp"
+
+    def _principal_from_auth_header(self, header_name: str, header_value: str) -> str:
+        if not header_name or header_name.lower() != "authorization":
+            return ""
+        if not header_value:
+            return ""
+        raw = header_value.strip()
+        if not raw.lower().startswith("bearer "):
+            return ""
+        token = raw[len("bearer "):].strip()
+        if not token:
+            return ""
+        payload = _decode_jwt_payload(token)
+        if not payload:
+            return ""
+        principal = str(payload.get("email") or payload.get("sub") or "").strip()
+        return principal
+
+    def _get_or_mint_gate_access_token(self) -> str:
+        now = int(time.time())
+        if self._cached_access_token and now < max(0, self._cached_access_token_exp_epoch - self.auth0_refresh_skew_seconds):
+            return self._cached_access_token
+        token, expires_in = self._mint_gate_access_token()
+        if not token:
+            raise RuntimeError("Spinnaker auth token mint failed: empty access_token")
+        exp_epoch = now + max(60, expires_in)
+        jwt_exp = _jwt_exp_epoch(token)
+        if jwt_exp is not None:
+            exp_epoch = jwt_exp
+        self._cached_access_token = token
+        self._cached_access_token_exp_epoch = exp_epoch
+        self._logger.info(
+            "spinnaker.auth token_refreshed expires_at=%s",
+            datetime.fromtimestamp(exp_epoch, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+        return token
+
+    def _mint_gate_access_token(self) -> tuple[str, int]:
+        if not self.auth0_domain:
+            raise RuntimeError("Spinnaker auth token mint failed: auth0_domain is required")
+        if not self.auth0_client_id:
+            raise RuntimeError("Spinnaker auth token mint failed: auth0_client_id is required")
+        if not self.auth0_client_secret:
+            raise RuntimeError("Spinnaker auth token mint failed: auth0_client_secret is required")
+        if not self.auth0_audience:
+            raise RuntimeError("Spinnaker auth token mint failed: auth0_audience is required")
+
+        domain = self.auth0_domain.replace("https://", "").replace("http://", "").strip().rstrip("/")
+        token_url = f"https://{domain}/oauth/token"
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": self.auth0_client_id,
+            "client_secret": self.auth0_client_secret,
+            "audience": self.auth0_audience,
+        }
+        if self.auth0_scope:
+            payload["scope"] = self.auth0_scope
+        response, _, _ = self._request_json_no_auth("POST", token_url, payload, operation="mint_gate_token")
+        token = str(response.get("access_token") or "").strip() if isinstance(response, dict) else ""
+        expires_in_raw = response.get("expires_in") if isinstance(response, dict) else None
+        try:
+            expires_in = int(expires_in_raw)
+        except (TypeError, ValueError):
+            expires_in = 3600
+        return token, expires_in
+
+    def _request_json_no_auth(
+        self,
+        method: str,
+        url: str,
+        body: Optional[dict] = None,
+        operation: str = "request_no_auth",
+        timeout_seconds: Optional[float] = None,
+    ) -> tuple[dict, int, dict]:
+        data = None
+        headers = {"Content-Type": "application/json"}
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+        request = Request(url, data=data, headers=headers, method=method)
+        start = time.monotonic()
+        try:
+            effective_timeout = self.request_timeout_seconds if timeout_seconds is None else timeout_seconds
+            response_ctx = self._open_url(
+                request,
+                timeout_seconds=effective_timeout,
+                follow_redirects=True,
+                use_gate_tls=False,
+            )
+            with response_ctx as response:
+                status_code = response.status
+                response_headers = dict(response.headers.items())
+                payload = response.read().decode("utf-8")
+        except HTTPError as exc:
+            latency_ms = (time.monotonic() - start) * 1000
+            detail = exc.read().decode("utf-8") if exc.fp else ""
+            snippet = self._safe_snippet(detail)
+            message = f"Auth0 token HTTP {exc.code}: {snippet}" if snippet else f"Auth0 token HTTP {exc.code}"
+            self._logger.warning(
+                "spinnaker.auth token_request_failed status=%s latency_ms=%.1f error=%s",
+                exc.code,
+                latency_ms,
+                redact_text(message),
+            )
+            raise RuntimeError(redact_text(message)) from exc
+        except URLError as exc:
+            latency_ms = (time.monotonic() - start) * 1000
+            self._logger.warning(
+                "spinnaker.auth token_request_failed status=error latency_ms=%.1f error=%s",
+                latency_ms,
+                redact_text(str(exc.reason)),
+            )
+            raise RuntimeError(redact_text(f"Auth0 token connection failed: {exc.reason}")) from exc
+        if not payload:
+            return {}, status_code, response_headers
+        try:
+            return json.loads(payload), status_code, response_headers
+        except json.JSONDecodeError:
+            return {}, status_code, response_headers
+
+    def _build_gate_ssl_context(self) -> Optional[ssl.SSLContext]:
+        cert = self.mtls_cert_path
+        key = self.mtls_key_path
+        ca = self.mtls_ca_path
+        uses_https = self.base_url.strip().lower().startswith("https://")
+        has_mtls_config = bool(cert or key or ca or self.mtls_server_name)
+        if not uses_https or not has_mtls_config:
+            return None
+        if bool(cert) != bool(key):
+            raise RuntimeError("Spinnaker mTLS config invalid: cert and key must both be set")
+        try:
+            context = ssl.create_default_context()
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            if ca:
+                context.load_verify_locations(cafile=ca)
+            if cert and key:
+                context.load_cert_chain(certfile=cert, keyfile=key)
+        except Exception as exc:
+            raise RuntimeError(f"Spinnaker mTLS context initialization failed: {exc}") from exc
+        return context
+
+    def _open_url(
+        self,
+        request: Request,
+        timeout_seconds: Optional[float],
+        follow_redirects: bool,
+        use_gate_tls: bool,
+    ):
+        handlers = []
+        if not follow_redirects:
+            handlers.append(_NoRedirectHandler())
+        if use_gate_tls and self._gate_ssl_context is not None:
+            if self.mtls_server_name:
+                handlers.append(
+                    _ServerNameHTTPSHandler(
+                        context=self._gate_ssl_context,
+                        server_name=self.mtls_server_name,
+                    )
+                )
+            else:
+                handlers.append(HTTPSHandler(context=self._gate_ssl_context))
+        if handlers:
+            opener = build_opener(*handlers)
+            if timeout_seconds is None:
+                return opener.open(request)
+            return opener.open(request, timeout=timeout_seconds)
+        if timeout_seconds is None:
+            return urlopen(request)
+        return urlopen(request, timeout=timeout_seconds)
+
+    def _should_retry_without_user_token_on_redirect(self, request_url: str, location: str) -> bool:
+        if not location:
+            return False
+        if self._gate_ssl_context is None:
+            return False
+        try:
+            src = urlparse(request_url)
+            target = urlparse(location)
+        except Exception:
+            return False
+        if target.scheme.lower() != "https":
+            return False
+        src_host = (src.hostname or "").lower()
+        target_host = (target.hostname or "").lower()
+        src_port = src.port or (443 if src.scheme.lower() == "https" else 80)
+        target_port = target.port or (443 if target.scheme.lower() == "https" else 80)
+        return bool(src_host and target_host and src_host == target_host and src_port == target_port)
+
+    def _canonical_redirect_target(self, request_url: str, location: str) -> Optional[str]:
+        if not location:
+            return None
+        try:
+            src = urlparse(request_url)
+            target = urlparse(urljoin(request_url, location))
+        except Exception:
+            return None
+        if src.scheme.lower() != "https" or target.scheme.lower() != "https":
+            return None
+        src_host = (src.hostname or "").lower()
+        target_host = (target.hostname or "").lower()
+        if not src_host or src_host != target_host:
+            return None
+        target_path = target.path or "/"
+        lowered_path = target_path.lower()
+        # Never follow browser auth redirects on machine-to-machine Gate calls.
+        if lowered_path.startswith("/oauth2/") or lowered_path.startswith("/login") or lowered_path.startswith("/auth"):
+            return None
+        # Only follow redirects that stay in known Gate API path families.
+        allowed_prefixes = (
+            "/health",
+            "/applications",
+            "/pipelineconfigs",
+            "/pipelines",
+            "/gate/health",
+            "/gate/applications",
+            "/gate/pipelineconfigs",
+            "/gate/pipelines",
+        )
+        if not lowered_path.startswith(allowed_prefixes):
+            return None
+        src_port = src.port or 443
+        target_port = target.port or 443
+        if src_port == target_port and (src.path or "/") == target_path and (src.query or "") == (target.query or ""):
+            return None
+        return target.geturl()
+
+    def _redirect_location_classification(self, request_url: str, location: str) -> str:
+        try:
+            target = urlparse(urljoin(request_url, location))
+        except Exception:
+            return "other"
+        path = (target.path or "/").lower()
+        if path.startswith("/oauth2/") or path.startswith("/login") or path.startswith("/auth"):
+            return "oauth_login"
+        if path.startswith("/gate/") or path.startswith("/pipelines") or path.startswith("/applications") or path.startswith("/health"):
+            return "gate_api"
+        return "other"
 
     def _log_spinnaker_event(
         self,
@@ -446,6 +963,77 @@ def _normalize_failure_category(value: Optional[str]) -> str:
         "UNKNOWN": "UNKNOWN",
     }
     return mapping.get(category, "UNKNOWN")
+
+
+def _jwt_exp_epoch(token: str) -> Optional[int]:
+    parsed = _decode_jwt_payload(token)
+    if not parsed:
+        return None
+    exp = parsed.get("exp")
+    if isinstance(exp, int):
+        return exp
+    try:
+        return int(exp)
+    except (TypeError, ValueError):
+        return None
+
+
+def _decode_jwt_payload(token: str) -> Optional[dict]:
+    if not token or token.count(".") < 2:
+        return None
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
+        parsed = json.loads(decoded)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class _ServerNameHTTPSConnection(HTTPSConnection):
+    def __init__(self, *args, server_name: str, **kwargs):
+        self._server_name_override = server_name
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        self.sock = self._create_connection(
+            (self.host, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        if self._tunnel_host:
+            self._tunnel()
+        server_hostname = self._server_name_override if self._context.check_hostname else None
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _ServerNameHTTPSHandler(HTTPSHandler):
+    def __init__(self, context: ssl.SSLContext, server_name: str):
+        super().__init__(context=context)
+        self._context = context
+        self._server_name = server_name
+
+    def https_open(self, req):
+        return self.do_open(
+            lambda host, **kwargs: _ServerNameHTTPSConnection(
+                host,
+                context=self._context,
+                server_name=self._server_name,
+                **kwargs,
+            ),
+            req,
+        )
 
 
 def normalize_failures(raw_failures: Optional[List[dict]]) -> List[dict]:

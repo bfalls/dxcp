@@ -224,7 +224,13 @@ PY
 }
 
 if ! "$ROOT_DIR/scripts/check_ssm_config.sh"; then
-  exit 1
+  if [[ -t 0 ]]; then
+    echo "Required SSM parameters are missing or empty. Launching bootstrap for missing values..."
+    "$ROOT_DIR/scripts/bootstrap_config.sh" --missing-only
+    "$ROOT_DIR/scripts/check_ssm_config.sh"
+  else
+    exit 1
+  fi
 fi
 ensure_ssm_auth_config
 if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
@@ -273,6 +279,40 @@ else
 fi
 copy_dir_contents "$ROOT_DIR/dxcp-api/data" "$API_BUILD_DIR/data"
 copy_dir_contents "$ROOT_DIR/spinnaker-adapter" "$API_BUILD_DIR/spinnaker-adapter"
+
+echo "Preparing optional Spinnaker mTLS cert bundle..."
+DXCP_SPINNAKER_MTLS_CERT_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_cert_path" || true)")"
+DXCP_SPINNAKER_MTLS_KEY_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_key_path" || true)")"
+DXCP_SPINNAKER_MTLS_CA_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_ca_path" || true)")"
+DXCP_SPINNAKER_CERTS_SOURCE_DIR="${DXCP_SPINNAKER_CERTS_SOURCE_DIR:-$ROOT_DIR/ops/certs}"
+if [[ -n "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" ]]; then
+  if [[ -z "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -z "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" ]]; then
+    echo "spinnaker/mtls_cert_path and spinnaker/mtls_key_path must both be configured when mTLS is enabled." >&2
+    exit 1
+  fi
+  if [[ ! -d "$DXCP_SPINNAKER_CERTS_SOURCE_DIR" ]]; then
+    echo "mTLS cert source directory not found: $DXCP_SPINNAKER_CERTS_SOURCE_DIR" >&2
+    echo "Set DXCP_SPINNAKER_CERTS_SOURCE_DIR or place certs under $ROOT_DIR/ops/certs" >&2
+    exit 1
+  fi
+  for required_file in dxcp-client.crt dxcp-client.key; do
+    if [[ ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" ]]; then
+      echo "Missing mTLS file: $DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" >&2
+      exit 1
+    fi
+  done
+  if [[ -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" && ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
+    echo "spinnaker/mtls_ca_path is set but missing ca.crt at $DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" >&2
+    exit 1
+  fi
+  mkdir -p "$API_BUILD_DIR/certs"
+  cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.crt" "$API_BUILD_DIR/certs/dxcp-client.crt"
+  cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.key" "$API_BUILD_DIR/certs/dxcp-client.key"
+  if [[ -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
+    cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" "$API_BUILD_DIR/certs/ca.crt"
+  fi
+  echo "Bundled mTLS certs from: $DXCP_SPINNAKER_CERTS_SOURCE_DIR"
+fi
 
 echo "Deploying CDK stacks..."
 pushd "$ROOT_DIR/cdk" >/dev/null

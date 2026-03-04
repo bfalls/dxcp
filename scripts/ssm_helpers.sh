@@ -20,13 +20,21 @@ param_exists() {
 put_param() {
   local name="$1"
   local value="$2"
-  aws ssm put-parameter --name "$name" --type "String" --value "$value" >/dev/null
+  local type="String"
+  if [[ "$name" =~ (token|secret|password|key)$ || "$name" =~ /auth0_client_secret$ ]]; then
+    type="SecureString"
+  fi
+  aws ssm put-parameter --name "$name" --type "$type" --value "$value" >/dev/null
 }
 
 ensure_param() {
   local name="$1"
   local value="$2"
-  aws ssm put-parameter --name "$name" --type "String" --value "$value" --overwrite >/dev/null
+  local type="String"
+  if [[ "$name" =~ (token|secret|password|key)$ || "$name" =~ /auth0_client_secret$ ]]; then
+    type="SecureString"
+  fi
+  aws ssm put-parameter --name "$name" --type "$type" --value "$value" --overwrite >/dev/null
 }
 
 get_ssm_param() {

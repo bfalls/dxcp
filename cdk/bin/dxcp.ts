@@ -32,6 +32,14 @@ const iamAccount = account || cdk.Aws.ACCOUNT_ID;
 const assumerRoleArn = `arn:aws:iam::${iamAccount}:role/spinnaker-assumer-role`;
 const spinnakerLocalUserName = "spinnaker-local-user";
 const spinnakerLocalUserArn = `arn:aws:iam::${iamAccount}:user/${spinnakerLocalUserName}`;
+const spinnakerSecretsBucketName =
+  app.node.tryGetContext("spinnakerSecretsBucketName") ||
+  process.env.DXCP_SPINNAKER_SECRETS_BUCKET ||
+  `dxcp-secrets-${iamAccount}-${region}`;
+const spinnakerSecretsObjectKey =
+  app.node.tryGetContext("spinnakerSecretsObjectKey") ||
+  process.env.DXCP_SPINNAKER_SECRETS_OBJECT_KEY ||
+  "dxcp/secrets.yml";
 const assumerTrustedPrincipalArn =
   app.node.tryGetContext("spinnakerAssumerTrustedPrincipalArn") ||
   process.env.DXCP_SPINNAKER_ASSUMER_TRUSTED_PRINCIPAL_ARN;
@@ -59,6 +67,8 @@ new EnvIamAssumerStack(app, "dxcp-env-iam-assumer", {
   env,
   trustedPrincipalArn: assumerTrustedPrincipalArn,
   localUserName: spinnakerLocalUserName,
+  spinnakerSecretsBucketName,
+  spinnakerSecretsObjectKey,
   targetRoleArns: [
     iamDevStack.roleArn,
     iamStagingStack.roleArn,

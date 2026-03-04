@@ -228,9 +228,16 @@ function main(): number {
   );
 
   if (overallStatus !== "PASS") {
-    console.error("[ERROR] Governance conformance status is FAIL.");
+    if (runtime?.conformance_profile !== "strict") {
+      console.error(
+        `[ERROR] Governance conformance status is FAIL. Reason: conformance_profile=${runtime?.conformance_profile ?? "unknown"} (strict required).`,
+      );
+    } else {
+      console.error("[ERROR] Governance conformance status is FAIL.");
+    }
     return 1;
   }
+  console.log("[INFO] Governance conformance status is SUCCESS.");
   return 0;
 }
 

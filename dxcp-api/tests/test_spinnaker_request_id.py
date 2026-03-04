@@ -26,6 +26,14 @@ class FakeResponse:
         return None
 
 
+class FakeOpener:
+    def __init__(self, fn):
+        self._fn = fn
+
+    def open(self, request, timeout=None):
+        return self._fn(request, timeout)
+
+
 def test_spinnaker_request_includes_request_id(monkeypatch):
     captured = {}
 
@@ -35,11 +43,13 @@ def test_spinnaker_request_includes_request_id(monkeypatch):
 
     import spinnaker_adapter.adapter as adapter_module
     monkeypatch.setattr(adapter_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(adapter_module, "build_opener", lambda *handlers: FakeOpener(fake_urlopen))
     adapter = SpinnakerAdapter(
         base_url="https://spinnaker.example.com",
         mode="http",
         request_id_provider=lambda: "req-abc",
     )
+    monkeypatch.setattr(adapter, "_get_or_mint_gate_access_token", lambda: "token-for-test")
     adapter.list_applications()
     header_value = None
     for key, value in captured["headers"].items():

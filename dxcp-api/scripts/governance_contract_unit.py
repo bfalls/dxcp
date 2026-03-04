@@ -85,8 +85,6 @@ def main() -> int:
     plugin = GovernanceContractPlugin()
     os.chdir(DXCP_API_ROOT)
     args = [
-        "-m",
-        "governance_contract",
         "tests",
         "-q",
     ]

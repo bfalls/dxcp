@@ -13,6 +13,7 @@ Authentication model:
 - admin, owner, observer tokens obtained via headless Playwright login against SPA Auth0 PKCE flow.
 - ci token minted using Auth0 client_credentials (M2M).
 - Demo artifact publisher workflow follows same CI idempotency pattern.
+- No ROPC/password grant and no test-only auth gateway are used.
 
 For canonical CI build registration integration docs, see:
 - `docs/integrations/ci/overview.md`
@@ -53,6 +54,17 @@ Required keys:
 - GOV_OBSERVER_PASSWORD
 - GOV_CI_CLIENT_ID
 - GOV_CI_CLIENT_SECRET
+
+UI E2E auth-state keys (required for `ui` Playwright login bootstrap):
+
+- GOV_DXCP_UI_BASE
+- GOV_AUTH0_DOMAIN
+- GOV_AUTH0_AUDIENCE
+- GOV_DXCP_UI_CLIENT_ID
+- GOV_ADMIN_USERNAME
+- GOV_ADMIN_PASSWORD
+- GOV_OWNER_USERNAME
+- GOV_OWNER_PASSWORD
 
 Strict conformance additional required keys:
 
@@ -138,6 +150,9 @@ Otherwise dry-run.
 
 - Runner auto-loads .env.govtest.
 - User tokens obtained via Playwright login.
+- UI Playwright writes role states to `ui/playwright/.auth/{owner,admin,observer}.json`.
+- `GOV_DXCP_UI_BASE` must match the same UI origin used to generate storage state; switching origins requires state regeneration.
+- Regenerate auth state by deleting `ui/playwright/.auth/*.json` or waiting for `GOV_AUTH_STATE_MAX_AGE_MINUTES` expiry.
 - Fail-fast on first invariant violation.
 - Run artifact written to .govtest.last-run.json.
 - Print request_id on failure for diagnostics.

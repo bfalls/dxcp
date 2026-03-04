@@ -63,6 +63,39 @@ See SETUP_AND_OPERATIONS.md for configuration details.
 
 ---------------------------------------------------------------------
 
+## Artifact Lifecycle (Self-Contained)
+
+Runtime govtest artifact handling is intentionally self-contained and deterministic.
+No manual AWS CLI artifact copy step is required during a normal run.
+
+- Before build registration/deploy checks, the harness resolves a run artifact reference.
+- Default behavior is `GOV_ARTIFACT_PREP_MODE=reuse-baseline`:
+  the harness verifies a known baseline artifact exists in S3 and reuses that baseline artifactRef for build registration and deploy.
+- Optional copy mode (`GOV_ARTIFACT_PREP_MODE=copy-baseline`) performs a server-side S3 copy from baseline key to run-version key and uses the copied target key.
+
+Cleanup behavior:
+
+- If the harness created a run-version artifact object during prep, it deletes that object at run end (best effort).
+- If the target/baseline object was pre-existing, cleanup does not delete it.
+  This prevents test cleanup from removing artifacts required by other workflows.
+
+Optional env controls:
+
+- `GOV_RUN_VERSION`:
+  optional run-version override; if already registered, harness falls back to a computed unregistered version to preserve first-register invariants.
+- `GOV_BASELINE_ARTIFACT_VERSION`:
+  preferred baseline artifact version for prep.
+- `GOV_ARTIFACT_BASELINE_VERSION`:
+  legacy alias for baseline version.
+- `GOV_ARTIFACT_KEY_TEMPLATE`:
+  artifact key template; default `demo-service/demo-service-{version}.zip`.
+- `GOV_ARTIFACT_BASELINE_REF`:
+  explicit `s3://bucket/key` baseline override in the same bucket.
+- `GOV_ARTIFACT_PREP_MODE`:
+  `reuse-baseline` (default) or `copy-baseline`.
+
+---------------------------------------------------------------------
+
 ## Unified Conformance Snapshot
 
 Governance conformance is evaluated in two layers:

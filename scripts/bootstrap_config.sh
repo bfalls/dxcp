@@ -5,14 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/ssm_helpers.sh"
 
 prefix="${DXCP_CONFIG_PREFIX:-${DXCP_SSM_PREFIX:-/dxcp/config}}"
+MISSING_ONLY=0
 
 for arg in "$@"; do
   case "$arg" in
+    --missing-only)
+      MISSING_ONLY=1
+      ;;
     -h|--help)
       cat <<'EOF'
 Usage: bootstrap_config.sh [options]
 
 Options:
+  --missing-only      Only prompt for required parameters that are missing or empty.
   -h, --help          Show this help message.
 
 Environment:
@@ -100,6 +105,17 @@ maybe_overwrite() {
   ensure_param "$name" "$value"
 }
 
+param_has_value() {
+  local name="$1"
+  if ! param_exists "$name"; then
+    return 1
+  fi
+  local value
+  value="$(get_ssm_param "$name" 2>/dev/null || true)"
+  value="$(echo "$value" | xargs)"
+  [[ -n "$value" ]]
+}
+
 main() {
   require_aws
   echo "DXCP SSM bootstrap"
@@ -110,6 +126,8 @@ main() {
     "${prefix}/oidc/audience"
     "${prefix}/oidc/roles_claim"
     "${prefix}/spinnaker/gate_url"
+    "${prefix}/spinnaker/mtls_cert_path"
+    "${prefix}/spinnaker/mtls_key_path"
   )
 
   optional_params=(
@@ -118,6 +136,13 @@ main() {
     "${prefix}/ui_min_refresh_seconds"
     "${prefix}/ui_max_refresh_seconds"
     "${prefix}/runtime/artifact_bucket"
+    "${prefix}/spinnaker/mtls_ca_path"
+    "${prefix}/spinnaker/auth0_domain"
+    "${prefix}/spinnaker/auth0_client_id"
+    "${prefix}/spinnaker/auth0_client_secret"
+    "${prefix}/spinnaker/auth0_audience"
+    "${prefix}/spinnaker/auth0_scope"
+    "${prefix}/spinnaker/auth0_refresh_skew_seconds"
   )
 
   optional_defaults=(
@@ -126,10 +151,20 @@ main() {
     "60"
     "3600"
     ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    ""
+    "60"
   )
 
   for name in "${required_params[@]}"; do
-    if param_exists "$name"; then
+    if param_has_value "$name"; then
+      if [[ "$MISSING_ONLY" -eq 1 ]]; then
+        continue
+      fi
       describe_existing_param "$name"
       maybe_overwrite "$name"
     else
@@ -140,6 +175,9 @@ main() {
   done
 
   for i in "${!optional_params[@]}"; do
+    if [[ "$MISSING_ONLY" -eq 1 ]]; then
+      continue
+    fi
     name="${optional_params[$i]}"
     default_value="${optional_defaults[$i]}"
     if param_exists "$name"; then

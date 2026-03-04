@@ -69,6 +69,9 @@ Optional:
 - DXCP_UI_MIN_REFRESH_SECONDS (default 60)
 - DXCP_UI_MAX_REFRESH_SECONDS (default 3600)
 - DXCP_SPINNAKER_GATE_URL (required only if testing engine calls)
+- DXCP_SPINNAKER_MTLS_CERT_PATH (required for mTLS Gate endpoint mode)
+- DXCP_SPINNAKER_MTLS_KEY_PATH (required for mTLS Gate endpoint mode)
+- DXCP_SPINNAKER_MTLS_CA_PATH (optional CA pinning for mTLS Gate endpoint mode)
 - DXCP_RUNTIME_ARTIFACT_BUCKET (required only for version refresh)
 
 Notes:
@@ -142,6 +145,9 @@ Examples:
 - `runtime/artifact_bucket`
 - `api/cors_origins`
 - `spinnaker/gate_url`
+- `spinnaker/mtls_cert_path`
+- `spinnaker/mtls_key_path`
+- `spinnaker/mtls_ca_path`
 
 UI env vars are still set at build time (Vite).
 

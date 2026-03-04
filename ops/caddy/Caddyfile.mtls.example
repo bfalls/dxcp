@@ -1,0 +1,30 @@
+# Existing public endpoint for Deck + OAuth remains unchanged.
+# Keep your current UI/OAuth routing block as-is.
+#
+# Example (already in your current setup):
+# :8088 {
+#   handle /gate* { ... }
+#   handle /auth* { ... }
+#   handle /oauth2/* { ... }
+#   handle /login* { ... }
+#   handle /logout* { ... }
+#   handle { reverse_proxy 127.0.0.1:9000 }
+# }
+
+# New machine-only Gate endpoint for DXCP.
+# Use a separate host (preferred) so mTLS policy is isolated.
+gate-api.example.internal {
+  tls {
+    client_auth {
+      mode require_and_verify
+      trust_pool file /etc/dxcp/certs/ca.crt
+    }
+  }
+
+  reverse_proxy 127.0.0.1:8084 {
+    header_up X-Forwarded-Proto https
+    header_up X-Forwarded-Port 443
+    header_up X-Forwarded-Host {host}
+    header_up Host {host}
+  }
+}

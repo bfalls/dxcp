@@ -60,6 +60,15 @@ curl -s http://127.0.0.1:8000/v1/deployments \\
 Spinnaker adapter:
 - DXCP_SPINNAKER_MODE: stub (default) or http
 - DXCP_SPINNAKER_GATE_URL: base URL for Spinnaker Gate in http mode
+- DXCP_SPINNAKER_AUTH0_DOMAIN: Auth0 domain for Gate M2M token mint
+- DXCP_SPINNAKER_AUTH0_CLIENT_ID: Auth0 M2M client id for Gate
+- DXCP_SPINNAKER_AUTH0_CLIENT_SECRET: Auth0 M2M client secret for Gate
+- DXCP_SPINNAKER_AUTH0_AUDIENCE: Auth0 audience used to mint Gate token
+- DXCP_SPINNAKER_AUTH0_SCOPE: optional Auth0 scope for Gate token
+- DXCP_SPINNAKER_AUTH0_REFRESH_SKEW_SECONDS: token refresh lead time (default: 60)
+- DXCP_SPINNAKER_MTLS_CERT_PATH: client certificate path for Gate mTLS endpoint
+- DXCP_SPINNAKER_MTLS_KEY_PATH: client private key path for Gate mTLS endpoint
+- DXCP_SPINNAKER_MTLS_CA_PATH: optional CA bundle path used to verify Gate TLS cert
 
 ## Notes
 

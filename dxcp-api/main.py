@@ -112,6 +112,16 @@ spinnaker = SpinnakerAdapter(
     application=SETTINGS.spinnaker_application,
     header_name=SETTINGS.spinnaker_header_name,
     header_value=SETTINGS.spinnaker_header_value,
+    auth0_domain=SETTINGS.spinnaker_auth0_domain,
+    auth0_client_id=SETTINGS.spinnaker_auth0_client_id,
+    auth0_client_secret=SETTINGS.spinnaker_auth0_client_secret,
+    auth0_audience=SETTINGS.spinnaker_auth0_audience,
+    auth0_scope=SETTINGS.spinnaker_auth0_scope,
+    auth0_refresh_skew_seconds=SETTINGS.spinnaker_auth0_refresh_skew_seconds,
+    mtls_cert_path=SETTINGS.spinnaker_mtls_cert_path,
+    mtls_key_path=SETTINGS.spinnaker_mtls_key_path,
+    mtls_ca_path=SETTINGS.spinnaker_mtls_ca_path,
+    mtls_server_name=SETTINGS.spinnaker_mtls_server_name,
     request_id_provider=get_request_id,
 )
 logger = logging.getLogger("dxcp.api")
@@ -1108,6 +1118,7 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
     }
     policy_change_codes = {
         "ARTIFACT_NOT_FOUND",
+        "ENGINE_MISCONFIGURED",
         "SERVICE_NOT_ALLOWLISTED",
         "SERVICE_NOT_IN_DELIVERY_GROUP",
         "ENVIRONMENT_NOT_ALLOWED",
@@ -1244,6 +1255,8 @@ def _classify_engine_error(message: str) -> tuple[str, int]:
         return "ARTIFACT_NOT_FOUND", 409
     if "timeout" in lowered or "timed out" in lowered:
         return "ENGINE_TIMEOUT", 504
+    if "redirect blocked" in lowered or "http 301" in lowered or "http 302" in lowered:
+        return "ENGINE_MISCONFIGURED", 502
     if "http 401" in lowered or "http 403" in lowered:
         return "ENGINE_UNAUTHORIZED", 502
     if "connection failed" in lowered or "base url is required" in lowered or "stub mode" in lowered:
@@ -1259,6 +1272,16 @@ def _extract_upstream_status(message: str) -> Optional[int]:
         return int(match.group(1))
     except ValueError:
         return None
+
+
+def _extract_redirect_field(message: str, field_name: str) -> Optional[str]:
+    if not message:
+        return None
+    match = re.search(rf"\b{re.escape(field_name)}=([^;]+)", message)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    return value or None
 
 
 def _engine_host() -> str:
@@ -1297,26 +1320,124 @@ def _get_engine_invocation_counter() -> int:
     return _ENGINE_INVOKE_COUNTER
 
 
-def _invoke_engine(kind: str, payload: dict, idempotency_key: str) -> dict:
+def _invoke_engine(
+    kind: str,
+    payload: dict,
+    idempotency_key: str,
+    user_bearer_token: Optional[str] = None,
+    user_principal: Optional[str] = None,
+) -> dict:
     global _ENGINE_INVOKE_COUNTER
     if _is_test_mode():
         _ENGINE_INVOKE_COUNTER += 1
     if kind == "deploy":
-        return spinnaker.trigger_deploy(payload, idempotency_key)
+        return _call_gate_with_user_token(
+            spinnaker.trigger_deploy,
+            payload,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     if kind == "rollback":
-        return spinnaker.trigger_rollback(payload, idempotency_key)
+        return _call_gate_with_user_token(
+            spinnaker.trigger_rollback,
+            payload,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     raise ValueError(f"Unsupported engine invocation kind: {kind}")
 
 
-def _preflight_engine_readiness(actor: Actor) -> Optional[JSONResponse]:
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split(" ")
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None
+
+
+def _derive_gate_user_from_claims(claims: dict) -> Optional[str]:
+    if not isinstance(claims, dict):
+        return None
+    custom_email = claims.get("https://dxcp.example/claims/email")
+    if isinstance(custom_email, str) and custom_email.strip():
+        return custom_email.strip().lower()
+    email = claims.get("email")
+    if isinstance(email, str) and email.strip():
+        return email.strip().lower()
+    sub = claims.get("sub")
+    if isinstance(sub, str) and sub.strip():
+        return sub.strip()
+    return None
+
+
+def _call_gate_with_user_token(
+    callable_obj,
+    *args,
+    user_bearer_token: Optional[str] = None,
+    user_principal: Optional[str] = None,
+    **kwargs,
+):
+    call_variants: list[dict[str, Optional[str]]] = []
+    if user_bearer_token is not None or user_principal is not None:
+        call_variants.append(
+            {
+                "user_bearer_token": user_bearer_token,
+                "user_principal": user_principal,
+            }
+        )
+    if user_principal is not None:
+        call_variants.append({"user_principal": user_principal})
+    if user_bearer_token is not None:
+        call_variants.append({"user_bearer_token": user_bearer_token})
+    call_variants.append({})
+
+    last_type_error: Optional[TypeError] = None
+    for variant in call_variants:
+        try:
+            return callable_obj(*args, **variant, **kwargs)
+        except TypeError as exc:
+            message = str(exc)
+            if "unexpected keyword argument" not in message:
+                raise
+            if "user_bearer_token" not in message and "user_principal" not in message:
+                raise
+            last_type_error = exc
+            continue
+    if last_type_error:
+        raise last_type_error
+    return callable_obj(*args, **kwargs)
+
+
+def _preflight_engine_readiness(
+    actor: Actor,
+    user_bearer_token: Optional[str] = None,
+    user_principal: Optional[str] = None,
+) -> Optional[JSONResponse]:
     if spinnaker.mode != "http":
         return None
     if not SETTINGS.spinnaker_base_url:
         return None
-    try:
-        spinnaker.check_health(timeout_seconds=2.0)
-    except Exception as exc:
-        return _engine_error_response(actor, "Unable to validate deployment", exc)
+    last_exc: Optional[Exception] = None
+    # Allow brief engine restarts/port-forward churn without failing validation immediately.
+    for wait_seconds in (0.0, 0.5, 1.0, 2.0):
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        try:
+            _call_gate_with_user_token(
+                spinnaker.check_health,
+                timeout_seconds=2.0,
+                user_bearer_token=user_bearer_token,
+                user_principal=user_principal,
+            )
+            return None
+        except Exception as exc:
+            last_exc = exc
+    if last_exc is not None:
+        return _engine_error_response(actor, "Unable to validate deployment", last_exc)
     return None
 
 
@@ -1336,6 +1457,17 @@ def _engine_error_response(actor: Actor, user_message: str, exc: Exception) -> J
         )
         if _include_operator_hint(actor):
             operator_hint = "If using demo artifact retention, older artifacts may expire."
+    elif code == "ENGINE_MISCONFIGURED" and _include_operator_hint(actor):
+        redirect_location = _extract_redirect_field(raw_message, "location") or "unknown"
+        gate_base_url = _extract_redirect_field(raw_message, "gate_base_url") or (SETTINGS.spinnaker_base_url or "unknown")
+        request_path = _extract_redirect_field(raw_message, "request_path") or "unknown"
+        upstream_request_id = _extract_redirect_field(raw_message, "requestId") or "unknown"
+        operator_hint = (
+            "upstream_status="
+            f"{upstream_status if upstream_status is not None else 'unknown'}; "
+            f"location={redirect_location}; gate_base_url={gate_base_url}; "
+            f"request_path={request_path}; upstream_request_id={upstream_request_id}"
+        )
     elif _include_operator_hint(actor) and redacted:
         operator_hint = redacted
     details = {
@@ -1665,9 +1797,18 @@ def _versions_from_cache(builds: list) -> list:
     return versions
 
 
-def refresh_from_spinnaker(deployment: dict) -> dict:
+def refresh_from_spinnaker(
+    deployment: dict,
+    user_bearer_token: Optional[str] = None,
+    user_principal: Optional[str] = None,
+) -> dict:
     try:
-        execution = spinnaker.get_execution(deployment["spinnakerExecutionId"])
+        execution = _call_gate_with_user_token(
+            spinnaker.get_execution,
+            deployment["spinnakerExecutionId"],
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         logger.warning("engine.refresh_failed deployment_id=%s error=%s", deployment.get("id"), redact_text(str(exc)))
         return deployment
@@ -1709,11 +1850,20 @@ def _active_deployments_for_group(group_id: str, environment: Optional[str]) -> 
     ]
 
 
-def _reap_stale_group_locks(group_id: str, environment: Optional[str]) -> None:
+def _reap_stale_group_locks(
+    group_id: str,
+    environment: Optional[str],
+    user_bearer_token: Optional[str] = None,
+    user_principal: Optional[str] = None,
+) -> None:
     stale_seconds = _deployment_lock_stale_seconds()
     now = datetime.now(timezone.utc)
     for deployment in _active_deployments_for_group(group_id, environment):
-        refreshed = refresh_from_spinnaker(deployment)
+        refreshed = refresh_from_spinnaker(
+            deployment,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         # Only reap stale in-progress locks. Active deployments can be legitimately long-running
         # and should continue to enforce concurrency limits.
         if refreshed.get("state") != "IN_PROGRESS":
@@ -2062,7 +2212,11 @@ def create_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
     if role_error:
         return role_error
@@ -2114,7 +2268,12 @@ def create_deployment(
             quota_scope=_quota_scope(group["id"], env_entry.get("name")),
             quota_limit=daily_deploy_quota,
         )
-        _reap_stale_group_locks(group["id"], env_entry.get("name"))
+        _reap_stale_group_locks(
+            group["id"],
+            env_entry.get("name"),
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
     except PolicyError as exc:
         _record_deploy_denied(actor, intent, exc.code, group.get("id"))
@@ -2133,7 +2292,13 @@ def create_deployment(
         payload["artifactRef"] = build["artifactRef"]
 
     try:
-        execution = _invoke_engine("deploy", payload, idempotency_key)
+        execution = _invoke_engine(
+            "deploy",
+            payload,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start deployment", exc)
     execution_id, execution_url = _extract_engine_execution(execution)
@@ -2254,7 +2419,11 @@ def validate_deployment(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "deploy")
     if role_error:
         return role_error
@@ -2291,7 +2460,11 @@ def validate_deployment(
     preflight_artifact_error = _preflight_artifact_availability(build, actor)
     if preflight_artifact_error:
         return preflight_artifact_error
-    preflight_engine_error = _preflight_engine_readiness(actor)
+    preflight_engine_error = _preflight_engine_readiness(
+        actor,
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     if preflight_engine_error:
         return preflight_engine_error
 
@@ -2357,7 +2530,11 @@ def create_promotion(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "promote")
     if role_error:
         return role_error
@@ -2395,7 +2572,12 @@ def create_promotion(
         quota_scope=_quota_scope(group["id"], target_env.get("name")),
         quota_limit=daily_deploy_quota,
     )
-    _reap_stale_group_locks(group["id"], target_env.get("name"))
+    _reap_stale_group_locks(
+        group["id"],
+        target_env.get("name"),
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, target_env.get("name"))
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
@@ -2414,7 +2596,13 @@ def create_promotion(
             return error_response(400, "INVALID_REQUEST", "spinnakerApplication is required for promotion")
         payload["artifactRef"] = build["artifactRef"]
     try:
-        execution = _invoke_engine("deploy", payload, idempotency_key)
+        execution = _invoke_engine(
+            "deploy",
+            payload,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start promotion", exc)
     execution_id, execution_url = _extract_engine_execution(execution)
@@ -3079,7 +3267,11 @@ def health():
 
 @app.get("/v1/spinnaker/status")
 def spinnaker_status(request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view spinnaker status")
     if role_error:
@@ -3087,7 +3279,11 @@ def spinnaker_status(request: Request, authorization: Optional[str] = Header(Non
     if spinnaker.mode != "http":
         return {"status": "DOWN", "error": f"Spinnaker mode is {spinnaker.mode}"}
     try:
-        spinnaker.check_health()
+        _call_gate_with_user_token(
+            spinnaker.check_health,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
         return {"status": "UP"}
     except Exception as exc:
         log_event("spinnaker_health_failed", outcome="FAILED", summary=redact_text(str(exc)))
@@ -3100,7 +3296,11 @@ def get_deployment(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -3111,7 +3311,11 @@ def get_deployment(
             "DELIVERY_GROUP_SCOPE_REQUIRED",
             "Deployment not in actor delivery group scope",
         )
-    deployment = refresh_from_spinnaker(deployment)
+    deployment = refresh_from_spinnaker(
+        deployment,
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     deployments = storage.list_deployments(deployment.get("service"), None, deployment.get("environment"))
     latest_success_by_scope = _latest_success_by_scope(deployments)
     return _deployment_public_view(actor, deployment, latest_success_by_scope)
@@ -3123,7 +3327,11 @@ def get_deployment_failures(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -3134,7 +3342,11 @@ def get_deployment_failures(
             "DELIVERY_GROUP_SCOPE_REQUIRED",
             "Deployment not in actor delivery group scope",
         )
-    deployment = refresh_from_spinnaker(deployment)
+    deployment = refresh_from_spinnaker(
+        deployment,
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     return deployment.get("failures", [])
 
 
@@ -3144,7 +3356,11 @@ def get_deployment_timeline(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     deployment = storage.get_deployment(deployment_id)
     if not deployment:
@@ -3155,7 +3371,11 @@ def get_deployment_timeline(
             "DELIVERY_GROUP_SCOPE_REQUIRED",
             "Deployment not in actor delivery group scope",
         )
-    deployment = refresh_from_spinnaker(deployment)
+    deployment = refresh_from_spinnaker(
+        deployment,
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     return derive_timeline(deployment)
 
 
@@ -3335,7 +3555,11 @@ def list_spinnaker_applications(
     tagName: Optional[str] = Query(None),
     tagValue: Optional[str] = Query(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view engine mapping")
     if role_error:
@@ -3343,7 +3567,11 @@ def list_spinnaker_applications(
     if spinnaker.mode != "http":
         return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
-        apps = spinnaker.list_applications()
+        apps = _call_gate_with_user_token(
+            spinnaker.list_applications,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         return _engine_error_response(actor, "Unable to retrieve Spinnaker applications", exc)
     if tagName:
@@ -3363,7 +3591,11 @@ def list_spinnaker_pipelines(
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     rate_limiter.check_read(actor.actor_id)
     role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view engine mapping")
     if role_error:
@@ -3371,7 +3603,12 @@ def list_spinnaker_pipelines(
     if spinnaker.mode != "http":
         return error_response(503, "ENGINE_UNAVAILABLE", "Spinnaker is not available in the current mode")
     try:
-        pipelines = spinnaker.list_pipeline_configs(application)
+        pipelines = _call_gate_with_user_token(
+            spinnaker.list_pipeline_configs,
+            application,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         return _engine_error_response(actor, "Unable to retrieve Spinnaker pipelines", exc)
     return {
@@ -3393,7 +3630,11 @@ def rollback_deployment(
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    if not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
     role_error = require_role(actor, {Role.DELIVERY_OWNER, Role.PLATFORM_ADMIN}, "rollback")
     if role_error:
         return role_error
@@ -3434,7 +3675,12 @@ def rollback_deployment(
     cached = enforce_idempotency(request, idempotency_key)
     if cached:
         return cached
-    _reap_stale_group_locks(group["id"], env_entry.get("name"))
+    _reap_stale_group_locks(
+        group["id"],
+        env_entry.get("name"),
+        user_bearer_token=user_bearer_token,
+        user_principal=user_principal,
+    )
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, env_entry.get("name"))
 
     prior = storage.find_prior_successful_deployment(deployment_id)
@@ -3467,7 +3713,13 @@ def rollback_deployment(
             payload["artifactRef"] = build["artifactRef"]
 
     try:
-        execution = _invoke_engine("rollback", payload, idempotency_key)
+        execution = _invoke_engine(
+            "rollback",
+            payload,
+            idempotency_key,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
     except Exception as exc:
         return _engine_error_response(actor, "Unable to start rollback", exc)
     execution_id, execution_url = _extract_engine_execution(execution)

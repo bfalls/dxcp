@@ -2229,8 +2229,15 @@ class DynamoStorage:
         end_time: Optional[str] = None,
         limit: int = 200,
     ) -> List[dict]:
-        response = self.table.scan(FilterExpression=Attr("pk").eq("AUDIT_EVENT"))
-        items = response.get("Items", [])
+        items = []
+        scan_kwargs = {"FilterExpression": Attr("pk").eq("AUDIT_EVENT")}
+        while True:
+            response = self.table.scan(**scan_kwargs)
+            items.extend(response.get("Items", []))
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
         filtered = []
         for item in items:
             if event_type and item.get("event_type") != event_type:
