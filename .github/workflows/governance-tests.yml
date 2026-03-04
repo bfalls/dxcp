@@ -40,6 +40,13 @@ jobs:
       - name: Run governance contract unit subset
         run: python dxcp-api/scripts/governance_contract_unit.py
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.GOV_AWS_REGION }}
+
       - name: Run governance runtime harness (strict)
         env:
           GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
