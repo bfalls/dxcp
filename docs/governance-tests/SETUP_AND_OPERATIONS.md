@@ -11,7 +11,7 @@ The harness establishes a deterministic, fail-fast governance test entrypoint fo
 Authentication model:
 
 - admin, owner, observer tokens obtained via headless Playwright login against SPA Auth0 PKCE flow.
-- ci token minted using Auth0 client_credentials (M2M).
+- ci token provided as GOV_CI_TOKEN (non-interactive DXCP API bearer token).
 - Demo artifact publisher workflow follows same CI idempotency pattern.
 - No ROPC/password grant and no test-only auth gateway are used.
 
@@ -52,8 +52,7 @@ Required keys:
 - GOV_OWNER_PASSWORD
 - GOV_OBSERVER_USERNAME
 - GOV_OBSERVER_PASSWORD
-- GOV_CI_CLIENT_ID
-- GOV_CI_CLIENT_SECRET
+- GOV_CI_TOKEN
 
 UI E2E auth-state keys (required for `ui` Playwright login bootstrap):
 
@@ -81,12 +80,11 @@ Optional key:
 
 ## Auth0 Setup
 
-Create M2M application:
+Provision a CI publisher identity that can obtain a DXCP API access token.
 
-- ci
+- Set GOV_CI_TOKEN to that token.
 
-Authorize it for DXCP API audience.
-Grant required CI publisher claims.
+DXCP will enforce CI publisher allowlist and required claims for build registration.
 
 Create real users:
 

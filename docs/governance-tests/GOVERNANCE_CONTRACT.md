@@ -18,7 +18,7 @@ Roles:
 - PLATFORM_ADMIN
 - DELIVERY_OWNER
 - OBSERVER
-- CI publisher (M2M identity)
+- CI publisher (service identity)
 
 1.1 PLATFORM_ADMIN
 

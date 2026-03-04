@@ -22,7 +22,12 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8084/health
 
 ## Gate auth mode requirements for DXCP API calls
 
-DXCP forwards the end-user bearer token to Gate for API calls. To support Fiat-based authorization on the propagated identity:
+DXCP must be able to call Gate without relying on browser login flows. DXCP supports two Gate access patterns:
+
+1) Local/dev (no mTLS): DXCP may forward the end-user bearer token to Gate.
+2) Recommended runtime: DXCP calls a dedicated machine-only Gate endpoint protected by mTLS. In this mode, DXCP does **not** forward end-user bearer tokens to Gate.
+
+In both cases, DXCP sets `X-Spinnaker-User` to carry end-user attribution for audit/governance, and to enable Fiat-based authorization decisions on that propagated identity.
 
 - Gate must accept bearer JWTs for API requests (resource-server style validation).
 - Gate must not require browser redirect login for API endpoints used by DXCP.
@@ -123,6 +128,11 @@ export DXCP_SPINNAKER_MTLS_CERT_PATH="/app/certs/dxcp-client.crt"
 export DXCP_SPINNAKER_MTLS_KEY_PATH="/app/certs/dxcp-client.key"
 export DXCP_SPINNAKER_MTLS_CA_PATH="/app/certs/ca.crt" # optional
 ```
+
+Notes:
+- When mTLS is enabled, DXCP authenticates to Gate using the client certificate.
+- DXCP does not forward end-user `Authorization: Bearer ...` tokens to the machine-only Gate endpoint.
+- DXCP always includes `X-Spinnaker-User` for end-user attribution (required for machine-only Gate calls).
 
 ## ngrok (UI access without port forwarding)
 

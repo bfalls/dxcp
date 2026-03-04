@@ -5,7 +5,7 @@ Phase 2 governance harness runner.
 Current scope:
 - GOV_ config loading and validation.
 - Optional local .env.govtest loading.
-- Auth0 M2M token minting for admin/owner/observer/ci.
+- Token acquisition for admin/owner/observer/ci.
 - /v1/whoami sanity checks for all minted tokens.
 - Version discovery and run-version computation.
 - Dry-run planning when required GOV_ secrets are absent.

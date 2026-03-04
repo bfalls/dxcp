@@ -85,3 +85,16 @@ Set DXCP_CONFIG_PREFIX to override the default (/dxcp/config).
 - JWTs must be issued by the configured issuer and audience.
 - DXCP roles are derived from the roles claim in the access token.
 - The UI shows a derived role for convenience; the API is authoritative.
+
+### Authentication boundaries
+
+DXCP authentication described in this document applies to **clients calling the DXCP API**
+(e.g., the DXCP UI or external automation).
+
+DXCP uses Auth0-issued JWTs to authenticate and authorize these requests.
+
+When DXCP communicates with external delivery engines (for example Spinnaker Gate),
+it uses **service-to-service authentication** rather than forwarding the user JWT.
+The Spinnaker adapter uses **mutual TLS (mTLS)** to authenticate DXCP as a trusted
+service and forwards the end-user identity for governance using the
+`X-Spinnaker-User` header.

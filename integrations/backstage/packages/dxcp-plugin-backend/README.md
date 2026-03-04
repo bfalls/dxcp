@@ -8,8 +8,10 @@ Provides:
 
 ## Responsibilities
 
+If your DXCP deployment does not issue non-interactive tokens, this backend plugin is not applicable.
+
 -   Validate Backstage credentials
--   Exchange M2M token
+-   Fetch service access token
 -   Call DXCP API
 -   Return JSON
 

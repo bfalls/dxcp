@@ -54,8 +54,8 @@ backend.add(import('./plugins/dxcp'));
 
 dxcp: baseUrl: https://your-dxcp-api auth0: tokenUrl:
 https://tenant.auth0.com/oauth/token clientId:
-\${AUTH_M2M_AUTH0_CLIENT_ID} clientSecret:
-\${AUTH_M2M_AUTH0_CLIENT_SECRET} audience: https://dxcp-api
+\${AUTH_SERVICE_AUTH0_CLIENT_ID} clientSecret:
+\${AUTH_SERVICE_AUTH0_CLIENT_SECRET} audience: https://dxcp-api
 
 ------------------------------------------------------------------------
 
@@ -70,7 +70,9 @@ Add to packages/app/package.json:
 
 ## Security Model
 
-Backstage validates user. Backend exchanges M2M token. DXCP enforces
+Note: This integration expects a non-interactive DXCP API access token. If your DXCP deployment does not issue such tokens, do not enable this integration.
+
+Backstage validates user. Backend fetches a service access token. DXCP enforces
 RBAC.
 
 Identity authority: Backstage. Delivery authority: DXCP.
