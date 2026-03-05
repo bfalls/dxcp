@@ -1,0 +1,43 @@
+{
+  "symbols": {
+    "info": "[i]",
+    "unicode": {
+      "step": "\u25B6",
+      "substep": "\u25B8",
+      "success": "\u2713",
+      "fail": "\u2717"
+    },
+    "ascii": {
+      "step": ">",
+      "substep": "-",
+      "success": "+",
+      "fail": "X"
+    }
+  },
+  "palette": {
+    "1": {
+      "title": { "bold": true, "ansi16": 97 },
+      "info": { "ansi16": 94 },
+      "step": { "bold": true, "ansi16": 94 },
+      "substep": { "dim": true, "ansi16": 94 },
+      "success": { "ansi16": 92 },
+      "fail": { "ansi16": 91 }
+    },
+    "2": {
+      "title": { "bold": true, "ansi256": 255 },
+      "info": { "ansi256": 75 },
+      "step": { "bold": true, "ansi256": 81 },
+      "substep": { "dim": true, "ansi256": 117 },
+      "success": { "ansi256": 82 },
+      "fail": { "ansi256": 203 }
+    },
+    "3": {
+      "title": { "bold": true, "rgb": [235, 235, 245] },
+      "info": { "rgb": [110, 190, 255] },
+      "step": { "bold": true, "rgb": [100, 180, 255] },
+      "substep": { "dim": true, "rgb": [160, 190, 220] },
+      "success": { "rgb": [80, 210, 140] },
+      "fail": { "rgb": [255, 105, 105] }
+    }
+  }
+}

@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Page } from "@playwright/test";
-import { requiredEnv } from "./common.ts";
+import { logInfo, requiredEnv } from "./common.ts";
 import { getCachedToken, putCachedToken } from "./token_cache.ts";
 import {
   adminCredentialsFromEnv,
@@ -83,7 +83,7 @@ async function getUserAccessTokenViaCredentials(
     azp: uiClientId,
   });
   if (cached) {
-    console.log(`[INFO] Using cached ${label} user token`);
+    logInfo(`Using cached ${label} user token`);
     return cached;
   }
 
@@ -93,14 +93,14 @@ async function getUserAccessTokenViaCredentials(
   const page = (await context.newPage()) as Page;
 
   try {
-    console.log(`[INFO] Acquiring ${label} user token via headless SPA login`);
+    logInfo(`Acquiring ${label} user token via headless SPA login`);
     await ensureLoggedInViaUi(page, username, password);
     const token = await captureAccessTokenFromSpaCache(page);
     if (!token) {
       throw new Error(`Captured empty token for role=${label}`);
     }
     putCachedToken(cacheKey, token);
-    console.log(`[INFO] Acquired ${label} user token`);
+    logInfo(`Acquired ${label} user token`);
     return token;
   } finally {
     await context.close();
@@ -122,9 +122,7 @@ async function launchBrowser(chromium: ChromiumApi): Promise<any> {
     } catch (error) {
       lastError = error;
       const detail = error instanceof Error ? error.message : String(error);
-      console.log(
-        `[INFO] Playwright launch failed for channel=${opts.channel ?? "bundled"}; retrying if alternatives remain (${detail})`,
-      );
+      logInfo(`Playwright launch failed for channel=${opts.channel ?? "bundled"}; retrying if alternatives remain (${detail})`);
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));

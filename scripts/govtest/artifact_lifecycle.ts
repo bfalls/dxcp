@@ -1,6 +1,6 @@
 import { CopyObjectCommand, DeleteObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { RunContext } from "./types.ts";
-import { optionalEnv, requiredEnv } from "./common.ts";
+import { logInfo, optionalEnv, requiredEnv } from "./common.ts";
 
 const DEFAULT_ARTIFACT_KEY_TEMPLATE = "demo-service/demo-service-{version}.zip";
 
@@ -11,10 +11,6 @@ export type PreparedArtifact = {
   runVersion: string;
   createdByPrep: boolean;
 };
-
-function logInfo(message: string): void {
-  console.log(`[INFO] ${message}`);
-}
 
 function fail(message: string): never {
   throw new Error(message);

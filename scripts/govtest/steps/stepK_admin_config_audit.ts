@@ -6,6 +6,7 @@ import {
   assertStatus,
   decodeJwtClaims,
   isStrictConformance,
+  logInfo,
   markStepEnd,
   markStepStart,
 } from "../common.ts";
@@ -76,8 +77,8 @@ export async function stepK_adminConfigAuditConformance(context: RunContext, adm
 
   if (!ciPublishersEvent || mutationsDisabledEvents.length < 2) {
     if (!strict) {
-      console.log(
-        `[INFO] K: diagnostic mode: admin config audit assertions skipped for this runId (${context.runId}) due to missing run-scoped audit events.`,
+      logInfo(
+        `K: diagnostic mode: admin config audit assertions skipped for this runId (${context.runId}) due to missing run-scoped audit events.`,
       );
       markStepEnd(context, step);
       return;

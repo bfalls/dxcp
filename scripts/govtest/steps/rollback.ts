@@ -7,6 +7,7 @@ import {
   buildDeploymentIntent,
   decodeJson,
   isStrictConformance,
+  logInfo,
   markStepEnd,
   markStepStart,
   optionalEnv,
@@ -209,7 +210,7 @@ export async function stepG_rollbackAfterDeploy(context: RunContext, ownerToken:
     }
     context.rollback.skipped = true;
     context.rollback.skipReason = reason;
-    console.log(`[INFO] Rollback skipped: ${context.rollback.skipReason}`);
+    logInfo(`Rollback skipped: ${context.rollback.skipReason}`);
     markStepEnd(context, step);
     return;
   }

@@ -3,10 +3,13 @@
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { ANSI, colorize } = require("../ansi.cjs");
+const { detectColorLevel, detectSymbolMode, makeSymbols, makeTheme } = require("../term/style.cjs");
 
 const repoRoot = path.join(__dirname, "..", "..");
 const forwardedArgs = process.argv.slice(2);
+const symbolMode = detectSymbolMode();
+const symbols = makeSymbols(symbolMode);
+const TERM_THEME = makeTheme(detectColorLevel(), symbols);
 
 function runOrExit(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -63,7 +66,7 @@ function findPython() {
 }
 
 function main() {
-  console.log(colorize("Running Unified Governance Conformance (unit + runtime + merge)", ANSI.boldCyan));
+  console.log(TERM_THEME.title("Running Unified Governance Conformance (unit + runtime + merge)"));
 
   const python = findPython();
   if (!python) {

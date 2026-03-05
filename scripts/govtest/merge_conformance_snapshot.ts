@@ -1,7 +1,54 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+
+const require = createRequire(import.meta.url);
+const { detectColorLevel, detectSymbolMode, makeSymbols, makeTheme } = require("../term/style.cjs") as {
+  detectColorLevel: (opts?: {
+    isTTY?: boolean;
+    env?: NodeJS.ProcessEnv;
+    term?: string;
+    colorTerm?: string;
+  }) => 0 | 1 | 2 | 3;
+  detectSymbolMode: (opts?: {
+    isTTY?: boolean;
+    env?: NodeJS.ProcessEnv;
+    term?: string;
+    locale?: string;
+  }) => "unicode" | "ascii";
+  makeSymbols: (mode: "unicode" | "ascii") => {
+    info: string;
+    step: string;
+    substep: string;
+    success: string;
+    fail: string;
+  };
+  makeTheme: (level: 0 | 1 | 2 | 3, symbols?: { info: string; step: string; substep: string; success: string; fail: string }) => {
+    symbols: {
+      info: string;
+      step: string;
+      substep: string;
+      success: string;
+      fail: string;
+    };
+    title: (text: string) => string;
+    info: (text: string) => string;
+    step: (text: string) => string;
+    substep: (text: string) => string;
+    success: (text: string) => string;
+    fail: (text: string) => string;
+  };
+};
+
+const symbolMode = detectSymbolMode();
+const symbols = makeSymbols(symbolMode);
+const TERM_THEME = makeTheme(detectColorLevel(), symbols);
+
+function logInfo(message: string): void {
+  console.log(`${TERM_THEME.symbols.info} ${message}`);
+}
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -222,10 +269,8 @@ function main(): number {
   };
 
   writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf8");
-  console.log(`[INFO] Wrote merged conformance snapshot: ${args.outputPath}`);
-  console.log(
-    `[INFO] GovernanceContractVersion taken from docs/governance-tests/GOVERNANCE_CONTRACT.md: ${governanceContractVersion}`,
-  );
+  logInfo(`Wrote merged conformance snapshot: ${args.outputPath}`);
+  logInfo(`GovernanceContractVersion taken from docs/governance-tests/GOVERNANCE_CONTRACT.md: ${governanceContractVersion}`);
 
   if (overallStatus !== "PASS") {
     if (runtime?.conformance_profile !== "strict") {
@@ -237,7 +282,7 @@ function main(): number {
     }
     return 1;
   }
-  console.log("[INFO] Governance conformance status is SUCCESS.");
+  logInfo("Governance conformance status is SUCCESS.");
   return 0;
 }
 

@@ -1,5 +1,5 @@
 import type { RunContext } from "../types.ts";
-import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, requiredEnv, markStepEnd, markStepStart } from "../common.ts";
+import { announceStep, apiRequest, assertStatus, buildRegisterExistingPayload, logInfo, requiredEnv, markStepEnd, markStepStart } from "../common.ts";
 
 export async function stepC_registerBuildHappyPath(context: RunContext, ciToken: string): Promise<void> {
   const step = "C";
@@ -10,7 +10,7 @@ export async function stepC_registerBuildHappyPath(context: RunContext, ciToken:
     version: context.runVersion,
     git_sha: "b".repeat(40),
   });
-  console.log(`[INFO] C build registration artifactRef=${String(payload?.artifactRef ?? "")}`);
+  logInfo(`C build registration artifactRef=${String(payload?.artifactRef ?? "")}`);
   const baseApi = requiredEnv("GOV_DXCP_API_BASE").replace(/\/$/, "");
 
   const missingIdempotency = await apiRequest("POST", "/v1/builds/register", ciToken, {

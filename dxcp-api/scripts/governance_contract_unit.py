@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import importlib.util
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DXCP_API_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_DOC = REPO_ROOT / "docs" / "governance-tests" / "GOVERNANCE_CONTRACT.md"
 OUTPUT_PATH = REPO_ROOT / ".dxcpapi.governance.snapshot.json"
+TERM_STYLE_PATH = REPO_ROOT / "scripts" / "term" / "style.py"
+_TERM_STYLE_SPEC = importlib.util.spec_from_file_location("dxcp_term_style", TERM_STYLE_PATH)
+if _TERM_STYLE_SPEC is None or _TERM_STYLE_SPEC.loader is None:
+    raise RuntimeError(f"Unable to load terminal style module from {TERM_STYLE_PATH}")
+_TERM_STYLE = importlib.util.module_from_spec(_TERM_STYLE_SPEC)
+_TERM_STYLE_SPEC.loader.exec_module(_TERM_STYLE)
+_COLOR_LEVEL = _TERM_STYLE.detect_color_level()
+_SYMBOL_MODE = _TERM_STYLE.detect_symbol_mode()
+_SYMBOLS = _TERM_STYLE.make_symbols(_SYMBOL_MODE)
+_THEME = _TERM_STYLE.make_theme(_COLOR_LEVEL, _SYMBOLS)
 
 
 @dataclass
@@ -81,6 +92,10 @@ def _build_summary(results: List[TestResult]) -> dict:
     }
 
 
+def _log_info(message: str) -> None:
+    print(f"{_THEME['symbols']['info']} {message}")
+
+
 def main() -> int:
     plugin = GovernanceContractPlugin()
     os.chdir(DXCP_API_ROOT)
@@ -107,7 +122,7 @@ def main() -> int:
         ],
     }
     OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"[INFO] Wrote governance unit snapshot: {OUTPUT_PATH}")
+    _log_info(f"Wrote governance unit snapshot: {OUTPUT_PATH}")
     return int(exit_code)
 
 

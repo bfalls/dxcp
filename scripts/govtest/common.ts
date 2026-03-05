@@ -1,7 +1,50 @@
 import { readFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import type { RunContext, JwtClaims, WhoAmI, ConformanceProfile } from "./types.ts";
 import { getCachedToken, putCachedToken } from "./token_cache.ts";
+
+const require = createRequire(import.meta.url);
+const { detectColorLevel, detectSymbolMode, makeSymbols, makeTheme } = require("../term/style.cjs") as {
+  detectColorLevel: (opts?: {
+    isTTY?: boolean;
+    env?: NodeJS.ProcessEnv;
+    term?: string;
+    colorTerm?: string;
+  }) => 0 | 1 | 2 | 3;
+  detectSymbolMode: (opts?: {
+    isTTY?: boolean;
+    env?: NodeJS.ProcessEnv;
+    term?: string;
+    locale?: string;
+  }) => "unicode" | "ascii";
+  makeSymbols: (mode: "unicode" | "ascii") => {
+    info: string;
+    step: string;
+    substep: string;
+    success: string;
+    fail: string;
+  };
+  makeTheme: (
+    level: 0 | 1 | 2 | 3,
+    symbols?: { info: string; step: string; substep: string; success: string; fail: string },
+  ) => {
+    symbols: {
+      info: string;
+      step: string;
+      substep: string;
+      success: string;
+      fail: string;
+    };
+    symbolMode: "unicode" | "ascii";
+    title: (text: string) => string;
+    info: (text: string) => string;
+    step: (text: string) => string;
+    substep: (text: string) => string;
+    success: (text: string) => string;
+    fail: (text: string) => string;
+  };
+};
 
 const VERSION_RE = /^0\.(\d+)\.(\d+)$/;
 const SEMVER_IN_TEXT_RE = /(?:^|[^0-9])v?(0\.\d+\.\d+)(?:[^0-9]|$)/;
@@ -10,17 +53,25 @@ const DEFAULT_ARTIFACT_KEY_TEMPLATE = "demo-service/demo-service-{version}.zip";
 const VERSION_FETCH_MAX_ATTEMPTS = 5;
 const VERSION_FETCH_INITIAL_BACKOFF_MS = 1000;
 const RETRYABLE_VERSION_FETCH_STATUS = new Set([429, 500, 502, 503, 504]);
+const COLOR_LEVEL = detectColorLevel();
+const SYMBOL_MODE = detectSymbolMode();
+const SYMBOLS = makeSymbols(SYMBOL_MODE);
+export const TERM_THEME = makeTheme(COLOR_LEVEL, SYMBOLS);
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function logInfo(message: string): void {
-  console.log(`[INFO] ${message}`);
+export function logInfo(message: string): void {
+  console.log(`${TERM_THEME.symbols.info} ${message}`);
 }
 
 function logStep(message: string): void {
-  console.log(`[STEP] ${message}`);
+  console.log(`${TERM_THEME.symbols.step} ${message}`);
+}
+
+export function logSubstep(message: string): void {
+  console.log(`${TERM_THEME.symbols.substep} ${message}`);
 }
 
 function redactToken(token: string): string {

@@ -5,6 +5,7 @@ import {
   assert,
   assertStatus,
   isStrictConformance,
+  logInfo,
   markStepEnd,
   markStepStart,
   optionalEnv,
@@ -65,7 +66,7 @@ export async function stepI_ciDenialMatrixEnforcement(
     if (isStrictConformance(context)) {
       throw new Error(`${message} (strict conformance)`);
     }
-    console.log(`[INFO] ${message}; skipping rollback denial probe in diagnostic mode.`);
+    logInfo(`${message}; skipping rollback denial probe in diagnostic mode.`);
   } else {
     const rollback = await apiRequest(
       "POST",

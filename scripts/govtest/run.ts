@@ -2,7 +2,6 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import {
   announceStep,
   apiRequest,
@@ -13,10 +12,12 @@ import {
   fail,
   isStrictConformance,
   loadLocalDotenv,
+  logInfo,
   optionalEnv,
   printIdentity,
   printRunPlan,
   requiredEnv,
+  TERM_THEME,
   whoAmI,
 } from "./common.ts";
 import type { RunContext } from "./types.ts";
@@ -38,19 +39,6 @@ import { cleanupPreparedArtifact, prepareRunArtifact, type PreparedArtifact } fr
 
 const LAST_RUN_ARTIFACT = ".govtest.last-run.json";
 const CONTRACT_SNAPSHOT_ARTIFACT = ".govtest.contract.snapshot.json";
-const require = createRequire(import.meta.url);
-const { ANSI, formatTag } = require("../ansi.cjs") as {
-  ANSI: {
-    reset: string;
-    green: string;
-    red: string;
-    yellow: string;
-    blue: string;
-    boldCyan: string;
-  };
-  formatTag: (label: string, color: string) => string;
-};
-
 type ResultKind = "success" | "failure" | "information";
 type RecipeCleanupFailure = {
   recipeId: string;
@@ -61,22 +49,9 @@ function hasArg(name: string): boolean {
   return process.argv.includes(name);
 }
 
-function colorFor(kind: ResultKind): string {
-  if (kind === "success") return ANSI.green;
-  if (kind === "failure") return ANSI.red;
-  return ANSI.blue;
-}
-
-function labelFor(kind: ResultKind): string {
-  if (kind === "success") return "✓";
-  if (kind === "failure") return "✗";
-  return "i";
-}
-
 function printEvaluatedLine(kind: ResultKind, message: string): void {
-  const color = colorFor(kind);
-  const label = labelFor(kind);
-  console.log(`${formatTag(label, color)} ${message}`);
+  const tag = kind === "success" ? TERM_THEME.symbols.success : kind === "failure" ? TERM_THEME.symbols.fail : TERM_THEME.symbols.info;
+  console.log(`${tag} ${message}`);
 }
 
 function printSummaryField(kind: ResultKind, key: string, value: string | number | boolean): void {
@@ -127,12 +102,12 @@ async function cleanupTemporaryRecipes(context: RunContext, adminToken: string):
   for (const recipeId of uniqueRecipeIds) {
     const response = await apiRequest("DELETE", `/v1/admin/recipes/${encodeURIComponent(recipeId)}`, adminToken);
     if (response.status === 204) {
-      console.log(`[INFO] Cleanup recipe deleted: ${recipeId}`);
+      logInfo(`Cleanup recipe deleted: ${recipeId}`);
       continue;
     }
     const payload = await readResponsePayloadSafe(response);
     if (response.status === 404) {
-      console.log(`[INFO] Cleanup recipe already missing: ${recipeId}`);
+      logInfo(`Cleanup recipe already missing: ${recipeId}`);
       continue;
     }
     if (response.status === 409) {
@@ -246,7 +221,7 @@ function writeRunArtifact(context: RunContext, dryRun: boolean): void {
     writtenAt: new Date().toISOString(),
   };
   writeFileSync(join(process.cwd(), LAST_RUN_ARTIFACT), JSON.stringify(payload, null, 2), "utf8");
-  console.log(`[INFO] Wrote run artifact: ${LAST_RUN_ARTIFACT}`);
+  logInfo(`Wrote run artifact: ${LAST_RUN_ARTIFACT}`);
   writeContractSnapshot(context, dryRun);
 }
 
@@ -298,11 +273,11 @@ function writeContractSnapshot(context: RunContext, dryRun: boolean): void {
     },
   };
   writeFileSync(join(process.cwd(), CONTRACT_SNAPSHOT_ARTIFACT), JSON.stringify(payload, null, 2), "utf8");
-  console.log(`[INFO] Wrote contract snapshot: ${CONTRACT_SNAPSHOT_ARTIFACT}`);
+  logInfo(`Wrote contract snapshot: ${CONTRACT_SNAPSHOT_ARTIFACT}`);
 }
 
 function printSummary(context: RunContext): void {
-  console.log("\n[SUMMARY] Governance API run complete");
+  console.log(`\n${TERM_THEME.title("[SUMMARY] Governance API run complete")}`);
   printSummaryField("information", "runId", context.runId);
   printSummaryField("information", "conformanceProfile", context.conformanceProfile);
   printSummaryField("information", "runVersion", context.runVersion);
@@ -434,9 +409,7 @@ async function main(): Promise<number> {
     );
     nonMemberOwnerClaims = decodeJwtClaims(nonMemberOwnerToken);
   } else {
-    console.log(
-      "[INFO] Non-member owner deployment status probe skipped: GOV_NON_MEMBER_OWNER_USERNAME/PASSWORD not configured.",
-    );
+    logInfo("Non-member owner deployment status probe skipped: GOV_NON_MEMBER_OWNER_USERNAME/PASSWORD not configured.");
   }
 
   const claimsByRole = {
@@ -460,7 +433,7 @@ async function main(): Promise<number> {
   printRunPlan(context);
 
   if (dryRun) {
-    console.log("[INFO] Dry-run requested; skipping phase 3 governance mutation steps.");
+    logInfo("Dry-run requested; skipping phase 3 governance mutation steps.");
     printSummary(context);
     writeRunArtifact(context, true);
     return 0;

@@ -8,6 +8,8 @@ import {
   isStrictConformance,
   markStepEnd,
   markStepStart,
+  logInfo,
+  logSubstep,
   optionalEnv,
 } from "../common.ts";
 import type { GuardrailCheckClassification } from "../types.ts";
@@ -476,9 +478,9 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
 }
 
 function printGuardrailSummary(context: RunContext): void {
-  console.log(`[INFO] Guardrails mode=${context.guardrails.mode}`);
+  logInfo(`Guardrails mode=${context.guardrails.mode}`);
   for (const check of context.guardrails.checks) {
-    console.log(`[GUARDRAIL] ${check.status} ${check.classification} ${check.id} :: ${check.detail}`);
+    logSubstep(`${check.status} ${check.classification} ${check.id} :: ${check.detail}`);
   }
 }
 

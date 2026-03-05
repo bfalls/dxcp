@@ -8,6 +8,7 @@
     "govtest:dry": "node --experimental-strip-types scripts/govtest/run.ts --dry-run",
     "govtest:runtime": "node --experimental-strip-types scripts/govtest/run.ts",
     "govtest": "node scripts/govtest/run_all.cjs",
+    "term:preview": "node scripts/term/preview.cjs",
     "api-dev": "bash -lc 'cd dxcp-api && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000'",
     "api-test": "node scripts/api_test.js",
     "api-test-verbose": "node scripts/api_test.js --verbose",
