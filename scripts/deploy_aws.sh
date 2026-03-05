@@ -76,6 +76,26 @@ trim() {
   echo "$1" | xargs
 }
 
+get_optional_ssm_param() {
+  local name="$1"
+  local output
+  local status
+  set +e
+  output="$(get_ssm_param "$name" 2>&1)"
+  status=$?
+  set -e
+  if [[ $status -eq 0 ]]; then
+    echo "$output"
+    return 0
+  fi
+  if [[ "$output" == *"ParameterNotFound"* ]]; then
+    echo ""
+    return 0
+  fi
+  echo "$output" >&2
+  return $status
+}
+
 stack_output() {
   local stack_name="$1"
   local output_key="$2"
@@ -281,15 +301,15 @@ copy_dir_contents "$ROOT_DIR/dxcp-api/data" "$API_BUILD_DIR/data"
 copy_dir_contents "$ROOT_DIR/spinnaker-adapter" "$API_BUILD_DIR/spinnaker-adapter"
 
 echo "Preparing optional Spinnaker mTLS cert bundle..."
-DXCP_SPINNAKER_MTLS_CERT_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_cert_path" || true)")"
-DXCP_SPINNAKER_MTLS_KEY_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_key_path" || true)")"
-DXCP_SPINNAKER_MTLS_CA_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_ca_path" || true)")"
+DXCP_SPINNAKER_MTLS_CERT_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_cert_path")")"
+DXCP_SPINNAKER_MTLS_KEY_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_key_path")")"
+DXCP_SPINNAKER_MTLS_CA_PATH_CFG="$(trim "$(get_optional_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_ca_path")")"
 DXCP_SPINNAKER_CERTS_SOURCE_DIR="${DXCP_SPINNAKER_CERTS_SOURCE_DIR:-$ROOT_DIR/ops/certs}"
+if [[ -z "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -z "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" ]]; then
+  echo "spinnaker/mtls_cert_path and spinnaker/mtls_key_path are required and must be non-empty." >&2
+  exit 1
+fi
 if [[ -n "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" ]]; then
-  if [[ -z "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -z "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" ]]; then
-    echo "spinnaker/mtls_cert_path and spinnaker/mtls_key_path must both be configured when mTLS is enabled." >&2
-    exit 1
-  fi
   if [[ ! -d "$DXCP_SPINNAKER_CERTS_SOURCE_DIR" ]]; then
     echo "mTLS cert source directory not found: $DXCP_SPINNAKER_CERTS_SOURCE_DIR" >&2
     echo "Set DXCP_SPINNAKER_CERTS_SOURCE_DIR or place certs under $ROOT_DIR/ops/certs" >&2

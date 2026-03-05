@@ -609,6 +609,34 @@ function formatApiError(result, fallbackMessage) {
   return fallbackMessage
 }
 
+function formatRecipeInUseSummary(details) {
+  if (!details || typeof details !== 'object') return ''
+  const referenceType = String(details.reference_type || '')
+  const referenceCount = Number(details.reference_count || 0)
+  const references = Array.isArray(details.references) ? details.references : []
+  if (referenceType === 'service_environment_routing') {
+    const preview = references
+      .map((item) => `${item?.service_id || '-'}:${item?.environment_id || '-'}`)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(', ')
+    return preview
+      ? ` In use by ${referenceCount} service environment routes (${preview}).`
+      : ` In use by ${referenceCount} service environment routes.`
+  }
+  if (referenceType === 'delivery_group_allowed_recipes') {
+    const preview = references
+      .map((item) => item?.delivery_group_id || '-')
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(', ')
+    return preview
+      ? ` In use by ${referenceCount} delivery group policies (${preview}).`
+      : ` In use by ${referenceCount} delivery group policies.`
+  }
+  return ''
+}
+
 function versionNotFoundActionMessage(result) {
   const requestPart = result?.request_id ? ` Request ID: ${result.request_id}.` : ''
   return `Action required: build not registered by CI. Confirm CI build ran and registered this version. If you deployed directly via Spinnaker, that can cause drift; redeploy via DXCP after CI registers.${requestPart}`
@@ -795,6 +823,7 @@ export default function App() {
   const [adminRecipeError, setAdminRecipeError] = useState('')
   const [adminRecipeNote, setAdminRecipeNote] = useState('')
   const [adminRecipeSaving, setAdminRecipeSaving] = useState(false)
+  const [adminRecipeDeletingId, setAdminRecipeDeletingId] = useState('')
   const [adminRecipeValidation, setAdminRecipeValidation] = useState(null)
   const [adminRecipeConfirmWarning, setAdminRecipeConfirmWarning] = useState(false)
   const [systemRateLimitDraft, setSystemRateLimitDraft] = useState({
@@ -2338,6 +2367,47 @@ export default function App() {
       setAdminRecipeError('Failed to save recipe.')
     } finally {
       setAdminRecipeSaving(false)
+    }
+  }
+
+  async function deleteAdminRecipe(recipeId) {
+    if (adminReadOnly) {
+      setAdminRecipeError('Only Platform Admins can modify this.')
+      return
+    }
+    const id = String(recipeId || '').trim()
+    if (!id) return
+    const confirmed = window.confirm(
+      `Delete recipe ${id}?\n\nDeletion is blocked if referenced by service routing or delivery group policy.`
+    )
+    if (!confirmed) return
+    setAdminRecipeError('')
+    setAdminRecipeNote('')
+    setAdminRecipeDeletingId(id)
+    try {
+      const result = await api.delete(`/admin/recipes/${encodeURIComponent(id)}`)
+      const status = result?.status
+      const payload = result?.data
+      if (status === 204 || status === 404) {
+        await loadRecipes({ bypassCache: true, cacheTtlMs: 0 })
+        if (adminRecipeId === id) {
+          setAdminRecipeId('')
+          setAdminRecipeMode('view')
+          setAdminRecipeDraft(buildRecipeDraft(null))
+        }
+        setAdminRecipeNote(status === 404 ? 'Recipe already removed.' : 'Recipe deleted.')
+        return
+      }
+      if (status === 409 && payload?.code === 'RECIPE_IN_USE') {
+        setAdminRecipeError(`${payload.code}: ${payload.message}${formatRecipeInUseSummary(payload?.details)}`)
+        return
+      }
+      setAdminRecipeError(formatApiError(payload, 'Failed to delete recipe.'))
+    } catch (err) {
+      if (isLoginRequiredError(err)) return
+      setAdminRecipeError('Failed to delete recipe.')
+    } finally {
+      setAdminRecipeDeletingId('')
     }
   }
 
@@ -4150,6 +4220,8 @@ export default function App() {
     setAdminRecipeConfirmWarning,
     adminRecipeError,
     adminRecipeNote,
+    deleteAdminRecipe,
+    adminRecipeDeletingId,
     saveAdminRecipe,
     buildRecipeDraft,
     loadAuditEvents,

@@ -81,5 +81,23 @@ export function createApiClient({ baseUrl, getToken }) {
     return res.json()
   }
 
-  return { get, post, put, patch }
+  async function del(path) {
+    const headers = await buildHeaders()
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'DELETE',
+      headers
+    })
+    const text = await res.text()
+    let data = null
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch {
+        data = { message: text }
+      }
+    }
+    return { status: res.status, data }
+  }
+
+  return { get, post, put, patch, delete: del }
 }

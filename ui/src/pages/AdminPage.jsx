@@ -84,6 +84,8 @@ export default function AdminPage({
   setAdminRecipeConfirmWarning,
   adminRecipeError,
   adminRecipeNote,
+  deleteAdminRecipe,
+  adminRecipeDeletingId,
   saveAdminRecipe,
   setAdminRecipeDraft,
   buildRecipeDraft,
@@ -907,12 +909,24 @@ export default function AdminPage({
                         <button className="button secondary" onClick={() => startAdminRecipeEdit(recipe)} disabled={adminReadOnly}>
                           Edit
                         </button>
+                        {isPlatformAdmin && (
+                          <button
+                            className="button danger"
+                            data-testid="admin-recipe-delete"
+                            onClick={() => deleteAdminRecipe(recipe.id)}
+                            disabled={adminReadOnly || adminRecipeDeletingId === recipe.id}
+                          >
+                            {adminRecipeDeletingId === recipe.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )
                 })}
               </div>
             )}
+            {adminRecipeError && <div className="helper space-8">{adminRecipeError}</div>}
+            {adminRecipeNote && <div className="helper space-8">{adminRecipeNote}</div>}
           </SectionCard>
           <SectionCard>
             {adminRecipeMode === 'view' && activeAdminRecipe && (

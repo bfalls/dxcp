@@ -12,6 +12,16 @@ const ok = (data) =>
     json: () => Promise.resolve(data)
   })
 
+const withStatus = (status, data = null) => {
+  const textBody = data === null || typeof data === 'undefined' ? '' : JSON.stringify(data)
+  return Promise.resolve({
+    status,
+    ok: status >= 200 && status < 300,
+    text: () => Promise.resolve(textBody),
+    json: () => Promise.resolve(data)
+  })
+}
+
 const renderApp = (initialPath = '/services') =>
   render(
     <MemoryRouter initialEntries={[initialPath]}>
@@ -37,6 +47,7 @@ const buildFetchMock = ({
   versionsByService,
   environments,
   adminEnvironments,
+  deleteRecipeResponses,
   uiExposureArtifactRefDisplay,
   uiExposureExternalLinksDisplay,
   buildCommitUrl,
@@ -380,6 +391,19 @@ const buildFetchMock = ({
       const recipeId = pathname.split('/').pop()
       recipeList = recipeList.map((recipe) => (recipe.id === recipeId ? body : recipe))
       return ok(body)
+    }
+    if (pathname.startsWith('/v1/admin/recipes/') && options.method === 'DELETE') {
+      const recipeId = pathname.split('/').pop()
+      const configured = deleteRecipeResponses?.[recipeId]
+      if (configured) {
+        return withStatus(configured.status, configured.body)
+      }
+      const exists = recipeList.some((recipe) => recipe.id === recipeId)
+      if (!exists) {
+        return withStatus(404, { code: 'NOT_FOUND', message: 'Recipe not found' })
+      }
+      recipeList = recipeList.filter((recipe) => recipe.id !== recipeId)
+      return withStatus(204, null)
     }
     if (pathname === '/v1/services') {
       return ok(serviceList)
@@ -1500,6 +1524,103 @@ export async function runAllTests() {
     await view.findByText('Selected recipe is deprecated and cannot be used for new deployments.')
     const reviewButton = view.getByRole('button', { name: 'Review deploy' })
     assert.equal(reviewButton.disabled, true)
+  })
+
+  await runTest('Admin can delete an unreferenced recipe from Recipes tab', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          services: ['demo-service'],
+          allowed_recipes: ['default', 'temp-delete'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [
+        { id: 'default', name: 'Default Deploy', status: 'active' },
+        { id: 'temp-delete', name: 'Temp Delete Recipe', status: 'active' }
+      ]
+    })
+    const previousConfirm = window.confirm
+    window.confirm = () => true
+    try {
+      const view = renderApp()
+      await view.findByText('PLATFORM_ADMIN')
+      fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+      fireEvent.click(view.getByRole('button', { name: 'Recipes' }))
+      const recipeIdCell = await view.findByText('temp-delete')
+      const row = recipeIdCell.closest('.list-item')
+      assert.ok(row)
+      const deleteButton = row.querySelector('[data-testid="admin-recipe-delete"]')
+      assert.ok(deleteButton)
+      fireEvent.click(deleteButton)
+      await view.findByText('Recipe deleted.')
+      await waitForCondition(() => view.queryByText('temp-delete') === null)
+    } finally {
+      window.confirm = previousConfirm
+    }
+  })
+
+  await runTest('Admin delete shows in-use error and keeps recipe row', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      recipes: [{ id: 'default', name: 'Default Deploy', status: 'active' }],
+      deleteRecipeResponses: {
+        default: {
+          status: 409,
+          body: {
+            code: 'RECIPE_IN_USE',
+            message: 'Recipe default is still referenced by service_environment_routing',
+            details: {
+              reference_type: 'service_environment_routing',
+              reference_count: 1,
+              references: [{ service_id: 'demo-service', environment_id: 'sandbox' }]
+            }
+          }
+        }
+      }
+    })
+    const previousConfirm = window.confirm
+    window.confirm = () => true
+    try {
+      const view = renderApp()
+      await view.findByText('PLATFORM_ADMIN')
+      fireEvent.click(view.getByRole('link', { name: 'Admin' }))
+      fireEvent.click(view.getByRole('button', { name: 'Recipes' }))
+      const recipeIdCell = await view.findByText('default')
+      const row = recipeIdCell.closest('.list-item')
+      assert.ok(row)
+      const deleteButton = row.querySelector('[data-testid="admin-recipe-delete"]')
+      assert.ok(deleteButton)
+      fireEvent.click(deleteButton)
+      await view.findByText(/RECIPE_IN_USE:/)
+      await view.findByText(/demo-service:sandbox/)
+      assert.ok(view.queryByText('default'))
+    } finally {
+      window.confirm = previousConfirm
+    }
   })
 
   await runTest('Admin can create and edit delivery group', async () => {
