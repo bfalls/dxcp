@@ -111,6 +111,64 @@ paths:
         '503':
           $ref: '#/components/responses/MutationsDisabled'
 
+  /promotions/validate:
+    post:
+      summary: Validate promotion intent and policy
+      operationId: validatePromotion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionIntent'
+      responses:
+        '200':
+          description: Promotion pre-flight validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionPreflight'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '409':
+          $ref: '#/components/responses/DeploymentLocked'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+
+  /promotions:
+    post:
+      summary: Trigger promotion from source to target environment
+      operationId: createPromotion
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionIntent'
+      responses:
+        '201':
+          description: Promotion created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/ServiceNotAllowlisted'
+        '409':
+          $ref: '#/components/responses/DeploymentLocked'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/MutationsDisabled'
+
   /policy/summary:
     post:
       summary: Fetch policy summary for a service selection
@@ -579,6 +637,86 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NormalizedFailure'
+    PromotionIntent:
+      type: object
+      required: [service, source_environment, target_environment, version, changeSummary]
+      properties:
+        service:
+          type: string
+          description: Must be allowlisted.
+        source_environment:
+          type: string
+          description: Current environment where version is already successful.
+        target_environment:
+          type: string
+          description: Next environment in delivery-group promotion order.
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$'
+        changeSummary:
+          type: string
+          maxLength: 240
+      example:
+        service: payments
+        source_environment: sandbox
+        target_environment: staging
+        version: 1.2.3
+        changeSummary: Promote payments to staging after validation
+    PromotionPreflight:
+      type: object
+      required:
+        - service
+        - source_environment
+        - target_environment
+        - version
+        - recipeId
+        - deliveryGroupId
+        - versionEligible
+        - policy
+        - validatedAt
+      properties:
+        service:
+          type: string
+        source_environment:
+          type: string
+        target_environment:
+          type: string
+        version:
+          type: string
+        recipeId:
+          type: string
+          description: Resolved from service-environment routing for target_environment.
+        deliveryGroupId:
+          type: string
+        versionEligible:
+          type: boolean
+        policy:
+          type: object
+          required:
+            - max_concurrent_deployments
+            - current_concurrent_deployments
+            - daily_deploy_quota
+            - deployments_used
+            - deployments_remaining
+            - daily_quota_build_register
+          properties:
+            max_concurrent_deployments:
+              type: integer
+            current_concurrent_deployments:
+              type: integer
+            daily_deploy_quota:
+              type: integer
+            deployments_used:
+              type: integer
+            deployments_remaining:
+              type: integer
+            daily_quota_build_register:
+              type: integer
+              minimum: 0
+              maximum: 5000
+        validatedAt:
+          type: string
+          format: date-time
     DeploymentPreflight:
       type: object
       required:

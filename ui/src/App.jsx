@@ -2795,7 +2795,6 @@ export default function App() {
         source_environment: candidate.source_environment,
         target_environment: candidate.target_environment,
         version: candidate.version,
-        recipeId: candidate.recipeId,
         changeSummary: promotionChangeSummary.trim()
       }
       const result = await api.post('/promotions/validate', payload)
@@ -2825,7 +2824,6 @@ export default function App() {
         source_environment: promotionValidation.source_environment,
         target_environment: promotionValidation.target_environment,
         version: promotionValidation.version,
-        recipeId: promotionValidation.recipeId,
         changeSummary: promotionChangeSummary.trim()
       }
       const key = `promote-${Date.now()}`

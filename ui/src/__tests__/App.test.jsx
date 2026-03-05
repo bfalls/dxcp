@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App.jsx'
 import { createApiClient } from '../apiClient.js'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 
 const ok = (data) =>
@@ -153,7 +153,7 @@ const buildFetchMock = ({
         source_environment: body.source_environment,
         target_environment: body.target_environment,
         version: body.version,
-        recipeId: body.recipeId,
+        recipeId: 'default',
         deliveryGroupId: 'default',
         versionEligible: true,
         policy: {
@@ -177,7 +177,7 @@ const buildFetchMock = ({
         environment: body.target_environment,
         sourceEnvironment: body.source_environment,
         version: body.version,
-        recipeId: body.recipeId,
+        recipeId: 'default',
         state: 'IN_PROGRESS',
         deploymentKind: 'PROMOTE'
       })
@@ -1742,7 +1742,16 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'Environments' }))
-    fireEvent.input(await view.findByLabelText('Environment id'), { target: { value: 'staging' } })
+    await view.findByText('Environment ID')
+    const envIdInput = await view.findByTestId('admin-environment-id-input')
+    assert.equal(envIdInput.getAttribute('placeholder'), 'dev, staging, prod')
+    assert.ok(view.getByRole('button', { name: 'Environment ID details' }))
+    assert.ok(
+      view.getByText(
+        'Stable identifier used internally and in APIs. Lowercase letters, numbers, and hyphens only. Cannot be changed later.'
+      )
+    )
+    fireEvent.input(envIdInput, { target: { value: 'staging' } })
     fireEvent.input(view.getByLabelText('Display name'), { target: { value: 'Staging' } })
     fireEvent.click(view.getByTestId('admin-environment-save'))
     await view.findByText('Environment created.')
@@ -2013,6 +2022,16 @@ export async function runAllTests() {
     await view.findByText('Target environment')
     await view.findByText('staging')
     assert.ok(view.getByRole('button', { name: 'Review promotion' }))
+  })
+
+  await runTest('Promote payload excludes recipeId and confirm view uses validate recipeId binding', async () => {
+    const appSource = readFileSync(resolvePath(process.cwd(), 'src', 'App.jsx'), 'utf8')
+    const servicesPageSource = readFileSync(resolvePath(process.cwd(), 'src', 'pages', 'ServicesPage.jsx'), 'utf8')
+    assert.ok(appSource.includes("const result = await api.post('/promotions/validate', payload)"))
+    assert.ok(appSource.includes("const result = await api.post('/promotions', payload, key)"))
+    assert.ok(!appSource.includes('recipeId: candidate.recipeId'))
+    assert.ok(!appSource.includes('recipeId: promotionValidation.recipeId'))
+    assert.ok(servicesPageSource.includes('{promotionValidation?.recipeId || \'-\'}'))
   })
 
   await runTest('Service detail shows Backstage link when configured', async () => {

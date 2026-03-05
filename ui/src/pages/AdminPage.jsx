@@ -1,6 +1,7 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
 import SectionCard from '../components/SectionCard.jsx'
+import InfoTooltip from '../components/InfoTooltip.jsx'
 
 function parseOwnerEmails(ownerValue) {
   if (!ownerValue) return []
@@ -1238,10 +1239,17 @@ export default function AdminPage({
           <SectionCard>
             <h2>{foundationEnvEditingId ? 'Edit environment' : 'Create environment'}</h2>
             <div className="field">
-              <label htmlFor="admin-foundation-environment-id">Environment id</label>
+              <label htmlFor="admin-foundation-environment-id">
+                Environment ID{' '}
+                <InfoTooltip label="Environment ID details">
+                  Stable identifier used internally and in APIs. Lowercase letters, numbers, and hyphens only. Cannot
+                  be changed later.
+                </InfoTooltip>
+              </label>
               <input
                 id="admin-foundation-environment-id"
                 data-testid="admin-environment-id-input"
+                placeholder="dev, staging, prod"
                 value={foundationEnvDraft.environment_id}
                 onChange={(e) => handleFoundationEnvDraftChange('environment_id', e.target.value)}
                 onInput={(e) => handleFoundationEnvDraftChange('environment_id', e.target.value)}

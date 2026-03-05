@@ -69,7 +69,6 @@ class PromotionIntent(BaseModel):
     source_environment: str
     target_environment: str
     version: str
-    recipeId: str
     changeSummary: str = Field(..., max_length=240)
 
 

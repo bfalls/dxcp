@@ -133,6 +133,7 @@ IDEMPOTENCY_OBSERVABLE_PATHS = {
     "/v1/builds/register",
     "/v1/builds",
     "/v1/builds/upload-capability",
+    "/v1/promotions",
 }
 BUILD_REGISTER_FINGERPRINT_FIELDS = (
     "service",
@@ -149,6 +150,13 @@ BUILD_REGISTER_FINGERPRINT_FIELDS = (
     "repo",
     "commit_url",
     "run_url",
+)
+PROMOTION_FINGERPRINT_FIELDS = (
+    "service",
+    "source_environment",
+    "target_environment",
+    "version",
+    "changeSummary",
 )
 
 logger.info(
@@ -404,6 +412,12 @@ def resolve_delivery_group(service: str, actor: Optional[Actor] = None):
             f"Service {service} is not assigned to a delivery group",
             actor,
         )
+    group_id = group.get("id")
+    if group_id:
+        group = {
+            **group,
+            "environments": storage.list_delivery_group_environment_policy(group_id),
+        }
     return group, None
 
 
@@ -417,6 +431,25 @@ def resolve_recipe(recipe_id: Optional[str], actor: Optional[Actor] = None):
     if recipe.get("status") == "deprecated":
         return None, _policy_denied("RECIPE_DEPRECATED", f"Recipe {resolved_id} is deprecated", actor)
     return recipe, None
+
+
+def resolve_routed_recipe_for_service_environment(
+    service: str,
+    environment: str,
+    actor: Optional[Actor] = None,
+) -> tuple[Optional[dict], Optional[dict], Optional[JSONResponse]]:
+    routes = storage.list_service_environment_routing(service)
+    route = next((row for row in routes if row.get("environment_id") == environment), None)
+    if not route:
+        return None, None, error_response(
+            400,
+            "SERVICE_ENVIRONMENT_NOT_ROUTED",
+            "No recipe is routed for the service and target environment",
+        )
+    recipe, recipe_error = resolve_recipe(route.get("recipe_id"), actor)
+    if recipe_error:
+        return None, route, recipe_error
+    return recipe, route, None
 
 
 def resolve_environment_for_group(
@@ -547,6 +580,23 @@ def _group_environment_names(group: dict, enabled_only: bool = True) -> list[str
 
 
 def _promotion_environment_sequence(group: dict) -> list[str]:
+    bound = group.get("environments")
+    if isinstance(bound, list) and bound:
+        ordered_bound = sorted(
+            [
+                row
+                for row in bound
+                if row.get("is_enabled", True)
+                and isinstance(row.get("order_index"), int)
+                and row.get("order_index") > 0
+                and isinstance(row.get("environment_id"), str)
+                and row.get("environment_id")
+            ],
+            key=lambda row: (row.get("order_index"), row.get("environment_id")),
+        )
+        sequence = [row.get("environment_id") for row in ordered_bound]
+        if sequence:
+            return sequence
     configured_from_environments = _group_environment_names(group, enabled_only=True)
     if configured_from_environments:
         return configured_from_environments
@@ -594,7 +644,11 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
             "PROMOTION_PATH_NOT_ALLOWED",
             "Promotion target is not the next configured environment",
         )
-    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
+    recipe, routing, recipe_error = resolve_routed_recipe_for_service_environment(
+        intent.service,
+        intent.target_environment,
+        actor,
+    )
     if recipe_error:
         return None, recipe_error
     policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
@@ -628,6 +682,7 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
         "source_env": source_env,
         "target_env": target_env,
         "recipe": recipe,
+        "routing": routing,
         "build": build,
     }, None
 
@@ -655,14 +710,19 @@ def _promotion_candidate_for_service(service: str, source_environment: str, acto
     promotable = next((item for item in deployments if item.get("state") == "SUCCEEDED"), None)
     if not promotable:
         return {"eligible": False, "reason": "PROMOTION_NO_SUCCESSFUL_SOURCE_VERSION", "target_environment": target_environment}
-    if not promotable.get("recipeId"):
-        return {"eligible": False, "reason": "RECIPE_ID_REQUIRED", "target_environment": target_environment}
+    routed_recipe, _, routed_recipe_error = resolve_routed_recipe_for_service_environment(
+        service,
+        target_environment,
+        actor,
+    )
+    if routed_recipe_error:
+        return {"eligible": False, "reason": _error_code_from_response(routed_recipe_error), "target_environment": target_environment}
     return {
         "eligible": True,
         "source_environment": source_environment,
         "target_environment": target_environment,
         "version": promotable.get("version"),
-        "recipeId": promotable.get("recipeId"),
+        "recipeId": routed_recipe.get("id"),
     }
 
 
@@ -1060,7 +1120,6 @@ def _record_promotion_denied(actor: Actor, intent: PromotionIntent, code: str, g
         actor_role=actor.role.value,
         delivery_group_id=group_id,
         service_name=intent.service,
-        recipe_id=intent.recipeId,
         environment=intent.target_environment,
         outcome="DENIED",
         summary=summary,
@@ -1762,6 +1821,16 @@ def _build_register_request_fingerprint(req: BuildRegisterExistingRequest) -> st
     normalized_payload = {
         field: _normalize_fingerprint_value(payload.get(field))
         for field in BUILD_REGISTER_FINGERPRINT_FIELDS
+    }
+    canonical_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def _promotion_request_fingerprint(intent: PromotionIntent) -> str:
+    payload = intent.dict()
+    normalized_payload = {
+        field: _normalize_fingerprint_value(payload.get(field))
+        for field in PROMOTION_FINGERPRINT_FIELDS
     }
     canonical_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
@@ -2609,7 +2678,12 @@ def create_promotion(
         user_principal=user_principal,
     )
     guardrails.enforce_delivery_group_lock(group["id"], max_concurrent, target_env.get("name"))
-    cached = enforce_idempotency(request, idempotency_key)
+    request_fingerprint = _promotion_request_fingerprint(intent)
+    cached = enforce_idempotency(
+        request,
+        idempotency_key,
+        request_fingerprint=request_fingerprint,
+    )
     if cached:
         return cached
     payload = {
@@ -2668,7 +2742,13 @@ def create_promotion(
         "failures": [],
     }
     storage.insert_deployment(record, [])
-    store_idempotency(request, idempotency_key, record, 201)
+    store_idempotency(
+        request,
+        idempotency_key,
+        record,
+        201,
+        request_fingerprint=request_fingerprint,
+    )
     _record_audit_event(
         actor,
         "PROMOTION_SUBMIT",
