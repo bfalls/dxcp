@@ -48,3 +48,4 @@ dxcp-api/.env
 dxcp-api/data/*.db
 integrations/backstage/packages/dxcp-plugin/dist/
 ops/k8s/
+ops/backstage/

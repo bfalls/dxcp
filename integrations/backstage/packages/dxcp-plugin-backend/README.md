@@ -25,6 +25,6 @@ Returns:
 
 ## Common Errors
 
-401 Missing credentials → frontend token not forwarded HTML instead of
-JSON → proxy not configured AUTHZ_ROLE_REQUIRED → missing roles claim in
+401 Missing credentials -> frontend token not forwarded HTML instead of
+JSON -> proxy not configured AUTHZ_ROLE_REQUIRED -> missing roles claim in
 Auth0

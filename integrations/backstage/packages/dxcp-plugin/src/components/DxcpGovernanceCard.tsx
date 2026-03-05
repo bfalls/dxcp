@@ -72,7 +72,7 @@ const useStyles = makeStyles(theme => ({
 }));
 
 function fmt(iso?: string) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
@@ -96,7 +96,7 @@ function LabeledRow(props: { label: string; value?: string | number | null }) {
     <Box display="flex" className={(useStyles as any)().row}>
       <Typography className={(useStyles as any)().label}>{label}</Typography>
       <Typography className={(useStyles as any)().value}>
-        {value === undefined || value === null || value === '' ? '—' : value}
+        {value === undefined || value === null || value === '' ? '-' : value}
       </Typography>
     </Box>
   );
@@ -109,7 +109,7 @@ export const DxcpGovernanceCard = () => {
   const serviceId =
     entity.metadata.annotations?.['dxcp.io/service-id'] ?? entity.metadata.name;
 
-  // ✅ keep your existing hook call; if your hook needs serviceId instead, pass serviceId
+  // keep your existing hook call; if your hook needs serviceId instead, pass serviceId
   const { loading, error, value } = useDxcpDeliveryStatus(serviceId);
   const data = value;
 
@@ -134,7 +134,7 @@ export const DxcpGovernanceCard = () => {
               label={
                 data?.latest
                   ? statusChipLabel(data.latest.state, data.latest.outcome ?? undefined)
-                  : '—'
+                  : '-'
               }
               color={
                 data?.latest
@@ -168,8 +168,8 @@ export const DxcpGovernanceCard = () => {
                 </Typography>
                 <Divider style={{ margin: '12px 0' }} />
 
-                <LabeledRow label="Version" value={data.currentRunning?.version ?? '—'} />
-                <LabeledRow label="Environment" value={data.currentRunning?.environment ?? '—'} />
+                <LabeledRow label="Version" value={data.currentRunning?.version ?? '-'} />
+                <LabeledRow label="Environment" value={data.currentRunning?.environment ?? '-'} />
                 <LabeledRow label="Derived At" value={fmt(data.currentRunning?.derivedAt)} />
               </Box>
             </Grid>
@@ -181,8 +181,8 @@ export const DxcpGovernanceCard = () => {
                 </Typography>
                 <Divider style={{ margin: '12px 0' }} />
 
-                <LabeledRow label="Version" value={data.latest?.version ?? '—'} />
-                <LabeledRow label="Recipe" value={data.latest?.recipeId ?? '—'} />
+                <LabeledRow label="Version" value={data.latest?.version ?? '-'} />
+                <LabeledRow label="Recipe" value={data.latest?.recipeId ?? '-'} />
                 <LabeledRow label="Updated At" value={fmt(data.latest?.updatedAt)} />
               </Box>
             </Grid>
@@ -205,4 +205,3 @@ export const DxcpGovernanceCard = () => {
     </InfoCard>
   );
 };
-

@@ -444,7 +444,7 @@ function shortId(value) {
   if (!value) return ''
   const text = String(value)
   if (text.length <= 12) return text
-  return `${text.slice(0, 8)}…${text.slice(-4)}`
+  return `${text.slice(0, 8)}...${text.slice(-4)}`
 }
 
 function parseBackstageRef(ref) {

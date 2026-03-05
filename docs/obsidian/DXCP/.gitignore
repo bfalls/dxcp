@@ -1,0 +1,15 @@
+# Obsidian workspace state (machine-specific)
+.obsidian/workspace*
+
+# Cache files
+.obsidian/cache/
+
+# Installed plugins (local environment)
+.obsidian/plugins/
+
+# Temporary files sometimes created by editors
+*.tmp
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -4,7 +4,7 @@ This directory contains the DXCP integration for Backstage.
 
 ## Architecture
 
-Backstage UI (3000) → Backstage Backend (7007) → DXCP Backend Router →
+Backstage UI (3000) -> Backstage Backend (7007) -> DXCP Backend Router ->
 DXCP API
 
 The frontend never talks directly to DXCP.
