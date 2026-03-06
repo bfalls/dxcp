@@ -149,7 +149,9 @@ This panel is read-only.
 
 # Deployment Timeline
 
-The timeline is the **core visual element** of the screen. Deployment lifecycle follows the process defined in [[Deploy Workflow]].
+The timeline is the **core visual element** of the screen.
+Its structure and event model are defined in [[Deployment Timeline]].
+Deployment lifecycle follows the process defined in [[Deploy Workflow]].
 
 It represents the lifecycle of the deployment.
 

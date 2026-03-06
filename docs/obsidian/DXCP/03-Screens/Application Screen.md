@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The **Application screen** is the primary operational workspace in DXCP. This screen represents an [[DXCP Core Vocabulary#Application|Application]] and allows users to create a [[DXCP Core Vocabulary#Deployment|Deployment]] using a selected [[DXCP Core Vocabulary#Deployment Strategy|Deployment Strategy]] governed by a [[DXCP Core Vocabulary#Deployment Group|Deployment Group]].
+The **Application screen** is the primary operational workspace in DXCP. This screen represents an [[DXCP Core Vocabulary#Application|Application]] and allows users to create a [[DXCP Core Vocabulary#Deployment|Deployment]] using a selected [[DXCP Core Vocabulary#Deployment Strategy|Deployment Strategy]] governed by a [[DXCP Core Vocabulary#Deployment Group|Deployment Group]]. The Application screen shows a summarized deployment history. Detailed lifecycle behavior is defined in [[Deployment Timeline]].
 
 Most user workflows begin and end on this screen.
 

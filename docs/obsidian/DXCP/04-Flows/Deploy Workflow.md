@@ -250,6 +250,8 @@ While a deployment is active:
 - Running Version remains the last successful deployment.
 - Timeline shows the active deployment at the top with "IN PROGRESS".
 
+Deployment progress is explained on [[Deployment Screen]] through the [[Deployment Timeline]].
+
 ## Deployment Detail Screen
 
 Deployment detail must provide:
