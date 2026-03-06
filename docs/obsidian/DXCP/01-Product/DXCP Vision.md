@@ -11,13 +11,13 @@ DXCP is the intent-first delivery control plane that makes deploying software fe
 
 ## Who DXCP is for
 ### Primary
-Product engineers deploying and rolling back services.
+Product engineers deploying and rolling back applications.
 - Minimal onboarding.
 - No tribal knowledge.
 - Wants speed, but not at the expense of correctness.
 
 ### Secondary
-Platform engineers shaping governance, recipes, and guardrails.
+Platform engineers shaping governance, deployment strategies, and guardrails.
 - Operates at the system-design layer, not day-to-day deployments.
 
 ## What success looks like
@@ -36,7 +36,7 @@ Platform engineers shaping governance, recipes, and guardrails.
 1. **Intent-first**: the UI is organized around what the user is trying to do.
 2. **Explainability**: every block has a reason, and the reason is actionable.
 3. **Determinism**: the same inputs produce the same outcomes and the UI reflects that stability.
-4. **Object-centric**: users navigate by core objects (Service, Deployment, Artifact, Governance Decision).
+4. **Object-centric**: users navigate by core objects (Application, Deployment, Deployment Group, Deployment Strategy).
 5. **Operational narrative**: history is presented as a timeline with meaning, not raw logs.
 
 ## Out of scope (product posture)
@@ -46,7 +46,7 @@ If a feature would teach engine concepts to be useful, it is not a DXCP feature.
 ## Key constraints (v1 posture)
 - Single execution engine (explicit, not user-selectable).
 - Explicit environment semantics (no implied promotion workflows).
-- Artifacts are validated and eligible under policy before execution.
+- Versions are validated and eligible under policy before execution.
 - Governance is enforced server-side; UI reflects, never defines.
 
 ## References

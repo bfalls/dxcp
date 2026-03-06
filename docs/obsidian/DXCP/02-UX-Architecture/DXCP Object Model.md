@@ -6,7 +6,7 @@ This is a UX model first: it should match how users think, not how the engine wo
 
 ## Primary objects (user-facing)
 
-### Service
+### Application
 A deployable unit users recognize (their "thing").
 User questions:
 - What is currently running?
@@ -20,30 +20,24 @@ User questions:
 - Why did it succeed/fail/rollback?
 - What is the current state?
 
-### Artifact
-A versioned build that may be eligible to deploy.
+### Version
+A versioned build identifier that may be eligible to deploy.
 User questions:
 - Which versions exist?
 - Is this version eligible under policy?
-- What is this artifact and where did it come from?
+- What version am I deploying?
 
-### Recipe
+### Deployment Strategy
 A named deployment strategy with user-facing semantics.
 User questions:
 - What will happen if I choose this?
-- Is it allowed for this service/group?
+- Is it allowed for this application or deployment group?
 
-### Governance Decision
-A normalized, explainable evaluation result that answers:
-- Can I do this?
-- If not, exactly why not?
-- What would make it allowed?
-
-### Delivery Group (policy boundary)
-The governance boundary that scopes what services can do.
+### Deployment Group
+The governance boundary that scopes what applications can do.
 User questions:
-- What rules apply to this service?
-- What recipes are allowed?
+- What rules apply to this application?
+- What deployment strategies are allowed?
 - What are the guardrails (quota, concurrency)?
 
 ### Environment
@@ -54,12 +48,12 @@ User questions:
 (Do not imply promotions or workflow automation unless explicitly built.)
 
 ## Relationships (user-facing)
-- A **Service** belongs to one **Delivery Group**.
-- A **Delivery Group** allows specific **Recipes** and enforces guardrails.
-- A **Deployment** targets a **Service** + **Environment** and uses a **Recipe**.
-- A **Deployment** references an **Artifact**.
-- A **Governance Decision** evaluates an intent (deploy, rollback, publish) and produces allow/deny with reasons.
-- A **Recipe** has stable user semantics; behavior changes are visible over time (revisioned/snapshotted).
+- An **Application** belongs to one **Deployment Group**.
+- A **Deployment Group** allows specific **Deployment Strategies** and enforces guardrails.
+- A **Deployment** targets an **Application** + **Environment** and uses a **Deployment Strategy**.
+- A **Deployment** references a **Version**.
+- A blocked or allowed action must always be explained in clear DXCP language.
+- A **Deployment Strategy** has stable user semantics; behavior changes are visible over time.
 
 ## Canonical "object pages"
 Each primary object gets a first-class page with:
@@ -71,18 +65,17 @@ Each primary object gets a first-class page with:
 
 ## Invariants for the UI
 - Users should never need to interpret engine identifiers to answer their questions.
-- Any "blocked" state must be tied to a Governance Decision (or equivalent).
+- Any blocked state must have a clear reason and next-step explanation.
 - History is presented as a narrative timeline with normalized outcomes.
 - Admin-only engine details may exist, but must never be required for comprehension.
 
 ## Navigation implications
 Global navigation should default to objects + workflows, not tool categories.
 Examples:
-- Services -> Service page -> Deploy / History / Failures
+- Applications -> Application page -> Deploy / History / Failures
 - Deployments -> Deployment page -> Timeline / Outcome / Rollback
-- Admin -> Delivery Groups / Recipes / System Settings
+- Admin -> Deployment Groups / Strategies / System Settings
 
 ## References
 - Link: [[UX-Principles]]
-- Link: [[04-Flows/Deployment-Flow]] (create later)
-- Link: [[05-Design-Decisions]] (ADRs attach to objects)
+- Link: [[Deploy Workflow]]

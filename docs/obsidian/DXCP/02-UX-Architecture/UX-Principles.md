@@ -10,15 +10,15 @@ fast, calm, minimal, and deeply explainable.
 If DXCP blocks an action, it must provide:
 - the exact reason
 - what the user can do about it
-- what a PLATFORM_ADMIN can do about it (only visible to admins)
+- what a platform admin can do about it (only visible to admins)
 
 No vague errors. No "try again later" without structured context.
 
 ### 2) Intent-first workflows
 Users choose:
-- service
-- version (artifact)
-- recipe
+- application
+- version
+- deployment strategy
 - environment
 - change summary
 DXCP handles the rest. The UI does not surface engine primitives as a requirement.
@@ -39,7 +39,7 @@ Never via scattered tabs that hide critical state.
 
 ### 5) Object-centric pages, not tool-centric screens
 Users should feel like they are navigating a system model:
-Service, Deployment, Artifact, Recipe, Governance Decision, Delivery Group, Environment.
+Application, Deployment, Deployment Strategy, Deployment Group, Environment.
 
 Menus exist to reach objects, not to replace them.
 
@@ -83,6 +83,5 @@ Logs are a drill-down, not the primary story.
 (Track the concrete layout contract in a dedicated note later.)
 
 ## References
-- Link: [[01-Product/Vision]]
-- Link: [[02-UX-Architecture/Object-Model]]
-- Link: [[05-Design-Decisions]] (ADRs must reference at least one principle)
+- Link: [[DXCP Vision]]
+- Link: [[DXCP Object Model]]

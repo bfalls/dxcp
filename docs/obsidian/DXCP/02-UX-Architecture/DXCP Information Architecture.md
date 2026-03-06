@@ -14,6 +14,9 @@ The IA describes:
 The goal is to align the UI structure with the DXCP domain model while
 keeping the interface **intent-first, guardrail-aware, and engine-agnostic**.
 
+Cross-screen behavior for blocked, loading, empty, and access-limited states is
+defined in [[Interaction Patterns]].
+
 DXCP is a **deployment control plane**, not a DevOps dashboard.
 
 The interface should revolve around **Applications and Deployments**, not
@@ -56,7 +59,7 @@ Example flow:
 
 ```
 Applications
-  -> Application Detail
+  -> Application Screen
      -> Deploy
 ```
 
@@ -121,13 +124,13 @@ Open Application
 
 ---
 
-# Application Detail
+# Application Screen
 
-The Application detail view is the **core operational screen** of DXCP.
+The Application screen is the **core operational screen** of DXCP.
 
 Operational work for an [[DXCP Core Vocabulary#Application|Application]] occurs primarily in the [[Application Screen]].
 
-Investigation of an individual [[DXCP Core Vocabulary#Deployment|Deployment]] occurs in the [[Deployment Screen]].
+Investigation of an individual [[DXCP Core Vocabulary#Deployment|Deployment]] occurs in the [[Deployment Detail Screen]].
 
 Creation of deployments follows the process defined in [[Deploy Workflow]].
 
@@ -141,34 +144,35 @@ Can I deploy?
 What policy governs this application?
 ```
 
-Application detail contains the following sections.
+The Application screen should not behave like a tab suite of equal-weight views.
+
+It should use one dominant operational workspace with:
 
 ```
-Overview
-Deploy
-Deployments
-Failures
-Insights
+Running Version
+Recent Deployment Activity
+Recent Failures
 ```
 
-These sections are implemented as tabs or sub-views.
+Deploy should be triggered from the primary action and follow [[Deploy Workflow]].
+Longer deployment history and broader insights should be intentionally accessed rather than permanently stacked into the default page shape.
 
 ---
 
 # Application Detail Sections
 
-## Overview
+## Default Application workspace
 
 Purpose:
 
-Provide a quick operational snapshot.
+Provide a quick operational snapshot without turning the page into an archive.
 
 Displays:
 
 ```
 Running Version
 Deployment Group
-Recent Deployments
+Recent Deployment Activity
 Recent Failures
 ```
 
@@ -177,6 +181,12 @@ Primary action:
 ```
 Deploy
 ```
+
+Rules:
+
+- keep current state first and historical depth second
+- show only a recent operational window by default
+- provide an intentional path to broader history rather than a long-scrolling page
 
 ---
 
@@ -213,13 +223,13 @@ Deploy
 
 ---
 
-## Deployments
+## Recent deployment activity
 
 Purpose:
 
 Show recent deployment activity for the application.
 
-Displays a chronological list or timeline of deployments.
+Displays a chronological list or timeline of recent deployments.
 
 Each entry contains:
 
@@ -232,19 +242,26 @@ Created Time
 Rollback Indicator
 ```
 
-Primary action:
+Primary actions:
 
 ```
 Open Deployment
+View Full History
 ```
+
+Rules:
+
+- the default page shows a recent, bounded slice of history
+- full history should be opened intentionally through a dedicated history view or expanded list mode
+- do not make the Application screen an unbounded deployment archive
 
 ---
 
-## Failures
+## Recent failures
 
 Purpose:
 
-Expose normalized failures related to deployments.
+Expose normalized failures related to recent deployments.
 
 Each failure entry displays:
 
@@ -277,13 +294,15 @@ Rollback rate
 Deployments by strategy
 ```
 
-This section may initially link to the global Insights view.
+This section should begin as a compact drill-through to the global [[Insights Screen]] rather than a large secondary analytics surface inside the Application screen.
 
 ---
 
 # Deployments
 
 The **Deployments** section displays a global list of deployment records.
+
+It should stay summary-first and time-scoped rather than behaving like an infinitely growing audit wall.
 
 Users visit this section to:
 
@@ -348,6 +367,8 @@ Diagnostics may include links to engine execution details for platform admins.
 
 The **Insights** section provides system-wide delivery analytics.
 
+It should stay compact, operational, and drill-down oriented.
+
 Examples:
 
 ```
@@ -373,9 +394,13 @@ Refresh Insights
 
 The **Admin** section contains platform configuration.
 
-Admin controls are visible only to platform administrators.
+Admin navigation and edit controls are visible only to platform administrators in normal use.
+
+If a non-admin user reaches an admin route directly, DXCP should show a blocked-access state rather than a partial admin shell.
 
 Admin sections include:
+
+The Admin area should remain configuration-first. It must not absorb standard delivery work that belongs in Applications, Deployments, or Insights.
 
 ```
 Deployment Groups

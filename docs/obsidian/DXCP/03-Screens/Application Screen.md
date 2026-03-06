@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The **Application screen** is the primary operational workspace in DXCP. This screen represents an [[DXCP Core Vocabulary#Application|Application]] and allows users to create a [[DXCP Core Vocabulary#Deployment|Deployment]] using a selected [[DXCP Core Vocabulary#Deployment Strategy|Deployment Strategy]] governed by a [[DXCP Core Vocabulary#Deployment Group|Deployment Group]]. The Application screen shows a summarized deployment history. Detailed lifecycle behavior is defined in [[Deployment Timeline]].
+The **Application screen** is the primary operational workspace in DXCP. This screen represents an [[DXCP Core Vocabulary#Application|Application]] and allows users to create a [[DXCP Core Vocabulary#Deployment|Deployment]] using a selected [[DXCP Core Vocabulary#Deployment Strategy|Deployment Strategy]] governed by a [[DXCP Core Vocabulary#Deployment Group|Deployment Group]]. The Application screen shows a summarized recent history, not a full archive. Detailed lifecycle behavior is defined in [[Deployment Timeline]].
 
 Most user workflows begin and end on this screen.
 
@@ -87,12 +87,13 @@ Secondary Column (right)
 Deployment Group
 Guardrails
 Allowed Strategies
-Environment Info
 ```
 
 Primary content must visually dominate the screen.
 
 The secondary column provides supporting context.
+
+It should stay compact and selective so the page remains calm and operational.
 
 ---
 
@@ -115,24 +116,26 @@ Deployment: 9831
 Deployed: 12 minutes ago
 ```
 
-This information is derived from **CurrentRunningState**. :contentReference[oaicite:1]{index=1}
+This information reflects DXCP's current running version for the application.
 
 Users should be able to click the deployment ID to open the deployment detail.
 
 ---
 
-# Deployment Timeline
+# Recent Deployment Activity
 
-The Deployment Timeline shows recent deployments in chronological order.
+This section shows recent deployments in chronological order.
 
 Example:
 
 ```
-Deployment Timeline
+Recent Deployment Activity
 
 SUCCEEDED  v1.32.1   12 minutes ago
 FAILED     v1.32.0   1 hour ago
 SUCCEEDED  v1.31.4   yesterday
+
+View Full History
 ```
 
 Each entry displays:
@@ -151,13 +154,19 @@ Primary action:
 Open Deployment
 ```
 
-The timeline should prioritize readability over table density.
+This section should prioritize readability over table density.
+
+Rules:
+
+- show a bounded recent slice by default
+- keep the list short enough to preserve above-the-fold meaning
+- make full history an intentional action rather than the default page shape
 
 ---
 
 # Failures
 
-The Failures section surfaces normalized failures related to deployments.
+The Failures section surfaces notable normalized failures related to recent deployments.
 
 Example:
 
@@ -173,7 +182,7 @@ Health check misconfigured
 Suggested action: verify target group settings
 ```
 
-Failure entries come from **FailureModel** records. :contentReference[oaicite:2]{index=2}
+Failure entries are normalized by DXCP so they can be read consistently across deployments.
 
 Primary action:
 
@@ -182,6 +191,8 @@ Inspect Deployment
 ```
 
 Failures should link to the associated deployment.
+
+This section should highlight what needs attention now rather than restating every historical failure.
 
 ---
 
@@ -209,11 +220,14 @@ Change Summary
 
 The form must show policy context in a side panel.
 
+That side panel should stay concise and decision-focused.
+
 ---
 
 # Policy Panel
 
 The policy panel shows governance information derived from the Deployment Group.
+It should support the deploy decision without becoming a tall second workspace.
 
 Example:
 
@@ -234,7 +248,7 @@ Rolling
 
 Guardrails are visible so users understand why deployments may be blocked.
 
-DXCP treats guardrails as product features, not hidden rules. :contentReference[oaicite:3]{index=3}
+DXCP treats guardrails as product features, not hidden rules.
 
 ---
 
@@ -259,7 +273,7 @@ If additional diagnostics exist, they may be visible to platform admins.
 
 The Application screen adapts to the user role.
 
-PLATFORM_ADMIN
+Platform admin
 
 ```
 Deploy
@@ -267,21 +281,48 @@ Rollback
 Open execution diagnostics
 ```
 
-DELIVERY_OWNER
+Delivery owner
 
 ```
 Deploy
 Rollback
 ```
 
-OBSERVER
+Observer
 
 ```
 Read-only view
-No deploy actions
+Deploy unavailable with explanation
 ```
 
 Blocked actions should display explanatory messages rather than disappearing.
+Page-level blocking reasons belong in the alert rail.
+
+---
+
+# Shared states
+
+The Application screen should distinguish loading, empty, no-results, and
+read-only states clearly.
+
+Loading:
+
+- preserve the page header and main layout
+- use placeholders for Running Version, recent deployments, and failures
+
+Empty states:
+
+- if the application has no deployment history, say so in the recent deployment area
+- if there are no recent failures, say so in the failures section rather than leaving it blank
+
+No-results states:
+
+- if a scoped filter or time window returns nothing, explain that the current scope has no matching deployments
+
+Read-only state:
+
+- keep deploy-related affordances understandable
+- explain unavailable actions in product language
 
 ---
 
@@ -297,6 +338,8 @@ Refresh Application
 ```
 
 The screen should never expose deployment engine mechanics.
+
+Shared state behavior should remain consistent with [[Interaction Patterns]].
 
 ---
 
@@ -336,8 +379,8 @@ Priority order:
 
 ```
 Running Version
-Recent Deployments
-Failures
+Recent Deployment Activity
+Recent Failures
 Policy Context
 ```
 
@@ -368,8 +411,8 @@ It provides:
 
 ```
 Current running state
-Deployment history
-Failure visibility
+Recent deployment activity
+Recent failure visibility
 Deployment intent
 Policy context
 ```

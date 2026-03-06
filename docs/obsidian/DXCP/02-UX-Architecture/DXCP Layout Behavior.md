@@ -166,7 +166,6 @@ Example sections:
 Deployment Group
 Guardrails
 Allowed Strategies
-Environment Info
 ```
 
 Behavior:
@@ -188,6 +187,8 @@ Rules:
 - Should contain read only contextual information
 - Should not dominate the visual layout
 - Panels should be stacked vertically
+- Should stay selective and compact rather than becoming a second primary column
+- Sticky behavior should disable when the column becomes too tall to remain helpful
 
 ---
 
@@ -202,17 +203,17 @@ Example structure:
 | Primary Column                     | Secondary Column            |
 |                                    |                             |
 | Running Version                    | Deployment Group            |
-| Deployment Timeline                | Guardrails                  |
-| Failures                           | Allowed Strategies          |
-|                                    | Environment Info            |
+| Recent Deployment Activity         | Guardrails                  |
+| Recent Failures                    | Allowed Strategies          |
 +------------------------------------+-----------------------------+
 ```
 
 Rules:
 
 - Primary column width should be larger than secondary column
-- Secondary column should remain visible while scrolling
+- Secondary column should remain visible while scrolling when helpful
 - Content must remain readable without horizontal scrolling
+- Wide screens should add outer whitespace, not extra equal-weight panels
 
 ---
 
@@ -225,12 +226,11 @@ Example order:
 
 ```
 Running Version
-Deployment Timeline
-Failures
+Recent Deployment Activity
+Recent Failures
 Deployment Group
 Guardrails
 Allowed Strategies
-Environment Info
 ```
 
 Rules:
@@ -238,6 +238,7 @@ Rules:
 - Primary column sections appear first
 - Secondary column sections appear after primary content
 - Layout must remain readable on smaller screens
+- Responsive collapse should preserve meaning, not promote secondary context above the main story
 
 ---
 
@@ -267,6 +268,12 @@ Policy context remains visible
 
 ```
 Secondary column is sticky
+```
+
+Scrolling is for reading depth, not for basic comprehension
+
+```
+Users should understand the current state before deep scroll is required
 ```
 
 These rules create a stable and predictable interaction model.

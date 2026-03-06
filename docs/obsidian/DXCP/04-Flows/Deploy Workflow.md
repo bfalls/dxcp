@@ -8,6 +8,8 @@ This flow is intent-first, guardrail-aware, and avoids exposing engine mechanics
 It defines user actions, validation stages, failure handling, and the resulting
 Deployment record lifecycle.
 
+Shared state handling follows [[Interaction Patterns]].
+
 Core nouns used:
 
 Application
@@ -40,9 +42,9 @@ Before a deploy can be submitted:
 
 - User is authenticated.
 - User role allows deploy:
-  - PLATFORM_ADMIN: allowed
-  - DELIVERY_OWNER: allowed (within scope)
-  - OBSERVER: not allowed
+  - platform admin: allowed
+  - delivery owner: allowed (within scope)
+  - observer: not allowed
 - Version is registered for the Application.
 - Deployment Strategy is selected.
 - Change Summary is provided (required).
@@ -56,7 +58,7 @@ High-level phases:
 1. Open deploy form (in Application context)
 2. Enter intent fields
 3. Validate intent (policy-first ordering)
-4. Submit deployment (creates Deployment record)
+4. Submit deployment (creates a Deployment)
 5. Observe deployment progress (via Deployment detail / timeline)
 6. Terminal outcome (succeeded/failed/canceled/etc.)
 
@@ -129,6 +131,7 @@ What is checked:
 If blocked:
 
 - Show a blocking message in the alert rail:
+- Keep field-level issues inline when the problem belongs to a specific input:
 
 Example:
 
@@ -203,7 +206,7 @@ User action:
 
 System behavior:
 
-- Create a new Deployment record (immutable record of intent + policy snapshot)
+- Create a new Deployment (an immutable record of intent + policy snapshot)
 - Begin execution through the engine adapter only after validations pass
 
 UI behavior:
@@ -330,8 +333,9 @@ Blocked deploy scenarios:
 UX rules:
 
 - Do not hide the Deploy button without explanation.
-- If blocked, disable the primary action and display the reason in a consistent location
-  (alert rail or form-level message).
+- If blocked, disable the primary action and display the reason in the alert rail.
+- Keep field-specific validation inline near the affected field.
+- Do not make users infer the reason from a disabled button alone.
 
 ---
 

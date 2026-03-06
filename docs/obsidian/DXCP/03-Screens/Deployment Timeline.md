@@ -32,18 +32,18 @@ This note specifies:
 
 ## Timeline object
 
-A DeploymentTimeline is an ordered list of DeploymentEvent entries attached to a DeploymentRecord.
+The Deployment Timeline is an ordered list of deployment events attached to a deployment.
 Events are append-only operational evidence.
 
 ### DeploymentEvent (conceptual)
 - id: stable identifier
 - timestamp: ISO8601
-- sequence: monotonic per DeploymentRecord (tie-break)
+- sequence: monotonic per deployment (tie-break)
 - category: SUBMISSION | GOVERNANCE | VALIDATION | EXECUTION | OUTCOME | FAILURE | DIAGNOSTIC
 - type: canonical event type (see below)
 - summary: one-line description (developer-readable)
 - detail: optional short explanation (no raw engine dumps)
-- relatedFailure: optional FailureModel reference (category/summary/actionHint)
+- relatedFailure: optional normalized failure reference (category/summary/action hint)
 - adminDiagnostics: optional (admin-only) references (engineExecutionUrl, request_id, operator_hint)
 
 ---
@@ -82,7 +82,7 @@ Events are append-only operational evidence.
 - RUNNING_STATE_UPDATED
 
 ### F) Failure observation
-- FAILURE_OBSERVED (references FailureModel)
+- FAILURE_OBSERVED (references a normalized failure)
 
 ### G) Rollback lineage (on rollback deployment record)
 - ROLLBACK_REQUESTED
@@ -127,10 +127,10 @@ Each milestone row can expand to show:
 
 ### “Next step” behavior
 If a failure exists, show exactly one recommended next action
-(using FailureModel.actionHint) near the first failure observation.
+(using the normalized action hint) near the first failure observation.
 
 ### Rollback behavior
-Rollback is a separate DeploymentRecord with its own timeline.
+Rollback is a separate deployment with its own timeline.
 The header must show “Rollback of <deploymentId>” (via rollbackOf).
 
 ---

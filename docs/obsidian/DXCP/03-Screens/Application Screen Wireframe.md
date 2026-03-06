@@ -56,9 +56,8 @@ Example structure:
 | Primary Column                     | Secondary Column            |
 |                                    |                             |
 | Running Version                    | Deployment Group            |
-| Deployment Timeline                | Guardrails                  |
-| Failures                           | Allowed Strategies          |
-|                                    | Environment Info            |
+| Recent Deployment Activity         | Guardrails                  |
+| Recent Failures                    | Allowed Strategies          |
 +------------------------------------+-----------------------------+
 ```
 
@@ -67,6 +66,8 @@ Rules:
 - Primary column contains operational signal
 - Secondary column contains context and policy
 - Primary column must visually dominate
+- Keep the number of context cards low
+- Avoid long explanatory blocks in the secondary column
 
 ---
 
@@ -118,8 +119,8 @@ The primary column contains the operational status of the application.
 Order of sections:
 
 1. Running Version
-2. Deployment Timeline
-3. Failures
+2. Recent Deployment Activity
+3. Recent Failures
 
 Example layout:
 
@@ -134,15 +135,16 @@ Example layout:
 +------------------------------------+
 
 +------------------------------------+
-| Deployment Timeline                |
+| Recent Deployment Activity        |
 |                                    |
 | SUCCEEDED   v1.32.1   12m ago      |
 | FAILED      v1.32.0   1h ago       |
 | SUCCEEDED   v1.31.4   yesterday    |
+| View Full History                  |
 +------------------------------------+
 
 +------------------------------------+
-| Failures                           |
+| Recent Failures                    |
 |                                    |
 | INFRASTRUCTURE                     |
 | ASG capacity exhausted             |
@@ -155,8 +157,9 @@ Example layout:
 Rules:
 
 - Sections are stacked vertically
-- Timeline entries are readable and concise
+- Recent activity remains readable and concise
 - Failures highlight actionable information
+- The default screen should not become a long-scroll archive
 
 ---
 
@@ -185,18 +188,19 @@ Rules:
 
 ---
 
-# Deployment Timeline Panel
+# Recent Deployment Activity Panel
 
-The timeline shows recent deployments for the application.
+The panel shows recent deployments for the application.
 
 Example:
 
 ```
-Deployment Timeline
+Recent Deployment Activity
 
 SUCCEEDED   v1.32.1   12m ago
 FAILED      v1.32.0   1h ago
 SUCCEEDED   v1.31.4   yesterday
+View Full History
 ```
 
 Rules:
@@ -204,12 +208,13 @@ Rules:
 - Most recent deployments appear first
 - Each entry links to Deployment detail
 - Avoid table layouts with many columns
+- Keep the default list intentionally short and summary-first
 
 ---
 
 # Failures Panel
 
-Failures summarize deployment related problems.
+Recent failures summarize deployment related problems.
 
 Example:
 
@@ -234,6 +239,7 @@ Rules:
 # Secondary Column
 
 The secondary column provides policy context.
+It should stay sparse enough that the primary story still dominates.
 
 Example layout:
 

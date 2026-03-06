@@ -12,7 +12,9 @@ It provides the authoritative record of:
 - what failures occurred
 - whether rollback is possible
 
-This screen is the primary investigation tool when something goes wrong.
+This screen provides the baseline deployment object view. Detailed investigation behavior is further refined in [[Deployment Detail Screen]].
+
+Shared state behavior should remain consistent with [[Interaction Patterns]].
 
 ---
 
@@ -68,6 +70,8 @@ Policy Snapshot
 Actions
 ```
 
+The right column should remain compact and supportive rather than becoming a second investigation surface.
+
 ---
 
 # Page Header
@@ -94,7 +98,8 @@ Open Application
 Refresh
 ```
 
-If rollback is not allowed, the button is disabled with explanation.
+If rollback is not allowed, the button remains visible but disabled with explanation.
+Page-level blocking reasons belong in the alert rail.
 
 ---
 
@@ -115,8 +120,7 @@ Created Time
 Requested By
 ```
 
-This information comes from the **DeploymentIntent** snapshot stored
-inside the Deployment record.
+This information comes from the immutable deployment details captured when the deployment was created.
 
 ---
 
@@ -238,6 +242,7 @@ Failures should link to related diagnostic information when available.
 # Actions Panel
 
 The right column contains available actions.
+Actions and diagnostics should stay concise so the timeline remains visually dominant.
 
 Typical actions:
 
@@ -255,6 +260,7 @@ View engine execution
 ```
 
 These should be hidden from non-admin users.
+Admin diagnostics should remain progressive disclosure rather than a permanently expanded panel.
 
 ---
 
@@ -335,6 +341,28 @@ interface remains engine-agnostic.
 
 ---
 
+# Shared interaction states
+
+### Read and loading states
+
+- preserve the page header and layout while deployment data loads
+- use placeholders for summary, timeline, and policy snapshot rather than a spinner-only page
+- if refresh fails, show the page-level problem in the alert rail
+
+### No failures
+
+If no failures exist for the deployment, state that clearly in the failures area.
+
+### Rollback unavailable
+
+When rollback is unavailable:
+
+- keep the action visible
+- explain why it is unavailable
+- place page-level blocking explanation in the alert rail when needed
+
+---
+
 # Empty / Edge States
 
 The screen must handle unusual cases gracefully.
@@ -377,7 +405,7 @@ The focus must remain on **deployment outcome**, not engine execution.
 
 # Visual Priority
 
-The visual hierarchy should emphasize operational signal.
+The visual hierarchy should emphasize operational signal and fast comprehension.
 
 Priority order:
 
