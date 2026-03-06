@@ -17,6 +17,8 @@ __pycache__/
 **/*.tgz
 ui/dist/
 docs/generated/
+docs/obsidian/*.zip
+docs/obsidian/**/.obsidian/
 
 # CDK artifacts
 cdk/cdk.out/
