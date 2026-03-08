@@ -196,7 +196,7 @@ Should make these states obvious:
 - no results from scoped filters
 - read failure in the Alert Rail
 
-### [[Admin Screens]]
+### [[Admin Screen]]
 
 Should make these states obvious:
 - blocked access for non-admin users on direct route entry

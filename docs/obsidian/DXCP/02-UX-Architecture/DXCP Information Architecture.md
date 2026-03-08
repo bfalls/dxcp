@@ -194,7 +194,9 @@ Rules:
 
 Purpose:
 
-Submit a deployment intent.
+Launch deployment submission for the current application.
+
+This area is an entry point, not the full submission surface. The complete deployment submission experience is owned by [[Deploy Workflow]].
 
 Displays:
 
@@ -218,7 +220,7 @@ Remaining Quotas
 Primary action:
 
 ```
-Deploy
+Open Deploy Workflow
 ```
 
 ---

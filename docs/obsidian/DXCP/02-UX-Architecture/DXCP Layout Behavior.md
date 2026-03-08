@@ -51,13 +51,16 @@ Behavior:
 Purpose:
 
 Provide a constant navigation anchor so users can quickly move between
-major sections of the system.
+major sections of the system and reliably access authenticated user actions.
 
 Rules:
 
 - Appears on every screen
 - Never scrolls out of view
 - Height should remain stable across screens
+- Includes a compact authenticated user menu on the right side
+- The authenticated user menu shows signed-in identity and a logout action
+- Role does not need to be shown in the top navigation by default
 
 ---
 
