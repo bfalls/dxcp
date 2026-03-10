@@ -229,7 +229,7 @@ This family carries the explanation posture of the product. It must feel consist
 **Role-aware or blocked behavior**
 - deploy blocked by policy
 - rollback blocked
-- non-admin read-only admin state
+- non-admin admin-route blocked-access state
 - system mutations disabled
 - restricted object mutation state
 
