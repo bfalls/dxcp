@@ -842,6 +842,107 @@ export async function runAllTests() {
     await view.findByText('Recent state summary')
   })
 
+  await runTest('New experience deploy route shows enabled deploy intent with readiness review', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications/payments-api/deploy')
+
+    await view.findByText('Deploy Application')
+    await view.findByText('Intent entry')
+    await view.findByText('Readiness review')
+    await view.findByText('Ready to deploy')
+    await view.findByText('No active deployment is already running for sandbox.')
+    await view.findAllByText('Ready')
+    assert.ok(view.getByRole('link', { name: 'Open Application' }))
+    assert.ok(view.getByRole('link', { name: 'Open Legacy Deploy' }))
+    await view.findByText('Policy and guardrails')
+  })
+
+  await runTest('New experience deploy route shows blocked deploy explanation locally', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications/payments-api/deploy/blocked')
+
+    await view.findByText('Deploy blocked')
+    await view.findByText('Deploy blocked by policy')
+    await view.findByText(
+      'Sandbox already has an active deployment for Payments Core. Wait for that deployment to complete, or open it to inspect progress before starting another deploy.'
+    )
+    await view.findByText('No active deployment is already running for sandbox.')
+    await view.findAllByText('Blocked')
+    assert.ok(view.getByRole('link', { name: 'Open Active Deployment' }))
+  })
+
+  await runTest('New experience deploy route shows permission-limited deploy behavior', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const permissionView = renderApp('/new/applications/payments-api/deploy/permission-limited')
+
+    await permissionView.findByText('Permission-limited deploy')
+    await permissionView.findByText(
+      'This intent is visible so you can review the deploy plan, but production deploys from this workflow are limited to platform admins. Return to the application or hand off to an authorized operator.'
+    )
+    await permissionView.findByText('Deploy permission is confirmed for production.')
+    await permissionView.findAllByText('Blocked')
+  })
+
+  await runTest('New experience deploy route shows read-only deploy behavior for observers', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'observer@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-observers']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'OBSERVER',
+      deployAllowed: false,
+      rollbackAllowed: false
+    })
+    const readOnlyView = renderApp('/new/applications/payments-api/deploy')
+
+    await readOnlyView.findByText('Read-only access')
+    await readOnlyView.findByText('Read-only workflow')
+    await readOnlyView.findByText(
+      'This workflow remains visible so you can understand deploy requirements, current policy, and the next handoff without being invited into a blocked mutation path.'
+    )
+    await readOnlyView.findAllByText('Read-only')
+  })
+
   await runTest('New experience deployment route shows unavailable treatment with legacy fallback', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

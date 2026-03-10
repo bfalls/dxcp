@@ -1,4 +1,5 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
 
 function formatRoleLabel(role) {
@@ -39,15 +40,26 @@ export default function NewExperiencePageHeader({
       <div className="new-page-header-actions" aria-label="Header actions">
         <div className="new-page-secondary-actions">
           {secondaryActions.map((action) => (
-            <button
-              key={action.label}
-              className="button secondary"
-              type="button"
-              disabled={action.disabled}
-              title={action.description || ''}
-            >
-              {action.label}
-            </button>
+            action.to ? (
+              <Link
+                key={action.label}
+                className="button secondary"
+                to={action.to}
+                title={action.description || ''}
+              >
+                {action.label}
+              </Link>
+            ) : (
+              <button
+                key={action.label}
+                className="button secondary"
+                type="button"
+                disabled={action.disabled}
+                title={action.description || ''}
+              >
+                {action.label}
+              </button>
+            )
           ))}
         </div>
         <div className="new-page-primary-action-group">

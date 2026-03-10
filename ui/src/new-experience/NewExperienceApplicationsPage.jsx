@@ -59,6 +59,7 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
   const { applicationName = 'payments-api' } = useParams()
   const isReadOnly = role === 'OBSERVER'
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
+  const newDeployRoute = `/new/applications/${applicationName}/deploy`
 
   const secondaryActions = [
     { label: 'Open Deployments', disabled: false, description: 'Use the recent state summary to open deployment detail.' },
@@ -98,7 +99,7 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
             <p className="helper">Current state stays first so this page reads as the application record, not a browse surface.</p>
           </div>
           <div className="links">
-            <Link className="link secondary" to="/deploy">
+            <Link className="link secondary" to={newDeployRoute}>
               Open deploy workflow
             </Link>
             <Link className="link" to="/new/deployments/9831">

@@ -16,6 +16,7 @@ import SettingsPage from './pages/SettingsPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import NewExperienceShell from './new-experience/NewExperienceShell.jsx'
 import NewExperienceApplicationsPage from './new-experience/NewExperienceApplicationsPage.jsx'
+import NewExperienceDeployPage from './new-experience/NewExperienceDeployPage.jsx'
 import NewExperienceUnavailableDeploymentPage from './new-experience/NewExperienceUnavailableDeploymentPage.jsx'
 import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
 
@@ -4312,6 +4313,14 @@ export default function App() {
             <Route
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} />}
+            />
+            <Route
+              path="/new/applications/:applicationName/deploy"
+              element={<NewExperienceDeployPage role={derivedRole} />}
+            />
+            <Route
+              path="/new/applications/:applicationName/deploy/:scenario"
+              element={<NewExperienceDeployPage role={derivedRole} />}
             />
             <Route path="/new/deployments/:deploymentId" element={<NewExperienceUnavailableDeploymentPage />} />
             <Route path="/new/admin" element={<NewExperienceUnavailableRoutePage />} />
