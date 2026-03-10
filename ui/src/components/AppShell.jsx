@@ -125,6 +125,9 @@ export default function AppShell({
             <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/admin" end>
               Admin
             </NavLink>
+            <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/new/applications/payments-api">
+              New Experience
+            </NavLink>
           </nav>
         </LayoutContainer>
       </header>

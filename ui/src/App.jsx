@@ -14,6 +14,8 @@ import DeploymentsPage from './pages/DeploymentsPage.jsx'
 import DeploymentDetailPage from './pages/DeploymentDetailPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
+import NewExperienceShell from './new-experience/NewExperienceShell.jsx'
+import NewExperienceApplicationsPage from './new-experience/NewExperienceApplicationsPage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -523,6 +525,7 @@ function formatAuditValue(by, at) {
 }
 
 function resolveViewFromPath(pathname) {
+  if (pathname.startsWith('/new')) return 'new-experience'
   if (matchPath('/deployments/:deploymentId', pathname)) return 'detail'
   if (matchPath('/services/:serviceName', pathname)) return 'service'
   if (pathname.startsWith('/deployments')) return 'deployments'
@@ -871,6 +874,7 @@ export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const currentPath = location.pathname || '/'
+  const isNewExperienceRoute = currentPath.startsWith('/new')
   const lastViewRef = useRef('')
   const lastRouteKeyRef = useRef('')
   const deploymentsScrollRef = useRef(0)
@@ -4294,6 +4298,24 @@ export default function App() {
       headline: 'Read-only mode',
       message: 'DXCP is in read-only mode. Mutations are disabled.'
     })
+  }
+
+  if (isNewExperienceRoute) {
+    return (
+      <NewExperienceShell>
+        {authReady && isAuthenticated && (
+          <Routes>
+            <Route path="/new" element={<Navigate to="/new/applications/payments-api" replace />} />
+            <Route path="/new/applications" element={<Navigate to="/new/applications/payments-api" replace />} />
+            <Route
+              path="/new/applications/:applicationName"
+              element={<NewExperienceApplicationsPage role={derivedRole} />}
+            />
+            <Route path="*" element={<Navigate to="/new/applications/payments-api" replace />} />
+          </Routes>
+        )}
+      </NewExperienceShell>
+    )
   }
 
   return (
