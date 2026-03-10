@@ -777,6 +777,77 @@ export async function runAllTests() {
     assert.equal(reviewButton.disabled, true)
   })
 
+  await runTest('New experience shows blocked deploy with local explanation and degraded-read placement', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications/payments-api')
+
+    await view.findByText('Application: payments-api')
+    await view.findByText('Deploy blocked')
+    await view.findByText('Another deployment is active for sandbox. Open the active deployment or wait for it to finish.')
+    await view.findByText('Supporting reads are degraded')
+    await view.findByText(
+      'Recent activity is current, but failure evidence from the last refresh is still catching up. Open the latest deployment for the authoritative record.'
+    )
+    await view.findByText('Mutation disabled')
+    await view.findByText('Permission-limited detail')
+  })
+
+  await runTest('New experience shows read-only application posture for observers', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'observer@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-observers']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'OBSERVER',
+      deployAllowed: false,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications/payments-api')
+
+    await view.findByText('Read-only access')
+    await view.findByText(
+      'You can review deploy readiness here, but only delivery owners can deploy from this workflow.'
+    )
+    await view.findByText('Read-only')
+  })
+
+  await runTest('New experience deployment route shows unavailable treatment with legacy fallback', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments/9831')
+
+    await view.findByText('Deployment detail is not available in the new experience preview')
+    assert.ok(view.getByRole('link', { name: 'Open Applications' }))
+    assert.ok(view.getByRole('link', { name: 'Open Legacy Deployment' }))
+  })
+
   await runTest('PLATFORM_ADMIN sees all sections', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

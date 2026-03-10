@@ -16,6 +16,8 @@ import SettingsPage from './pages/SettingsPage.jsx'
 import AdminPage from './pages/AdminPage.jsx'
 import NewExperienceShell from './new-experience/NewExperienceShell.jsx'
 import NewExperienceApplicationsPage from './new-experience/NewExperienceApplicationsPage.jsx'
+import NewExperienceUnavailableDeploymentPage from './new-experience/NewExperienceUnavailableDeploymentPage.jsx'
+import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -4311,6 +4313,8 @@ export default function App() {
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} />}
             />
+            <Route path="/new/deployments/:deploymentId" element={<NewExperienceUnavailableDeploymentPage />} />
+            <Route path="/new/admin" element={<NewExperienceUnavailableRoutePage />} />
             <Route path="*" element={<Navigate to="/new/applications/payments-api" replace />} />
           </Routes>
         )}

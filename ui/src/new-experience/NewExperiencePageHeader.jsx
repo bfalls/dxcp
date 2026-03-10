@@ -1,4 +1,5 @@
 import React from 'react'
+import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
 
 function formatRoleLabel(role) {
   if (role === 'PLATFORM_ADMIN') return 'Platform admin'
@@ -14,8 +15,12 @@ export default function NewExperiencePageHeader({
   primaryAction,
   secondaryActions = [],
   role = 'UNKNOWN',
-  readOnlyNote = ''
+  actionNote = ''
 }) {
+  const primaryActionState = primaryAction?.state || 'available'
+  const showPrimaryAction = primaryActionState !== 'unavailable'
+  const actionNoteId = showPrimaryAction && actionNote ? `new-header-note-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined
+
   return (
     <header className="new-page-header">
       <div className="new-page-header-identity">
@@ -44,18 +49,52 @@ export default function NewExperiencePageHeader({
             </button>
           ))}
         </div>
-        <button
-          className="button new-page-primary-action"
-          type="button"
-          disabled={primaryAction.disabled}
-          title={primaryAction.description || ''}
-        >
-          {primaryAction.label}
-        </button>
-        <div className="new-page-role-note">
-          Role: {formatRoleLabel(role)}
-          {readOnlyNote ? ` - ${readOnlyNote}` : ''}
-        </div>
+        {showPrimaryAction ? (
+          primaryActionState === 'read-only' ? (
+            <div className="new-page-read-only-action" aria-describedby={actionNoteId}>
+              <span className="new-page-read-only-label">{primaryAction.label}</span>
+              <span className="new-page-read-only-value">Read-only</span>
+            </div>
+          ) : (
+            <button
+              className={`button new-page-primary-action${
+                primaryActionState === 'blocked' ? ' new-page-primary-action-blocked' : ''
+              }`}
+              type="button"
+              disabled={primaryActionState === 'disabled' || primaryAction.disabled}
+              aria-disabled={primaryActionState === 'blocked' ? 'true' : undefined}
+              aria-describedby={actionNoteId}
+              title={primaryAction.description || ''}
+            >
+              {primaryAction.label}
+            </button>
+          )
+        ) : (
+          <div className="new-page-unavailable-action">Not available on this route</div>
+        )}
+        <div className="new-page-role-note">Role: {formatRoleLabel(role)}</div>
+        {actionNote ? (
+          <NewExplanation
+            title={
+              primaryActionState === 'blocked'
+                ? 'Deploy blocked'
+                : primaryActionState === 'disabled'
+                  ? 'Deploy not ready'
+                  : primaryActionState === 'read-only'
+                    ? 'Read-only access'
+                    : 'Action note'
+            }
+            tone={
+              primaryActionState === 'blocked'
+                ? 'danger'
+                : primaryActionState === 'disabled'
+                  ? 'neutral'
+                  : 'warning'
+            }
+          >
+            <span id={actionNoteId}>{actionNote}</span>
+          </NewExplanation>
+        ) : null}
       </div>
     </header>
   )
