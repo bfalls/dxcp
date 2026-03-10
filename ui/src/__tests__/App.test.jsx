@@ -777,7 +777,7 @@ export async function runAllTests() {
     assert.equal(reviewButton.disabled, true)
   })
 
-  await runTest('New experience shows blocked deploy with local explanation and degraded-read placement', async () => {
+  await runTest('New experience application route reads as an object page with blocked deploy and local explanation', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -793,15 +793,28 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/applications/payments-api')
 
-    await view.findByText('Application: payments-api')
+    await view.findByText('Application')
+    await view.findByText('payments-api')
+    await view.findByText('Current running summary')
+    await view.findByText('Recent state summary')
+    await view.findByText('Application owner')
+    await view.findByText('Payments Platform')
+    await view.findAllByText('Current version')
+    await view.findAllByText('v1.32.1')
     await view.findByText('Deploy blocked')
-    await view.findByText('Another deployment is active for sandbox. Open the active deployment or wait for it to finish.')
+    await view.findByText(
+      'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
+    )
+    assert.ok(view.getByRole('link', { name: 'Open deploy workflow' }))
+    assert.ok(view.getByRole('link', { name: 'Open current deployment detail' }))
+    assert.ok(view.getByRole('link', { name: 'Open active deployment' }))
     await view.findByText('Supporting reads are degraded')
     await view.findByText(
-      'Recent activity is current, but failure evidence from the last refresh is still catching up. Open the latest deployment for the authoritative record.'
+      'Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.'
     )
     await view.findByText('Mutation disabled')
     await view.findByText('Permission-limited detail')
+    await view.findByText('Supporting context')
   })
 
   await runTest('New experience shows read-only application posture for observers', async () => {
@@ -822,9 +835,11 @@ export async function runAllTests() {
 
     await view.findByText('Read-only access')
     await view.findByText(
-      'You can review deploy readiness here, but only delivery owners can deploy from this workflow.'
+      'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
     )
     await view.findByText('Read-only')
+    await view.findByText('Open deploy workflow')
+    await view.findByText('Recent state summary')
   })
 
   await runTest('New experience deployment route shows unavailable treatment with legacy fallback', async () => {

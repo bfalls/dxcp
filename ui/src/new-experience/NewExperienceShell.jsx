@@ -1,5 +1,5 @@
 import React from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 
 export const NEW_EXPERIENCE_MAX_WIDTH_PX = 1200
@@ -35,9 +35,12 @@ export default function NewExperienceShell({ children }) {
           <div className="new-shell-page-frame">
             <section className="new-shell-primary-region">{children}</section>
             <aside className="new-shell-supporting-region">
-              <SectionCard>
-                <h3>Supporting Context</h3>
-                <p className="helper">Reserved shell-level supporting region for later slices.</p>
+            <SectionCard>
+                <h3>Preview boundary</h3>
+                <p className="helper">The new experience remains opt-in under <code>/new/*</code> during rollout.</p>
+                <Link className="link secondary" to="/services">
+                  Return to legacy experience
+                </Link>
               </SectionCard>
             </aside>
           </div>

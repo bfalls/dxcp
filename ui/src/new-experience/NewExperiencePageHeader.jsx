@@ -29,7 +29,8 @@ export default function NewExperiencePageHeader({
         <div className="new-page-state-summary" aria-label="State summary">
           {stateSummaryItems.map((item) => (
             <span key={item.label} className="new-page-state-item">
-              <span className="new-page-state-label">{item.label}:</span> {item.value}
+              <span className="new-page-state-label">{item.label}</span>
+              <span className="new-page-state-value">{item.value}</span>
             </span>
           ))}
         </div>
@@ -49,31 +50,35 @@ export default function NewExperiencePageHeader({
             </button>
           ))}
         </div>
-        {showPrimaryAction ? (
-          primaryActionState === 'read-only' ? (
-            <div className="new-page-read-only-action" aria-describedby={actionNoteId}>
-              <span className="new-page-read-only-label">{primaryAction.label}</span>
-              <span className="new-page-read-only-value">Read-only</span>
-            </div>
+        <div className="new-page-primary-action-group">
+          {showPrimaryAction ? (
+            primaryActionState === 'read-only' ? (
+              <div className="new-page-read-only-action" aria-describedby={actionNoteId}>
+                <span className="new-page-read-only-label">{primaryAction.label}</span>
+                <span className="new-page-read-only-value">Read-only</span>
+              </div>
+            ) : (
+              <button
+                className={`button new-page-primary-action${
+                  primaryActionState === 'blocked' ? ' new-page-primary-action-blocked' : ''
+                }`}
+                type="button"
+                disabled={primaryActionState === 'disabled' || primaryAction.disabled}
+                aria-disabled={primaryActionState === 'blocked' ? 'true' : undefined}
+                aria-describedby={actionNoteId}
+                title={primaryAction.description || ''}
+              >
+                {primaryAction.label}
+              </button>
+            )
           ) : (
-            <button
-              className={`button new-page-primary-action${
-                primaryActionState === 'blocked' ? ' new-page-primary-action-blocked' : ''
-              }`}
-              type="button"
-              disabled={primaryActionState === 'disabled' || primaryAction.disabled}
-              aria-disabled={primaryActionState === 'blocked' ? 'true' : undefined}
-              aria-describedby={actionNoteId}
-              title={primaryAction.description || ''}
-            >
-              {primaryAction.label}
-            </button>
-          )
-        ) : (
-          <div className="new-page-unavailable-action">Not available on this route</div>
-        )}
-        <div className="new-page-role-note">Role: {formatRoleLabel(role)}</div>
-        {actionNote ? (
+            <div className="new-page-unavailable-action">Not available on this route</div>
+          )}
+          <div className="new-page-role-note">Role: {formatRoleLabel(role)}</div>
+        </div>
+      </div>
+      {actionNote ? (
+        <div className="new-page-header-note">
           <NewExplanation
             title={
               primaryActionState === 'blocked'
@@ -94,8 +99,8 @@ export default function NewExperiencePageHeader({
           >
             <span id={actionNoteId}>{actionNote}</span>
           </NewExplanation>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </header>
   )
 }

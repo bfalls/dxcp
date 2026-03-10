@@ -4,13 +4,64 @@ import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
 
+const APPLICATION_FIXTURE = {
+  owner: 'Payments Platform',
+  environment: 'sandbox',
+  currentVersion: 'v1.32.1',
+  currentOutcome: 'Succeeded',
+  deploymentGroup: 'Payments Core',
+  runningSince: '12 minutes',
+  lastChange: 'Deployment 9831 completed 12 minutes ago.',
+  activeDeployment: {
+    id: '9842',
+    version: 'v1.33.0',
+    summary: 'A newer candidate is progressing through sandbox now.',
+    startedAt: 'Started 2 minutes ago'
+  },
+  recentState: [
+    {
+      label: 'Active deployment',
+      state: 'Active',
+      detail: 'v1.33.0 is moving through sandbox.',
+      timestamp: 'Started 2 minutes ago',
+      linkLabel: 'Open active deployment',
+      to: '/new/deployments/9842'
+    },
+    {
+      label: 'Latest completed deployment',
+      state: 'Succeeded',
+      detail: 'v1.32.1 became current in sandbox.',
+      timestamp: '12 minutes ago',
+      linkLabel: 'Open deployment 9831',
+      to: '/new/deployments/9831'
+    },
+    {
+      label: 'Recent state signal',
+      state: 'Stable',
+      detail: 'No rollback has been recorded in the last 7 days.',
+      timestamp: 'As of this refresh'
+    }
+  ],
+  support: {
+    releasePath: 'Deploy through the current DXCP deploy workflow.',
+    policyPosture: 'One active deployment at a time in sandbox.',
+    diagnostics: 'Detailed execution diagnostics remain limited to platform admins.'
+  }
+}
+
+function toneForState(state) {
+  if (state === 'Succeeded' || state === 'Stable') return 'info'
+  if (state === 'Active') return 'warn'
+  return 'neutral'
+}
+
 export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
   const { applicationName = 'payments-api' } = useParams()
   const isReadOnly = role === 'OBSERVER'
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
 
   const secondaryActions = [
-    { label: 'Open Deployments', disabled: false },
+    { label: 'Open Deployments', disabled: false, description: 'Use the recent state summary to open deployment detail.' },
     { label: 'Refresh', disabled: false }
   ]
 
@@ -21,81 +72,120 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
   }
 
   return (
-    <>
+    <div className="new-application-page">
       <NewExperiencePageHeader
-        title="Applications"
-        objectIdentity={`Application: ${applicationName}`}
+        title="Application"
+        objectIdentity={applicationName}
         role={role}
         stateSummaryItems={[
-          { label: 'Running Version', value: 'v1.32.1' },
-          { label: 'Environment', value: 'sandbox' },
-          { label: 'State', value: 'Succeeded' }
+          { label: 'Environment', value: APPLICATION_FIXTURE.environment },
+          { label: 'Current version', value: APPLICATION_FIXTURE.currentVersion },
+          { label: 'Recent state', value: APPLICATION_FIXTURE.currentOutcome }
         ]}
         primaryAction={primaryAction}
         secondaryActions={secondaryActions}
         actionNote={
           isReadOnly
-            ? 'You can review deploy readiness here, but only delivery owners can deploy from this workflow.'
-            : 'Another deployment is active for sandbox. Open the active deployment or wait for it to finish.'
+            ? 'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
+            : 'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
         }
       />
-      <SectionCard>
-        <h3>Running Version</h3>
-        <p className="helper">v1.32.1 is serving sandbox. Deployment 9831 completed 12 minutes ago.</p>
-      </SectionCard>
-      <SectionCard>
+
+      <SectionCard className="new-application-card">
         <div className="new-section-header">
-          <h3>Recent Deployment Activity</h3>
-          <button className="button secondary" type="button" disabled>
-            Review deploy
-          </button>
-        </div>
-        <NewExplanation title="Supporting reads are degraded" tone="warning">
-          Recent activity is current, but failure evidence from the last refresh is still catching up. Open the latest
-          deployment for the authoritative record.
-        </NewExplanation>
-        <div className="new-activity-list">
-          <div className="new-activity-row">
-            <span className="badge info">Succeeded</span>
-            <span>v1.32.1</span>
-            <span>12 minutes ago</span>
+          <div>
+            <h3>Current running summary</h3>
+            <p className="helper">Current state stays first so this page reads as the application record, not a browse surface.</p>
+          </div>
+          <div className="links">
+            <Link className="link secondary" to="/deploy">
+              Open deploy workflow
+            </Link>
             <Link className="link" to="/new/deployments/9831">
-              Open Deployment
-            </Link>
-          </div>
-          <div className="new-activity-row">
-            <span className="badge warn">Active</span>
-            <span>v1.33.0</span>
-            <span>Started 2 minutes ago</span>
-            <Link className="link" to="/new/deployments/9842">
-              Open Active Deployment
+              Open current deployment detail
             </Link>
           </div>
         </div>
-        <div className="space-12">
-          <div className="helper">Disabled is used only for missing prerequisites or pending computation.</div>
-          <div className="helper">Add a change summary in the deploy workflow to continue to review.</div>
+
+        <dl className="new-object-summary-grid" aria-label="Application identity and current running summary">
+          <dt>Application owner</dt>
+          <dd>{APPLICATION_FIXTURE.owner}</dd>
+          <dt>Deployment group</dt>
+          <dd>{APPLICATION_FIXTURE.deploymentGroup}</dd>
+          <dt>Environment</dt>
+          <dd>{APPLICATION_FIXTURE.environment}</dd>
+          <dt>Current version</dt>
+          <dd>{APPLICATION_FIXTURE.currentVersion}</dd>
+          <dt>Current state</dt>
+          <dd>{APPLICATION_FIXTURE.currentOutcome}</dd>
+          <dt>Running since</dt>
+          <dd>{APPLICATION_FIXTURE.runningSince}</dd>
+        </dl>
+
+        <div className="new-running-callout">
+          <strong>{APPLICATION_FIXTURE.lastChange}</strong>
+          <p className="helper">{APPLICATION_FIXTURE.activeDeployment.summary}</p>
+          <Link className="link" to="/new/deployments/9842">
+            Open deployment {APPLICATION_FIXTURE.activeDeployment.id}
+          </Link>
         </div>
       </SectionCard>
-      <SectionCard>
-        <h3>Policy and Access</h3>
+
+      <SectionCard className="new-application-card">
+        <div className="new-section-header">
+          <div>
+            <h3>Recent state summary</h3>
+            <p className="helper">Recent deployment state stays compact and only exposes the latest signals needed for the next handoff.</p>
+          </div>
+        </div>
+
+        <NewExplanation title="Supporting reads are degraded" tone="warning">
+          Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.
+        </NewExplanation>
+
+        <div className="new-activity-list">
+          {APPLICATION_FIXTURE.recentState.map((item) => (
+            <div key={item.label} className="new-activity-row">
+              <span className={`badge ${toneForState(item.state)}`}>{item.state}</span>
+              <div className="new-activity-copy">
+                <strong>{item.label}</strong>
+                <span>{item.detail}</span>
+              </div>
+              <span>{item.timestamp}</span>
+              {item.to ? (
+                <Link className="link" to={item.to}>
+                  {item.linkLabel}
+                </Link>
+              ) : (
+                <span className="helper">No detail handoff needed</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard className="new-application-card new-application-support-card">
+        <h3>Supporting context</h3>
+        <p className="helper">This stays compact so the object identity and current state remain primary.</p>
+
+        <dl className="new-application-support-grid">
+          <dt>Release path</dt>
+          <dd>{APPLICATION_FIXTURE.support.releasePath}</dd>
+          <dt>Policy posture</dt>
+          <dd>{APPLICATION_FIXTURE.support.policyPosture}</dd>
+        </dl>
+
         <div className="new-explanation-stack">
           <NewExplanation title="Mutation disabled" tone="warning">
-            DXCP is in read-only mode for maintenance. Deploy and rollback stay visible so operators can understand what
-            is paused.
+            DXCP can pause mutating actions for maintenance without hiding the deploy handoff or the current application record.
           </NewExplanation>
-          {!isPlatformAdmin ? (
-            <NewExplanation title="Permission-limited detail" tone="neutral">
-              Execution diagnostics are limited to platform admins. Use the deployment record to understand outcome and
-              next steps without engine detail.
-            </NewExplanation>
-          ) : (
-            <NewExplanation title="Diagnostics access" tone="neutral">
-              Platform admin detail remains secondary to the normalized deployment record in this preview.
-            </NewExplanation>
-          )}
+          <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
+            {isPlatformAdmin
+              ? 'Platform admin diagnostics remain secondary to the normalized deployment record in this preview.'
+              : APPLICATION_FIXTURE.support.diagnostics}
+          </NewExplanation>
         </div>
       </SectionCard>
-    </>
+    </div>
   )
 }
