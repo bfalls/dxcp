@@ -1094,6 +1094,136 @@ export async function runAllTests() {
     await view.findByText('payments-api · v1.31.9')
   })
 
+  await runTest('New experience admin route proves review-before-save with a completed mutation slice', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const view = renderApp('/new/admin')
+
+    await view.findByRole('heading', { name: 'Admin' })
+    await view.findByText('Deployment Group: Payments Core')
+    await view.findByText('Governance object')
+    fireEvent.click(view.getByRole('button', { name: 'Edit' }))
+    await view.findByText('Edit draft')
+    fireEvent.click(view.getByRole('checkbox', { name: 'Rolling' }))
+    await waitFor(() => assert.equal(view.getByRole('button', { name: 'Review changes' }).disabled, false))
+    fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
+    await view.findByText('Review before save')
+    await view.findByText('Current: Blue-Green, Rolling')
+    await view.findByText('Proposed: Blue-Green')
+    await view.findByText('Impact preview')
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+    await view.findByText('Save complete')
+    await view.findByText('Deployment Group saved. Future deployments now use the reviewed quota and strategy access rules.')
+  })
+
+  await runTest('New experience admin route separates warnings from errors during review', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const view = renderApp('/new/admin/warnings')
+
+    await view.findByText('Warnings to review')
+    await view.findByText('5 Applications would no longer be allowed to use Rolling.')
+    assert.equal(view.queryByText('Errors blocking save'), null)
+    const saveButton = view.getByRole('button', { name: 'Save' })
+    assert.equal(saveButton.disabled, true)
+    fireEvent.click(view.getByRole('checkbox', { name: /reviewed the warning impact/i }))
+    assert.equal(view.getByRole('button', { name: 'Save' }).disabled, false)
+  })
+
+  await runTest('New experience admin route shows review errors and blocked-save explanation before mutation', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const errorView = renderApp('/new/admin/errors')
+
+    await errorView.findByText('Errors blocking save')
+    await errorView.findByText(
+      'At least one deployment strategy must remain allowed before DXCP can save this Deployment Group.'
+    )
+    await errorView.findByText('Daily deploy quota must stay greater than or equal to the daily rollback quota.')
+    assert.ok(errorView.getByRole('button', { name: 'Save' }).disabled)
+
+    cleanup()
+
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const blockedView = renderApp('/new/admin/blocked-save')
+
+    await blockedView.findByText('Blocked save explanation')
+    await blockedView.findByText(
+      'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'
+    )
+    await blockedView.findByText('Impact preview')
+    assert.ok(blockedView.getByRole('button', { name: 'Save' }).disabled)
+  })
+
+  await runTest('New experience admin route shows read-only posture for delivery owners', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/admin')
+
+    await view.findByText('Read-only access')
+    await view.findByText('Read-only governance posture')
+    await view.findByText(
+      'You can inspect governance posture, current guardrails, and the expected review model here, but platform admins are required to edit and review before saving changes.'
+    )
+    await view.findByText('Inspection remains coherent')
+  })
+
   await runTest('PLATFORM_ADMIN sees all sections', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

@@ -19,6 +19,7 @@ export default function NewExperiencePageHeader({
   actionNote = ''
 }) {
   const primaryActionState = primaryAction?.state || 'available'
+  const primaryActionLabel = primaryAction?.label || 'Action'
   const showPrimaryAction = primaryActionState !== 'unavailable'
   const actionNoteId = showPrimaryAction && actionNote ? `new-header-note-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined
 
@@ -54,6 +55,7 @@ export default function NewExperiencePageHeader({
                 key={action.label}
                 className="button secondary"
                 type="button"
+                onClick={action.onClick}
                 disabled={action.disabled}
                 title={action.description || ''}
               >
@@ -75,6 +77,7 @@ export default function NewExperiencePageHeader({
                   primaryActionState === 'blocked' ? ' new-page-primary-action-blocked' : ''
                 }`}
                 type="button"
+                onClick={primaryAction.onClick}
                 disabled={primaryActionState === 'disabled' || primaryAction.disabled}
                 aria-disabled={primaryActionState === 'blocked' ? 'true' : undefined}
                 aria-describedby={actionNoteId}
@@ -94,9 +97,9 @@ export default function NewExperiencePageHeader({
           <NewExplanation
             title={
               primaryActionState === 'blocked'
-                ? 'Deploy blocked'
+                ? `${primaryActionLabel} blocked`
                 : primaryActionState === 'disabled'
-                  ? 'Deploy not ready'
+                  ? `${primaryActionLabel} not ready`
                   : primaryActionState === 'read-only'
                     ? 'Read-only access'
                     : 'Action note'

@@ -440,6 +440,109 @@ body {
   gap: 16px;
 }
 
+.new-admin-page {
+  display: grid;
+  gap: 16px;
+}
+
+.new-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.new-admin-primary,
+.new-admin-support {
+  display: grid;
+  gap: 16px;
+}
+
+.new-admin-card {
+  display: grid;
+  gap: 14px;
+}
+
+.new-admin-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.new-admin-checkbox-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.new-admin-checkbox {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(13, 22, 22, 0.6);
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.new-admin-review-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.new-admin-comparison-list {
+  display: grid;
+  gap: 10px;
+}
+
+.new-admin-comparison-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(13, 22, 22, 0.6);
+  display: grid;
+  gap: 8px;
+}
+
+.new-admin-comparison-values {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.new-admin-message-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.new-admin-impact-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-admin-impact-columns > div {
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(13, 25, 25, 0.72);
+  display: grid;
+  gap: 10px;
+}
+
+.new-admin-acknowledgement {
+  border: 1px solid rgba(227, 176, 75, 0.45);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(227, 176, 75, 0.08);
+  display: flex;
+  gap: 10px;
+  align-items: start;
+}
+
 .new-deployments-card {
   display: grid;
   gap: 16px;
@@ -821,6 +924,10 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .new-admin-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .new-deployments-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -843,6 +950,11 @@ body {
   }
 
   .new-failure-narrative-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-admin-edit-grid,
+  .new-admin-impact-columns {
     grid-template-columns: minmax(0, 1fr);
   }
 
