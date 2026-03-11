@@ -62,7 +62,7 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
 
   const secondaryActions = [
-    { label: 'Open Deployments', disabled: false, description: 'Use the recent state summary to open deployment detail.' },
+    { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployments without leaving the new experience.' },
     { label: 'Refresh', disabled: false }
   ]
 

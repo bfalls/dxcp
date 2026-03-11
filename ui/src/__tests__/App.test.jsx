@@ -964,6 +964,109 @@ export async function runAllTests() {
     assert.ok(view.getByRole('link', { name: 'Open Legacy Deployment' }))
   })
 
+  await runTest('New experience deployments route shows restrained collection with obvious detail handoff', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments')
+
+    await view.findByRole('heading', { name: 'Deployments' })
+    await view.findByText('Recent deployment activity across applications')
+    await view.findByText('Recent deployment activity')
+    await view.findByText(
+      '3 deployments in the last 7 days for sandbox. Recent activity stays bounded so this page supports detail handoff without becoming archive-first.'
+    )
+    await view.findByText('payments-api · v1.33.0')
+    await view.findByText('billing-worker · v1.18.4')
+    await view.findByText('Rollback succeeded')
+    const openLinks = view.getAllByRole('link', { name: 'Open' })
+    assert.ok(openLinks.length >= 3)
+    assert.equal(openLinks[0].getAttribute('href'), '/new/deployments/9842')
+    assert.ok(view.getByRole('button', { name: 'Load older deployments' }))
+  })
+
+  await runTest('New experience deployments route preserves structure for empty state', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments/empty')
+
+    await view.findByRole('heading', { name: 'Deployments' })
+    await view.findByText('Recent deployment activity')
+    await view.findByText('No deployments recorded yet')
+    await view.findByText(
+      'The recent deployment window is valid, but there is no deployment activity to browse yet. Open an application to begin from object context instead of turning this page into a placeholder archive.'
+    )
+    assert.ok(view.getByRole('link', { name: 'Open Deploy Workflow' }))
+  })
+
+  await runTest('New experience deployments route distinguishes no-results state from empty history', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments/no-results')
+
+    await view.findByText('No deployments match this scope')
+    await view.findByText(
+      'Try a broader outcome or time window to continue browsing. This is different from empty history because deployment records exist outside the current filters.'
+    )
+    assert.ok(view.getByRole('link', { name: 'Clear filters' }))
+  })
+
+  await runTest('New experience deployments route shows degraded-read notice without collapsing the collection', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments/degraded-read')
+
+    await view.findByText('Supporting reads are degraded')
+    await view.findByText(
+      'Visible rows remain useful for scan and handoff, but freshness and supporting evidence may lag. Open deployment detail for the authoritative record before acting on a stale assumption.'
+    )
+    await view.findByText('payments-api · v1.33.0')
+    await view.findByText('billing-worker · v1.18.4')
+  })
+
   await runTest('PLATFORM_ADMIN sees all sections', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

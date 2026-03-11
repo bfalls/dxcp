@@ -430,6 +430,108 @@ body {
   gap: 16px;
 }
 
+.new-deployments-page {
+  display: grid;
+  gap: 16px;
+}
+
+.new-deployments-card {
+  display: grid;
+  gap: 16px;
+}
+
+.new-deployments-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-deployments-results-summary {
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  background: rgba(13, 25, 25, 0.72);
+}
+
+.new-collection-header {
+  margin-bottom: 0;
+}
+
+.new-deployments-list {
+  display: grid;
+  gap: 10px;
+}
+
+.new-deployment-row {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: rgba(13, 22, 22, 0.72);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.4fr) minmax(140px, 0.8fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.new-deployment-status-cell {
+  align-self: start;
+}
+
+.new-deployment-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.new-deployment-row-title {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.new-deployment-row-title:hover,
+.new-deployment-row-title:focus-visible {
+  color: var(--accent-2);
+}
+
+.new-deployment-row-subtitle {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.new-deployment-row-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.new-deployment-row-meta {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  justify-items: end;
+  text-align: right;
+}
+
+.new-deployment-row-action {
+  justify-self: end;
+  align-self: start;
+}
+
+.new-deployments-footer {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .new-deploy-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
@@ -544,10 +646,29 @@ body {
   .new-deploy-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .new-deployments-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .new-deployment-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-deployment-row-meta,
+  .new-deployment-row-action {
+    justify-items: start;
+    justify-self: start;
+    text-align: left;
+  }
 }
 
 @media (max-width: 720px) {
   .new-intent-entry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-deployments-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 

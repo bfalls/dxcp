@@ -17,6 +17,7 @@ import AdminPage from './pages/AdminPage.jsx'
 import NewExperienceShell from './new-experience/NewExperienceShell.jsx'
 import NewExperienceApplicationsPage from './new-experience/NewExperienceApplicationsPage.jsx'
 import NewExperienceDeployPage from './new-experience/NewExperienceDeployPage.jsx'
+import NewExperienceDeploymentsPage from './new-experience/NewExperienceDeploymentsPage.jsx'
 import NewExperienceUnavailableDeploymentPage from './new-experience/NewExperienceUnavailableDeploymentPage.jsx'
 import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
 
@@ -4310,6 +4311,19 @@ export default function App() {
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications/payments-api" replace />} />
             <Route path="/new/applications" element={<Navigate to="/new/applications/payments-api" replace />} />
+            <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} />} />
+            <Route
+              path="/new/deployments/empty"
+              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="empty" />}
+            />
+            <Route
+              path="/new/deployments/no-results"
+              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="no-results" />}
+            />
+            <Route
+              path="/new/deployments/degraded-read"
+              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="degraded-read" />}
+            />
             <Route
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} />}
