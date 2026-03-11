@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
@@ -30,16 +30,16 @@ const DEPLOYMENT_ROWS = [
     note: 'This deployment is the current running version for sandbox.'
   },
   {
-    id: '9827',
-    status: 'Rollback succeeded',
-    tone: 'neutral',
-    application: 'billing-worker',
-    version: 'v1.18.4',
-    environment: 'staging',
-    strategy: 'Rolling',
-    kind: 'Rollback',
-    time: 'Yesterday at 18:42 UTC',
-    note: 'Rollback restored the previous healthy version after validation failed.'
+    id: '9819',
+    status: 'Failed',
+    tone: 'danger',
+    application: 'payments-api',
+    version: 'v1.31.9',
+    environment: 'production',
+    strategy: 'Blue-Green',
+    kind: 'Roll-forward',
+    time: 'Yesterday at 17:27 UTC',
+    note: 'Verification failed before the deployment could become the running version.'
   }
 ]
 
@@ -151,7 +151,7 @@ function renderControl(label, value, options) {
   )
 }
 
-function DeploymentRow({ row }) {
+function DeploymentRow({ row, returnTo }) {
   const detailRoute = `/new/deployments/${row.id}`
 
   return (
@@ -161,7 +161,7 @@ function DeploymentRow({ row }) {
       </div>
 
       <div className="new-deployment-row-main">
-        <Link className="new-deployment-row-title" to={detailRoute}>
+        <Link className="new-deployment-row-title" to={detailRoute} state={{ returnTo }}>
           {row.application} · {row.version}
         </Link>
         <div className="new-deployment-row-subtitle">
@@ -178,7 +178,7 @@ function DeploymentRow({ row }) {
       </div>
 
       <div className="new-deployment-row-action">
-        <Link className="link secondary" to={detailRoute}>
+        <Link className="link secondary" to={detailRoute} state={{ returnTo }}>
           Open
         </Link>
       </div>
@@ -187,7 +187,13 @@ function DeploymentRow({ row }) {
 }
 
 export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenario = 'default' }) {
+  const location = useLocation()
   const activeScenario = SCENARIOS[scenario] || SCENARIOS.default
+  const returnTo = {
+    to: location.pathname,
+    label: 'Back to Deployments',
+    scopeSummary: activeScenario.resultsSummary
+  }
 
   return (
     <div className="new-deployments-page">
@@ -245,7 +251,7 @@ export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenari
         ) : (
           <div className="new-deployments-list" aria-label="Deployment collection">
             {activeScenario.rows.map((row) => (
-              <DeploymentRow key={row.id} row={row} />
+              <DeploymentRow key={row.id} row={row} returnTo={returnTo} />
             ))}
           </div>
         )}

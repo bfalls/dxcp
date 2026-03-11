@@ -18,7 +18,7 @@ import NewExperienceShell from './new-experience/NewExperienceShell.jsx'
 import NewExperienceApplicationsPage from './new-experience/NewExperienceApplicationsPage.jsx'
 import NewExperienceDeployPage from './new-experience/NewExperienceDeployPage.jsx'
 import NewExperienceDeploymentsPage from './new-experience/NewExperienceDeploymentsPage.jsx'
-import NewExperienceUnavailableDeploymentPage from './new-experience/NewExperienceUnavailableDeploymentPage.jsx'
+import NewExperienceDeploymentDetailPage from './new-experience/NewExperienceDeploymentDetailPage.jsx'
 import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
@@ -4336,7 +4336,10 @@ export default function App() {
               path="/new/applications/:applicationName/deploy/:scenario"
               element={<NewExperienceDeployPage role={derivedRole} />}
             />
-            <Route path="/new/deployments/:deploymentId" element={<NewExperienceUnavailableDeploymentPage />} />
+            <Route
+              path="/new/deployments/:deploymentId"
+              element={<NewExperienceDeploymentDetailPage role={derivedRole} />}
+            />
             <Route path="/new/admin" element={<NewExperienceUnavailableRoutePage />} />
             <Route path="*" element={<Navigate to="/new/applications/payments-api" replace />} />
           </Routes>

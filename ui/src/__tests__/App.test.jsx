@@ -943,7 +943,7 @@ export async function runAllTests() {
     await readOnlyView.findAllByText('Read-only')
   })
 
-  await runTest('New experience deployment route shows unavailable treatment with legacy fallback', async () => {
+  await runTest('New experience deployment route shows deployment object page with current outcome before timeline', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -959,9 +959,36 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/deployments/9831')
 
-    await view.findByText('Deployment detail is not available in the new experience preview')
-    assert.ok(view.getByRole('link', { name: 'Open Applications' }))
-    assert.ok(view.getByRole('link', { name: 'Open Legacy Deployment' }))
+    await view.findByRole('heading', { name: 'Deployment' })
+    await view.findAllByText('Deployment 9831')
+    await view.findByText('Deployment summary')
+    await view.findByText('Deployment timeline')
+    await view.findByText('Current running context')
+    assert.ok(view.getAllByText('Succeeded').length >= 1)
+    assert.ok(view.getByRole('link', { name: 'Open Application' }))
+    assert.ok(view.getByRole('link', { name: 'Open Deployments' }))
+  })
+
+  await runTest('New experience deployment detail preserves deployments browse continuity when opened from the collection', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/deployments')
+
+    await view.findByText('payments-api · v1.33.0')
+    fireEvent.click(view.getAllByRole('link', { name: 'Open' })[0])
+    await view.findByText('Opened from Deployments')
+    assert.ok(view.getAllByRole('link', { name: 'Back to Deployments' }).length >= 1)
   })
 
   await runTest('New experience deployments route shows restrained collection with obvious detail handoff', async () => {
@@ -987,8 +1014,8 @@ export async function runAllTests() {
       '3 deployments in the last 7 days for sandbox. Recent activity stays bounded so this page supports detail handoff without becoming archive-first.'
     )
     await view.findByText('payments-api · v1.33.0')
-    await view.findByText('billing-worker · v1.18.4')
-    await view.findByText('Rollback succeeded')
+    await view.findByText('payments-api · v1.31.9')
+    await view.findAllByText('Failed')
     const openLinks = view.getAllByRole('link', { name: 'Open' })
     assert.ok(openLinks.length >= 3)
     assert.equal(openLinks[0].getAttribute('href'), '/new/deployments/9842')
@@ -1064,7 +1091,7 @@ export async function runAllTests() {
       'Visible rows remain useful for scan and handoff, but freshness and supporting evidence may lag. Open deployment detail for the authoritative record before acting on a stale assumption.'
     )
     await view.findByText('payments-api · v1.33.0')
-    await view.findByText('billing-worker · v1.18.4')
+    await view.findByText('payments-api · v1.31.9')
   })
 
   await runTest('PLATFORM_ADMIN sees all sections', async () => {

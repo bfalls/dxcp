@@ -435,9 +435,26 @@ body {
   gap: 16px;
 }
 
+.new-deployment-detail-page {
+  display: grid;
+  gap: 16px;
+}
+
 .new-deployments-card {
   display: grid;
   gap: 16px;
+}
+
+.new-detail-context-card {
+  margin: 0;
+}
+
+.new-detail-context-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .new-deployments-controls {
@@ -530,6 +547,159 @@ body {
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+}
+
+.new-deployment-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.new-deployment-detail-primary,
+.new-deployment-detail-support {
+  display: grid;
+  gap: 16px;
+}
+
+.new-deployment-detail-card {
+  display: grid;
+  gap: 14px;
+}
+
+.new-detail-outcome-callout {
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  background: rgba(13, 25, 25, 0.72);
+}
+
+.new-detail-outcome-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.new-detail-outcome-copy span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.new-failure-narrative-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-failure-narrative-grid > div {
+  display: grid;
+  gap: 4px;
+}
+
+.new-failure-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.new-deployment-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.new-timeline-event {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.new-timeline-marker {
+  width: 10px;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 4px rgba(91, 209, 201, 0.12);
+}
+
+.new-timeline-body {
+  border-left: 1px solid rgba(183, 179, 166, 0.18);
+  padding-left: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.new-timeline-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  flex-wrap: wrap;
+}
+
+.new-timeline-heading {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.new-timeline-heading strong {
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.new-timeline-time {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.new-timeline-summary {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.new-timeline-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.new-detail-support-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.new-admin-diagnostics {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(13, 25, 25, 0.72);
+}
+
+.new-admin-diagnostics summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.new-admin-diagnostics[open] summary {
+  margin-bottom: 12px;
 }
 
 .new-deploy-layout {
@@ -647,6 +817,10 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .new-deployment-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .new-deployments-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -665,6 +839,10 @@ body {
 
 @media (max-width: 720px) {
   .new-intent-entry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-failure-narrative-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -708,6 +886,25 @@ body {
   .new-activity-row {
     grid-template-columns: 1fr;
     align-items: start;
+  }
+
+  .new-detail-outcome-callout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-timeline-event {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-timeline-marker {
+    display: none;
+  }
+
+  .new-timeline-body {
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid rgba(183, 179, 166, 0.18);
+    padding-top: 12px;
   }
 
   .new-object-summary-grid,
