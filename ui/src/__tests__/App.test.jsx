@@ -915,7 +915,7 @@ export async function runAllTests() {
     await permissionView.findByText(
       'This intent is visible so you can review the deploy plan, but production deploys from this workflow are limited to platform admins. Return to the application or hand off to an authorized operator.'
     )
-    await permissionView.findByText('Deploy permission is confirmed for production.')
+    await permissionView.findByText('Your role is allowed to deploy to production.')
     await permissionView.findAllByText('Blocked')
   })
 

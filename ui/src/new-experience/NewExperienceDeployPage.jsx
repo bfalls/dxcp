@@ -71,7 +71,7 @@ function getScenario(role, requestedScenario) {
         'This intent is visible so you can review the deploy plan, but production deploys from this workflow are limited to platform admins. Return to the application or hand off to an authorized operator.',
       readiness: [
         ...DEPLOY_FIXTURE.readinessBase.map((item) => ({ label: item, status: 'met' })),
-        { label: 'Deploy permission is confirmed for production.', status: 'blocked' }
+        { label: 'Your role is allowed to deploy to production.', status: 'blocked' }
       ]
     }
   }
