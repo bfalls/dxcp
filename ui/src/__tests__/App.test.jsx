@@ -1094,6 +1094,125 @@ export async function runAllTests() {
     await view.findByText('payments-api · v1.31.9')
   })
 
+  await runTest('New experience insights route shows restrained aggregate reading and drill-down paths', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/insights')
+
+    await view.findByRole('heading', { name: 'Insights' })
+    await view.findByText('Recent delivery health and attention across DXCP')
+    await view.findByText('Summary strip')
+    await view.findByText('Trend')
+    await view.findByText('Breakdown')
+    await view.findByText('Attention')
+    await view.findByText('Recent notable activity')
+    await view.findByText('Payments Core rollback activity increased')
+    assert.ok(view.getAllByRole('link', { name: 'Inspect deployment' }).length >= 1)
+  })
+
+  await runTest('New experience insights route preserves empty state without inventing dashboard bulk', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/insights/empty')
+
+    await view.findByText('No deployments in this time range')
+    await view.findByText(
+      'Insights keeps the same page structure when the selected scope has no delivery activity. Try a broader time window or clear scope filters before switching into a different object route.'
+    )
+    assert.ok(view.getByRole('link', { name: 'Open Applications' }))
+  })
+
+  await runTest('New experience insights route keeps degraded and failed reads calm and predictable', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const degradedView = renderApp('/new/insights/degraded-read')
+
+    await degradedView.findByText('Supporting reads are degraded')
+    await degradedView.findByText('Deployment Group breakdown is temporarily unavailable')
+    await degradedView.findByText(
+      'Trend and other breakdowns remain available, but this grouping did not refresh. Open Deployments for the authoritative scoped list while the supporting read catches up.'
+    )
+
+    cleanup()
+
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const failureView = renderApp('/new/insights/failure')
+
+    await failureView.findByText('Insights could not be loaded')
+    await failureView.findByText('Aggregate delivery reading is unavailable right now')
+    await failureView.findByText(
+      'The new Insights route keeps the same header, scope controls, and refresh action so you can retry without losing page context.'
+    )
+  })
+
+  await runTest('New experience insights route exposes refresh behavior in the header without changing hierarchy', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/insights')
+
+    await view.findByRole('button', { name: 'Refresh' })
+    fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
+    await view.findByRole('button', { name: 'Refreshing...' })
+    await view.findByText('Refresh update')
+    await view.findByText('Insights refreshed for the selected window without changing the page hierarchy.')
+  })
+
   await runTest('New experience admin route proves review-before-save with a completed mutation slice', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

@@ -16,6 +16,7 @@ export default function NewExperienceShell({ children }) {
           <nav className="new-shell-nav-links" aria-label="New experience navigation">
             <NavLink to="/new/applications/payments-api">Applications</NavLink>
             <NavLink to="/new/deployments">Deployments</NavLink>
+            <NavLink to="/new/insights">Insights</NavLink>
             <NavLink to="/new/admin">Admin</NavLink>
             <NavLink to="/services">Back to Legacy</NavLink>
           </nav>

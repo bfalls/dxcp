@@ -19,6 +19,7 @@ import NewExperienceApplicationsPage from './new-experience/NewExperienceApplica
 import NewExperienceDeployPage from './new-experience/NewExperienceDeployPage.jsx'
 import NewExperienceDeploymentsPage from './new-experience/NewExperienceDeploymentsPage.jsx'
 import NewExperienceDeploymentDetailPage from './new-experience/NewExperienceDeploymentDetailPage.jsx'
+import NewExperienceInsightsPage from './new-experience/NewExperienceInsightsPage.jsx'
 import NewExperienceAdminPage from './new-experience/NewExperienceAdminPage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
@@ -4324,6 +4325,8 @@ export default function App() {
               path="/new/deployments/degraded-read"
               element={<NewExperienceDeploymentsPage role={derivedRole} scenario="degraded-read" />}
             />
+            <Route path="/new/insights" element={<NewExperienceInsightsPage role={derivedRole} />} />
+            <Route path="/new/insights/:scenario" element={<NewExperienceInsightsPage role={derivedRole} />} />
             <Route
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} />}

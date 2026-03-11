@@ -440,6 +440,11 @@ body {
   gap: 16px;
 }
 
+.new-insights-page {
+  display: grid;
+  gap: 16px;
+}
+
 .new-admin-page {
   display: grid;
   gap: 16px;
@@ -461,6 +466,164 @@ body {
 .new-admin-card {
   display: grid;
   gap: 14px;
+}
+
+.new-insights-card {
+  display: grid;
+  gap: 16px;
+}
+
+.new-insights-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-insights-scope-summary {
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  background: rgba(13, 25, 25, 0.72);
+}
+
+.new-insights-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-insights-summary-item,
+.new-insights-trend-card,
+.new-insights-breakdown-card,
+.new-insights-attention-item,
+.new-insights-activity-item {
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(13, 25, 25, 0.72);
+}
+
+.new-insights-summary-item {
+  display: grid;
+  gap: 6px;
+}
+
+.new-insights-summary-item strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.new-insights-summary-item span,
+.new-insights-summary-item p {
+  color: var(--muted);
+}
+
+.new-insights-summary-item p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.new-insights-trend-grid,
+.new-insights-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.new-insights-block-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  flex-wrap: wrap;
+}
+
+.new-insights-block-header h4 {
+  margin: 0;
+}
+
+.new-insights-trend-card,
+.new-insights-breakdown-card {
+  display: grid;
+  gap: 12px;
+}
+
+.new-insights-trend-list,
+.new-insights-breakdown-list,
+.new-insights-attention-list,
+.new-insights-activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.new-insights-trend-row,
+.new-insights-breakdown-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+}
+
+.new-insights-trend-row {
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 1.1fr) auto;
+}
+
+.new-insights-trend-copy,
+.new-insights-breakdown-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.new-insights-trend-copy span,
+.new-insights-breakdown-copy span,
+.new-insights-attention-item p,
+.new-insights-activity-item p {
+  color: var(--muted);
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.new-insights-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(183, 179, 166, 0.14);
+  overflow: hidden;
+}
+
+.new-insights-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(91, 209, 201, 0.72);
+}
+
+.new-insights-trend-value,
+.new-insights-breakdown-value {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.new-insights-breakdown-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  border-top: 1px solid rgba(183, 179, 166, 0.12);
+  padding-top: 10px;
+}
+
+.new-insights-breakdown-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.new-insights-attention-item,
+.new-insights-activity-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+  flex-wrap: wrap;
 }
 
 .new-admin-edit-grid {
@@ -928,6 +1091,12 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .new-insights-summary-strip,
+  .new-insights-trend-grid,
+  .new-insights-breakdown-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .new-deployments-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -955,6 +1124,10 @@ body {
 
   .new-admin-edit-grid,
   .new-admin-impact-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-insights-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1002,6 +1175,16 @@ body {
 
   .new-detail-outcome-callout {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-insights-trend-row,
+  .new-insights-breakdown-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-insights-attention-item,
+  .new-insights-activity-item {
+    flex-direction: column;
   }
 
   .new-timeline-event {
