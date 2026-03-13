@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const BASE_GROUP = {
   id: 'payments-core',
@@ -145,97 +146,28 @@ function buildAuditSummary(draft, base) {
   return 'Audit remains quiet until you stage a governance change.'
 }
 
-function ReadOnlyAdminState() {
-  return (
-    <div className="new-admin-page">
-      <NewExperiencePageHeader
-        title="Admin"
-        objectIdentity="Deployment Group: Payments Core"
-        role="DELIVERY_OWNER"
-        stateSummaryItems={[
-          { label: 'Workspace', value: 'Deployment Groups' },
-          { label: 'Mode', value: 'Read-only' },
-          { label: 'Impact', value: 'Inspection only' }
-        ]}
-        primaryAction={{
-          label: 'Edit',
-          state: 'read-only',
-          description: 'Platform admins are required to enter edit and review mode before saving governance changes.'
-        }}
-        secondaryActions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api' },
-          { label: 'Open Legacy Admin', to: '/admin' }
-        ]}
-        actionNote="You can inspect governance posture, current guardrails, and the expected review model here, but platform admins are required to edit and review before saving changes."
-      />
+function BlockedAdminState({ role }) {
+  useNewExperienceAlertRail([
+    {
+      id: 'admin-blocked-access',
+      tone: 'danger',
+      title: 'Admin access required',
+      body: 'This area is limited to platform administration. Use Applications, Deployments, or Insights for standard delivery work.'
+    }
+  ])
 
-      <div className="new-admin-layout">
-        <div className="new-admin-primary">
-          <SectionCard className="new-admin-card">
-            <div className="new-section-header">
-              <div>
-                <h3>Governance object</h3>
-                <p className="helper">Admin stays object-first so this route reads as policy understanding before mutation.</p>
-              </div>
-            </div>
-
-            <dl className="new-object-summary-grid" aria-label="Deployment Group summary">
-              <dt>Deployment Group</dt>
-              <dd>{BASE_GROUP.name}</dd>
-              <dt>Owner</dt>
-              <dd>{BASE_GROUP.owner}</dd>
-              <dt>Applications governed</dt>
-              <dd>{BASE_GROUP.applicationsCount}</dd>
-              <dt>Environments</dt>
-              <dd>{BASE_GROUP.environments.join(', ')}</dd>
-              <dt>Allowed strategies</dt>
-              <dd>{formatStrategies(BASE_GROUP.allowedStrategies)}</dd>
-              <dt>Last changed</dt>
-              <dd>{BASE_GROUP.lastChanged}</dd>
-            </dl>
-          </SectionCard>
-
-          <SectionCard className="new-admin-card">
-            <h3>Read-only governance posture</h3>
-            <div className="new-explanation-stack">
-              <NewExplanation title="Inspection remains coherent" tone="warning">
-                This read-only view keeps current guardrails, allowed strategies, and current impact visible so the screen still explains how delivery is governed.
-              </NewExplanation>
-              <NewExplanation title="Mutation stays explicit" tone="neutral">
-                DXCP does not present a broken form here. Edit and review remain explicit platform-admin actions rather than half-enabled controls.
-              </NewExplanation>
-            </div>
-          </SectionCard>
-        </div>
-
-        <div className="new-admin-support">
-          <SectionCard className="new-admin-card">
-            <h3>Current impact</h3>
-            <p className="helper">Supporting context stays calm and governance-serious without becoming a separate admin console.</p>
-            <ul className="new-supporting-list">
-              <li>One active deployment at a time across sandbox and staging.</li>
-              <li>Rolling remains available today for all governed Applications.</li>
-              <li>Current running deployments are unaffected until a future deployment is requested.</li>
-            </ul>
-          </SectionCard>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function BlockedAdminState() {
   return (
     <>
       <NewExperiencePageHeader
         title="Admin"
         objectIdentity="Admin workspace"
-        role="OBSERVER"
-        stateSummaryItems={[{ label: 'Access', value: 'Blocked' }]}
+        role={role}
+        stateSummaryItems={[{ label: 'Workspace access', value: 'Unavailable' }]}
         primaryAction={{ label: 'Admin', state: 'unavailable' }}
         secondaryActions={[
           { label: 'Open Applications', to: '/new/applications/payments-api' },
-          { label: 'Open Deployments', to: '/new/deployments' }
+          { label: 'Open Deployments', to: '/new/deployments' },
+          { label: 'Open Insights', to: '/new/insights' }
         ]}
       />
       <NewStateBlock
@@ -244,7 +176,8 @@ function BlockedAdminState() {
         tone="danger"
         actions={[
           { label: 'Open Applications', to: '/new/applications/payments-api' },
-          { label: 'Open Deployments', to: '/new/deployments', secondary: true }
+          { label: 'Open Deployments', to: '/new/deployments', secondary: true },
+          { label: 'Open Insights', to: '/new/insights', secondary: true }
         ]}
       >
         This area is limited to platform administration. Use Applications, Deployments, or Insights for standard delivery work.
@@ -382,6 +315,41 @@ function PlatformAdminAdminPage({ role, scenario }) {
     }
     return 'Review stays visible before save so the policy impact remains explicit, not implied.'
   })()
+  const alertRailItems = useMemo(
+    () => [
+      {
+        id: `admin-${mode}-${scenario}`,
+        tone:
+          saveBlockedByScenario || validation.errors.length > 0
+            ? 'danger'
+            : saveRequiresWarningAcknowledgement && !warningAcknowledged
+              ? 'warning'
+              : 'neutral',
+        title:
+          saveBlockedByScenario || validation.errors.length > 0
+            ? 'Save blocked'
+            : saveRequiresWarningAcknowledgement && !warningAcknowledged
+              ? 'Warnings to review'
+              : mode === 'view'
+                ? 'Read-first posture'
+                : mode === 'edit'
+                  ? 'Review required before save'
+                  : 'Review before save',
+        body: actionNote
+      }
+    ],
+    [
+      actionNote,
+      mode,
+      saveBlockedByScenario,
+      saveRequiresWarningAcknowledgement,
+      scenario,
+      validation.errors.length,
+      warningAcknowledged
+    ]
+  )
+
+  useNewExperienceAlertRail(alertRailItems)
 
   return (
     <div className="new-admin-page">
@@ -401,7 +369,6 @@ function PlatformAdminAdminPage({ role, scenario }) {
             : { label: 'Open Applications', to: '/new/applications/payments-api' },
           { label: 'Open Legacy Admin', to: '/admin' }
         ]}
-        actionNote={actionNote}
       />
 
       <div className="new-admin-layout">
@@ -644,9 +611,5 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN' }) {
     return <PlatformAdminAdminPage role={role} scenario={normalizedScenario} />
   }
 
-  if (role === 'DELIVERY_OWNER') {
-    return <ReadOnlyAdminState />
-  }
-
-  return <BlockedAdminState />
+  return <BlockedAdminState role={role} />
 }

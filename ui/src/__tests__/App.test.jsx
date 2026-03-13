@@ -840,6 +840,7 @@ export async function runAllTests() {
     await view.findByText('Read-only')
     await view.findByText('Open deploy workflow')
     await view.findByText('Recent state summary')
+    assert.equal(view.queryByRole('link', { name: 'Admin' }), null)
   })
 
   await runTest('New experience deploy route shows enabled deploy intent with readiness review', async () => {
@@ -1237,7 +1238,7 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('checkbox', { name: 'Rolling' }))
     await waitFor(() => assert.equal(view.getByRole('button', { name: 'Review changes' }).disabled, false))
     fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
-    await view.findByText('Review before save')
+    await view.findByRole('heading', { name: 'Review before save' })
     await view.findByText('Current: Blue-Green, Rolling')
     await view.findByText('Proposed: Blue-Green')
     await view.findByText('Impact preview')
@@ -1262,7 +1263,7 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin/warnings')
 
-    await view.findByText('Warnings to review')
+    await view.findAllByText('Warnings to review')
     await view.findByText('5 Applications would no longer be allowed to use Rolling.')
     assert.equal(view.queryByText('Errors blocking save'), null)
     const saveButton = view.getByRole('button', { name: 'Save' })
@@ -1319,7 +1320,7 @@ export async function runAllTests() {
     assert.ok(blockedView.getByRole('button', { name: 'Save' }).disabled)
   })
 
-  await runTest('New experience admin route shows read-only posture for delivery owners', async () => {
+  await runTest('New experience admin route blocks non-admin access without rendering a partial Admin shell', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -1335,12 +1336,13 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
-    await view.findByText('Read-only access')
-    await view.findByText('Read-only governance posture')
-    await view.findByText(
-      'You can inspect governance posture, current guardrails, and the expected review model here, but platform admins are required to edit and review before saving changes.'
+    await view.findByRole('heading', { name: 'Admin access required' })
+    await view.findAllByText(
+      'This area is limited to platform administration. Use Applications, Deployments, or Insights for standard delivery work.'
     )
-    await view.findByText('Inspection remains coherent')
+    await view.findByText('Blocked access')
+    assert.equal(view.queryByText('Read-only governance posture'), null)
+    assert.equal(view.queryByRole('link', { name: 'Admin' }), null)
   })
 
   await runTest('PLATFORM_ADMIN sees all sections', async () => {

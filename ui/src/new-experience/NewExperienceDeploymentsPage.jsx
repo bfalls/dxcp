@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const DEPLOYMENT_ROWS = [
   {
@@ -189,11 +190,27 @@ function DeploymentRow({ row, returnTo }) {
 export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenario = 'default' }) {
   const location = useLocation()
   const activeScenario = SCENARIOS[scenario] || SCENARIOS.default
+  const alertRailItems = useMemo(
+    () =>
+      activeScenario.explanation
+        ? [
+            {
+              id: `deployments-${scenario}-notice`,
+              tone: activeScenario.explanation.tone,
+              title: activeScenario.explanation.title,
+              body: activeScenario.explanation.body
+            }
+          ]
+        : [],
+    [activeScenario, scenario]
+  )
   const returnTo = {
     to: location.pathname,
     label: 'Back to Deployments',
     scopeSummary: activeScenario.resultsSummary
   }
+
+  useNewExperienceAlertRail(alertRailItems)
 
   return (
     <div className="new-deployments-page">
@@ -232,12 +249,6 @@ export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenari
             </p>
           </div>
         </div>
-
-        {activeScenario.explanation ? (
-          <NewExplanation title={activeScenario.explanation.title} tone={activeScenario.explanation.tone}>
-            {activeScenario.explanation.body}
-          </NewExplanation>
-        ) : null}
 
         {activeScenario.stateBlock ? (
           <NewStateBlock

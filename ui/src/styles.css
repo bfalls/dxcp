@@ -127,6 +127,11 @@ body {
   padding: 10px 0 0;
 }
 
+.new-shell-alert-stack {
+  display: grid;
+  gap: 10px;
+}
+
 .new-shell-alert-card {
   margin: 0;
   border: 1px solid rgba(183, 179, 166, 0.18);
@@ -142,6 +147,18 @@ body {
 }
 
 .new-shell-alert-card strong {
+  color: var(--ink);
+}
+
+.new-shell-alert-card-warning {
+  border-color: rgba(227, 176, 75, 0.45);
+  background: rgba(227, 176, 75, 0.08);
+  color: var(--ink);
+}
+
+.new-shell-alert-card-danger {
+  border-color: rgba(224, 92, 78, 0.55);
+  background: rgba(224, 92, 78, 0.08);
   color: var(--ink);
 }
 

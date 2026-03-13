@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const WINDOW_OPTIONS = ['Last 24 hours', 'Last 7 days', 'Last 30 days']
 const APPLICATION_OPTIONS = ['All applications', 'payments-api', 'billing-worker', 'web-frontend']
@@ -375,6 +376,40 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
     () => buildReturnTo(location, `${timeWindow} · ${currentScopeSummary}`),
     [location, timeWindow, currentScopeSummary]
   )
+  const alertRailItems = useMemo(() => {
+    const items = []
+
+    if (refreshMessage) {
+      items.push({
+        id: 'insights-refresh-update',
+        tone: scenario === 'failure' ? 'danger' : scenario === 'degraded-read' ? 'warning' : 'neutral',
+        title: 'Refresh update',
+        body: refreshMessage
+      })
+    }
+
+    if (activeScenario.degradedNotice) {
+      items.push({
+        id: 'insights-degraded-read',
+        tone: 'warning',
+        title: activeScenario.degradedNotice.title,
+        body: activeScenario.degradedNotice.body
+      })
+    }
+
+    if (activeScenario.failureState) {
+      items.push({
+        id: 'insights-failure',
+        tone: 'danger',
+        title: activeScenario.failureState.title,
+        body: activeScenario.failureState.explanation
+      })
+    }
+
+    return items
+  }, [activeScenario, refreshMessage, scenario])
+
+  useNewExperienceAlertRail(alertRailItems)
 
   function handleRefresh() {
     if (refreshTimerRef.current) {
@@ -416,7 +451,6 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
           disabled: refreshing,
           description: 'Refresh the current Insights window without changing scope.'
         }}
-        actionNote="Insights stays read-focused. Refresh updates the selected aggregate reading without changing the page structure or turning this route into a dashboard-first workspace."
       />
 
       <SectionCard className="new-insights-card">
@@ -465,23 +499,8 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
         </div>
       </SectionCard>
 
-      {refreshMessage ? (
-        <NewExplanation title="Refresh update" tone={scenario === 'failure' ? 'danger' : scenario === 'degraded-read' ? 'warning' : 'neutral'}>
-          {refreshMessage}
-        </NewExplanation>
-      ) : null}
-
-      {activeScenario.degradedNotice ? (
-        <NewExplanation title={activeScenario.degradedNotice.title} tone="warning">
-          {activeScenario.degradedNotice.body}
-        </NewExplanation>
-      ) : null}
-
       {activeScenario.failureState ? (
         <>
-          <NewExplanation title={activeScenario.failureState.title} tone="danger">
-            {activeScenario.failureState.explanation}
-          </NewExplanation>
           <NewStateBlock
             eyebrow={activeScenario.failureState.stateBlock.eyebrow}
             title={activeScenario.failureState.stateBlock.title}

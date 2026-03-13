@@ -4307,7 +4307,7 @@ export default function App() {
 
   if (isNewExperienceRoute) {
     return (
-      <NewExperienceShell>
+      <NewExperienceShell role={derivedRole}>
         {authReady && isAuthenticated && (
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications/payments-api" replace />} />

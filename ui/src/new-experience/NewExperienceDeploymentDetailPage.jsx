@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const DEPLOYMENT_FIXTURES = {
   '9831': {
@@ -358,6 +359,22 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
 
   const returnTo = location.state?.returnTo || null
   const primaryActionState = deploymentPrimaryActionState(role, fixture)
+  const alertRailItems = useMemo(() => {
+    if (primaryActionState === 'available') {
+      return []
+    }
+
+    return [
+      {
+        id: `deployment-${deploymentId}-action`,
+        tone: primaryActionState === 'blocked' ? 'danger' : 'neutral',
+        title: primaryActionState === 'blocked' ? 'Rollback blocked' : 'Read-only access',
+        body: deploymentActionNote(role, fixture)
+      }
+    ]
+  }, [deploymentId, fixture, primaryActionState, role])
+
+  useNewExperienceAlertRail(alertRailItems)
 
   return (
     <div className="new-deployment-detail-page">
@@ -376,7 +393,6 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
           description: deploymentActionNote(role, fixture)
         }}
         secondaryActions={buildSecondaryActions(fixture, returnTo)}
-        actionNote={deploymentActionNote(role, fixture)}
       />
 
       {returnTo ? (
