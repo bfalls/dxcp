@@ -387,7 +387,7 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
       setRefreshStamp(nextStamp)
       setRefreshing(false)
       if (scenario === 'failure') {
-        setRefreshMessage('Refresh retried the read but aggregate insights remain unavailable for this preview state.')
+        setRefreshMessage('Refresh retried the read but aggregate insights remain unavailable for the current scope.')
       } else if (scenario === 'degraded-read') {
         setRefreshMessage('Refresh completed. Core aggregates remain available, but one supporting breakdown is still degraded.')
       } else {

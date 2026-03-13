@@ -1,6 +1,5 @@
 import React from 'react'
-import { NavLink, Link } from 'react-router-dom'
-import SectionCard from '../components/SectionCard.jsx'
+import { NavLink } from 'react-router-dom'
 
 export const NEW_EXPERIENCE_MAX_WIDTH_PX = 1200
 
@@ -25,27 +24,16 @@ export default function NewExperienceShell({ children }) {
 
       <div className="new-shell-alert-rail" aria-live="polite">
         <div className="new-shell-frame">
-          <SectionCard className="new-shell-alert-card">
-            <strong>Preview mode. </strong>
-            You are in the opt-in DXCP new experience shell.
-          </SectionCard>
+          <div className="new-shell-alert-card" role="note">
+            <strong>New experience preview.</strong>
+            <span>This route stays contained under <code>/new/*</code> while the current legacy experience remains available.</span>
+          </div>
         </div>
       </div>
 
       <main className="new-shell-page" role="main">
         <div className="new-shell-frame">
-          <div className="new-shell-page-frame">
-            <section className="new-shell-primary-region">{children}</section>
-            <aside className="new-shell-supporting-region">
-            <SectionCard>
-                <h3>Preview boundary</h3>
-                <p className="helper">The new experience remains opt-in under <code>/new/*</code> during rollout.</p>
-                <Link className="link secondary" to="/services">
-                  Return to legacy experience
-                </Link>
-              </SectionCard>
-            </aside>
-          </div>
+          <section className="new-shell-primary-region">{children}</section>
         </div>
       </main>
     </div>

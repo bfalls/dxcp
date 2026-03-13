@@ -343,14 +343,14 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
         />
         <NewStateBlock
           eyebrow="Unavailable route"
-          title="Deployment detail is not available for this preview record"
+          title="Deployment detail is not available for this route"
           tone="danger"
           actions={[
             { label: 'Open Deployments', to: '/new/deployments' },
             { label: 'Open Legacy Deployments', to: '/deployments', secondary: true }
           ]}
         >
-          This preview route only includes the deployment records needed to prove the Slice 7 object page states.
+          Open a visible deployment from the recent collection, or continue in the legacy Deployments route for records that are not exposed here yet.
         </NewStateBlock>
       </>
     )

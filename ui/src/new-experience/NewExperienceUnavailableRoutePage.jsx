@@ -8,20 +8,19 @@ export default function NewExperienceUnavailableRoutePage() {
       <NewExperiencePageHeader
         title="Admin"
         objectIdentity="Admin workspace"
-        stateSummaryItems={[{ label: 'Preview state', value: 'Unavailable' }]}
+        stateSummaryItems={[{ label: 'Route state', value: 'Unavailable' }]}
         primaryAction={{ label: 'Admin', state: 'unavailable' }}
       />
       <NewStateBlock
         eyebrow="Unavailable route"
-        title="Admin is not available in the new experience preview"
+        title="Admin is not available on this route"
         tone="danger"
         actions={[
           { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true },
           { label: 'Open Legacy Admin', to: '/admin' }
         ]}
       >
-        This route stays out of scope until the Admin slice is implemented. Continue in the legacy workspace for
-        governance tasks.
+        Continue in the current Admin workspace for governance tasks.
       </NewStateBlock>
     </>
   )

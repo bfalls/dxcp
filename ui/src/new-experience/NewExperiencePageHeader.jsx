@@ -9,6 +9,21 @@ function formatRoleLabel(role) {
   return 'Unknown role'
 }
 
+function getActionStateTitle(state, label) {
+  if (state === 'blocked') return `${label} blocked`
+  if (state === 'disabled') return `${label} not ready`
+  if (state === 'read-only') return 'Read-only access'
+  if (state === 'unavailable') return 'Unavailable on this route'
+  return 'Action note'
+}
+
+function getActionStateTone(state) {
+  if (state === 'blocked') return 'danger'
+  if (state === 'read-only' || state === 'unavailable') return 'neutral'
+  if (state === 'disabled') return 'neutral'
+  return 'warning'
+}
+
 export default function NewExperiencePageHeader({
   title,
   objectIdentity,
@@ -22,12 +37,15 @@ export default function NewExperiencePageHeader({
   const primaryActionLabel = primaryAction?.label || 'Action'
   const showPrimaryAction = primaryActionState !== 'unavailable'
   const actionNoteId = showPrimaryAction && actionNote ? `new-header-note-${title.replace(/\s+/g, '-').toLowerCase()}` : undefined
+  const actionStateTitle = getActionStateTitle(primaryActionState, primaryActionLabel)
+  const actionStateTone = getActionStateTone(primaryActionState)
 
   return (
     <header className="new-page-header">
       <div className="new-page-header-identity">
         <h2>{title}</h2>
         <div className="new-page-object-identity">{objectIdentity}</div>
+        <div className="new-page-role-note">{formatRoleLabel(role)}</div>
         <div className="new-page-state-summary" aria-label="State summary">
           {stateSummaryItems.map((item) => (
             <span key={item.label} className="new-page-state-item">
@@ -87,31 +105,13 @@ export default function NewExperiencePageHeader({
               </button>
             )
           ) : (
-            <div className="new-page-unavailable-action">Not available on this route</div>
+            <div className="new-page-unavailable-action">Unavailable on this route</div>
           )}
-          <div className="new-page-role-note">Role: {formatRoleLabel(role)}</div>
         </div>
       </div>
       {actionNote ? (
         <div className="new-page-header-note">
-          <NewExplanation
-            title={
-              primaryActionState === 'blocked'
-                ? `${primaryActionLabel} blocked`
-                : primaryActionState === 'disabled'
-                  ? `${primaryActionLabel} not ready`
-                  : primaryActionState === 'read-only'
-                    ? 'Read-only access'
-                    : 'Action note'
-            }
-            tone={
-              primaryActionState === 'blocked'
-                ? 'danger'
-                : primaryActionState === 'disabled'
-                  ? 'neutral'
-                  : 'warning'
-            }
-          >
+          <NewExplanation title={actionStateTitle} tone={actionStateTone}>
             <span id={actionNoteId}>{actionNote}</span>
           </NewExplanation>
         </div>

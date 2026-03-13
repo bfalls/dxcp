@@ -625,7 +625,7 @@ function PlatformAdminAdminPage({ role, scenario }) {
                 {buildAuditSummary(draftGroup, baseGroup)}
               </NewExplanation>
               <NewExplanation title="Legacy boundary" tone="neutral">
-                This preview keeps the new Admin slice inside <code>/new/*</code>. The existing legacy Admin remains available during rollout.
+                Admin remains contained under <code>/new/*</code> while the current Admin experience stays available during rollout.
               </NewExplanation>
             </div>
           </SectionCard>

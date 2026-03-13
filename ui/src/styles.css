@@ -124,22 +124,29 @@ body {
 
 .new-shell-alert-rail {
   width: 100%;
-  padding: 12px 0 0;
+  padding: 10px 0 0;
 }
 
 .new-shell-alert-card {
   margin: 0;
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(13, 25, 25, 0.72);
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.new-shell-alert-card strong {
+  color: var(--ink);
 }
 
 .new-shell-page {
-  padding: 16px 0 32px;
-}
-
-.new-shell-page-frame {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr);
-  gap: 20px;
-  align-items: start;
+  padding: 18px 0 32px;
 }
 
 .new-shell-primary-region,
@@ -147,35 +154,40 @@ body {
   min-width: 0;
 }
 
-.new-shell-supporting-region .card {
-  box-shadow: none;
-  background: rgba(18, 31, 31, 0.72);
-}
-
 .new-page-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px 24px;
+  gap: 14px 24px;
   align-items: start;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .new-page-header h2 {
   margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .new-page-header-identity {
   min-width: 0;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .new-page-object-identity {
   color: var(--ink);
   font-weight: 600;
-  font-size: 32px;
-  line-height: 1.05;
+  font-size: 30px;
+  line-height: 1.08;
   overflow-wrap: anywhere;
+}
+
+.new-page-role-note {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .new-page-state-summary {
@@ -230,11 +242,6 @@ body {
   display: grid;
   gap: 6px;
   justify-items: end;
-}
-
-.new-page-role-note {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .new-page-header-note {
@@ -382,6 +389,19 @@ body {
   gap: 16px;
 }
 
+.new-application-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.new-application-primary,
+.new-application-support {
+  display: grid;
+  gap: 16px;
+}
+
 .new-application-card {
   display: grid;
   gap: 16px;
@@ -511,7 +531,7 @@ body {
 }
 
 .new-insights-summary-item strong {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
 }
 
@@ -1067,16 +1087,8 @@ body {
 }
 
 @media (max-width: 1000px) {
-  .new-shell-page-frame {
-    grid-template-columns: 1fr;
-  }
-
-  .new-shell-primary-region {
-    order: 1;
-  }
-
-  .new-shell-supporting-region {
-    order: 2;
+  .new-application-layout {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .new-deploy-layout {
@@ -1185,6 +1197,10 @@ body {
   .new-insights-attention-item,
   .new-insights-activity-item {
     flex-direction: column;
+  }
+
+  .new-shell-alert-card {
+    align-items: flex-start;
   }
 
   .new-timeline-event {

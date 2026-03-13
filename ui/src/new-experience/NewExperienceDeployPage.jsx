@@ -64,7 +64,7 @@ function getScenario(role, requestedScenario) {
       key: 'permission-limited',
       environment: 'production',
       primaryActionState: 'blocked',
-      headerNote: 'Deploy is permission-limited because production deploys require platform-admin approval in this preview.',
+      headerNote: 'Deploy is permission-limited because production deploys require platform-admin approval on this route.',
       localTitle: 'Permission-limited deploy',
       localTone: 'warning',
       localExplanation:
@@ -117,7 +117,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
     {
       label: 'Open Legacy Deploy',
       to: '/deploy',
-      description: 'Use the current legacy deploy workflow during rollout.'
+      description: 'Use the current deploy workflow in the legacy experience during rollout.'
     }
   ]
 

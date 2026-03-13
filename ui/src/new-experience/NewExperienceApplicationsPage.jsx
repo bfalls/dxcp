@@ -92,101 +92,107 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
         }
       />
 
-      <SectionCard className="new-application-card">
-        <div className="new-section-header">
-          <div>
-            <h3>Current running summary</h3>
-            <p className="helper">Current state stays first so this page reads as the application record, not a browse surface.</p>
-          </div>
-          <div className="links">
-            <Link className="link secondary" to={newDeployRoute}>
-              Open deploy workflow
-            </Link>
-            <Link className="link" to="/new/deployments/9831">
-              Open current deployment detail
-            </Link>
-          </div>
-        </div>
-
-        <dl className="new-object-summary-grid" aria-label="Application identity and current running summary">
-          <dt>Application owner</dt>
-          <dd>{APPLICATION_FIXTURE.owner}</dd>
-          <dt>Deployment group</dt>
-          <dd>{APPLICATION_FIXTURE.deploymentGroup}</dd>
-          <dt>Environment</dt>
-          <dd>{APPLICATION_FIXTURE.environment}</dd>
-          <dt>Current version</dt>
-          <dd>{APPLICATION_FIXTURE.currentVersion}</dd>
-          <dt>Current state</dt>
-          <dd>{APPLICATION_FIXTURE.currentOutcome}</dd>
-          <dt>Running since</dt>
-          <dd>{APPLICATION_FIXTURE.runningSince}</dd>
-        </dl>
-
-        <div className="new-running-callout">
-          <strong>{APPLICATION_FIXTURE.lastChange}</strong>
-          <p className="helper">{APPLICATION_FIXTURE.activeDeployment.summary}</p>
-          <Link className="link" to="/new/deployments/9842">
-            Open deployment {APPLICATION_FIXTURE.activeDeployment.id}
-          </Link>
-        </div>
-      </SectionCard>
-
-      <SectionCard className="new-application-card">
-        <div className="new-section-header">
-          <div>
-            <h3>Recent state summary</h3>
-            <p className="helper">Recent deployment state stays compact and only exposes the latest signals needed for the next handoff.</p>
-          </div>
-        </div>
-
-        <NewExplanation title="Supporting reads are degraded" tone="warning">
-          Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.
-        </NewExplanation>
-
-        <div className="new-activity-list">
-          {APPLICATION_FIXTURE.recentState.map((item) => (
-            <div key={item.label} className="new-activity-row">
-              <span className={`badge ${toneForState(item.state)}`}>{item.state}</span>
-              <div className="new-activity-copy">
-                <strong>{item.label}</strong>
-                <span>{item.detail}</span>
+      <div className="new-application-layout">
+        <div className="new-application-primary">
+          <SectionCard className="new-application-card">
+            <div className="new-section-header">
+              <div>
+                <h3>Current running summary</h3>
+                <p className="helper">Current state stays first so this page reads as the application record, not a browse surface.</p>
               </div>
-              <span>{item.timestamp}</span>
-              {item.to ? (
-                <Link className="link" to={item.to}>
-                  {item.linkLabel}
+              <div className="links">
+                <Link className="link secondary" to={newDeployRoute}>
+                  Open deploy workflow
                 </Link>
-              ) : (
-                <span className="helper">No detail handoff needed</span>
-              )}
+                <Link className="link" to="/new/deployments/9831">
+                  Open current deployment detail
+                </Link>
+              </div>
             </div>
-          ))}
+
+            <dl className="new-object-summary-grid" aria-label="Application identity and current running summary">
+              <dt>Application owner</dt>
+              <dd>{APPLICATION_FIXTURE.owner}</dd>
+              <dt>Deployment group</dt>
+              <dd>{APPLICATION_FIXTURE.deploymentGroup}</dd>
+              <dt>Environment</dt>
+              <dd>{APPLICATION_FIXTURE.environment}</dd>
+              <dt>Current version</dt>
+              <dd>{APPLICATION_FIXTURE.currentVersion}</dd>
+              <dt>Current state</dt>
+              <dd>{APPLICATION_FIXTURE.currentOutcome}</dd>
+              <dt>Running since</dt>
+              <dd>{APPLICATION_FIXTURE.runningSince}</dd>
+            </dl>
+
+            <div className="new-running-callout">
+              <strong>{APPLICATION_FIXTURE.lastChange}</strong>
+              <p className="helper">{APPLICATION_FIXTURE.activeDeployment.summary}</p>
+              <Link className="link" to="/new/deployments/9842">
+                Open deployment {APPLICATION_FIXTURE.activeDeployment.id}
+              </Link>
+            </div>
+          </SectionCard>
+
+          <SectionCard className="new-application-card">
+            <div className="new-section-header">
+              <div>
+                <h3>Recent state summary</h3>
+                <p className="helper">Recent deployment state stays compact and only exposes the latest signals needed for the next handoff.</p>
+              </div>
+            </div>
+
+            <NewExplanation title="Supporting reads are degraded" tone="warning">
+              Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.
+            </NewExplanation>
+
+            <div className="new-activity-list">
+              {APPLICATION_FIXTURE.recentState.map((item) => (
+                <div key={item.label} className="new-activity-row">
+                  <span className={`badge ${toneForState(item.state)}`}>{item.state}</span>
+                  <div className="new-activity-copy">
+                    <strong>{item.label}</strong>
+                    <span>{item.detail}</span>
+                  </div>
+                  <span>{item.timestamp}</span>
+                  {item.to ? (
+                    <Link className="link" to={item.to}>
+                      {item.linkLabel}
+                    </Link>
+                  ) : (
+                    <span className="helper">No detail handoff needed</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </SectionCard>
         </div>
-      </SectionCard>
 
-      <SectionCard className="new-application-card new-application-support-card">
-        <h3>Supporting context</h3>
-        <p className="helper">This stays compact so the object identity and current state remain primary.</p>
+        <aside className="new-application-support">
+          <SectionCard className="new-application-card new-application-support-card">
+            <h3>Supporting context</h3>
+            <p className="helper">This stays compact so the object identity and current state remain primary.</p>
 
-        <dl className="new-application-support-grid">
-          <dt>Release path</dt>
-          <dd>{APPLICATION_FIXTURE.support.releasePath}</dd>
-          <dt>Policy posture</dt>
-          <dd>{APPLICATION_FIXTURE.support.policyPosture}</dd>
-        </dl>
+            <dl className="new-application-support-grid">
+              <dt>Release path</dt>
+              <dd>{APPLICATION_FIXTURE.support.releasePath}</dd>
+              <dt>Policy posture</dt>
+              <dd>{APPLICATION_FIXTURE.support.policyPosture}</dd>
+            </dl>
 
-        <div className="new-explanation-stack">
-          <NewExplanation title="Mutation disabled" tone="warning">
-            DXCP can pause mutating actions for maintenance without hiding the deploy handoff or the current application record.
-          </NewExplanation>
-          <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
-            {isPlatformAdmin
-              ? 'Platform admin diagnostics remain secondary to the normalized deployment record in this preview.'
-              : APPLICATION_FIXTURE.support.diagnostics}
-          </NewExplanation>
-        </div>
-      </SectionCard>
+            <div className="new-explanation-stack">
+              <NewExplanation title="Mutation disabled" tone="warning">
+                DXCP can pause mutating actions for maintenance without hiding the deploy handoff or the current application record.
+              </NewExplanation>
+              <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
+                {isPlatformAdmin
+                  ? 'Platform-admin diagnostics remain secondary to the normalized deployment record on this route.'
+                  : APPLICATION_FIXTURE.support.diagnostics}
+              </NewExplanation>
+            </div>
+          </SectionCard>
+        </aside>
+      </div>
     </div>
   )
 }
