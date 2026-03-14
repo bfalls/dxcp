@@ -114,6 +114,7 @@ const newExperienceDeploymentHistoryByService = {
   'payments-api': [
     {
       id: '9842',
+      service: 'payments-api',
       state: 'IN_PROGRESS',
       environment: 'sandbox',
       version: 'v1.33.0',
@@ -123,13 +124,114 @@ const newExperienceDeploymentHistoryByService = {
     },
     {
       id: '9831',
+      service: 'payments-api',
       state: 'SUCCEEDED',
       outcome: 'SUCCEEDED',
       environment: 'sandbox',
       version: 'v1.32.1',
       createdAt: '2025-01-02T23:40:00Z',
       updatedAt: '2025-01-03T00:03:00Z',
+      recipeId: 'default',
       deliveryGroupId: 'payments'
+    },
+    {
+      id: '9819',
+      service: 'payments-api',
+      state: 'FAILED',
+      outcome: 'FAILED',
+      environment: 'production',
+      version: 'v1.31.9',
+      createdAt: '2025-01-02T20:00:00Z',
+      updatedAt: '2025-01-02T20:12:00Z',
+      recipeId: 'default',
+      deliveryGroupId: 'payments'
+    }
+  ],
+  'billing-worker': [
+    {
+      id: 'bill-1',
+      service: 'billing-worker',
+      state: 'SUCCEEDED',
+      outcome: 'SUCCEEDED',
+      environment: 'staging',
+      version: '4.2.0',
+      createdAt: '2025-01-01T18:00:00Z',
+      updatedAt: '2025-01-01T18:06:00Z',
+      recipeId: 'default',
+      deliveryGroupId: 'billing'
+    }
+  ],
+  'web-frontend': []
+}
+
+const newExperienceDeploymentDetailsById = {
+  '9831': {
+    id: '9831',
+    state: 'SUCCEEDED',
+    outcome: 'SUCCEEDED',
+    service: 'payments-api',
+    environment: 'sandbox',
+    version: 'v1.32.1',
+    recipeId: 'default',
+    changeSummary: 'Release retry handling fixes and sandbox verification updates.',
+    createdAt: '2025-01-02T23:40:00Z',
+    updatedAt: '2025-01-03T00:03:00Z',
+    engineExecutionId: 'exec-9831',
+    engineExecutionUrl: 'https://spinnaker.example/executions/9831'
+  },
+  '9842': {
+    id: '9842',
+    state: 'IN_PROGRESS',
+    service: 'payments-api',
+    environment: 'sandbox',
+    version: 'v1.33.0',
+    recipeId: 'default',
+    changeSummary: 'Promote the current retry fix candidate through sandbox verification.',
+    createdAt: '2025-01-03T00:00:00Z',
+    updatedAt: '2025-01-03T00:05:00Z',
+    engineExecutionId: 'exec-9842',
+    engineExecutionUrl: 'https://spinnaker.example/executions/9842'
+  },
+  '9819': {
+    id: '9819',
+    state: 'FAILED',
+    outcome: 'FAILED',
+    service: 'payments-api',
+    environment: 'production',
+    version: 'v1.31.9',
+    recipeId: 'default',
+    changeSummary: 'Release checkout timeout handling and production verification updates.',
+    createdAt: '2025-01-02T20:00:00Z',
+    updatedAt: '2025-01-02T20:12:00Z',
+    engineExecutionId: 'exec-9819',
+    engineExecutionUrl: 'https://spinnaker.example/executions/9819'
+  }
+}
+
+const newExperienceDeploymentTimelineById = {
+  '9831': [
+    { key: 'submitted', occurredAt: '2025-01-02T23:40:00Z', detail: 'DXCP recorded the deployment request.' },
+    { key: 'validated', occurredAt: '2025-01-02T23:41:00Z', detail: 'Guardrails allowed this deployment.' },
+    { key: 'succeeded', occurredAt: '2025-01-03T00:03:00Z', detail: 'DXCP recorded a successful deployment outcome.' }
+  ],
+  '9842': [
+    { key: 'submitted', occurredAt: '2025-01-03T00:00:00Z', detail: 'DXCP recorded the deployment request.' },
+    { key: 'active', occurredAt: '2025-01-03T00:05:00Z', detail: 'Verification is still running for this deployment.' }
+  ],
+  '9819': [
+    { key: 'submitted', occurredAt: '2025-01-02T20:00:00Z', detail: 'DXCP recorded the deployment request.' },
+    { key: 'failed', occurredAt: '2025-01-02T20:12:00Z', detail: 'DXCP recorded a failed deployment outcome.' }
+  ]
+}
+
+const newExperienceDeploymentFailuresById = {
+  '9819': [
+    {
+      category: 'INFRA',
+      summary: 'Verification did not pass after traffic cutover began.',
+      detail: 'DXCP observed sustained checkout timeout errors during verification.',
+      actionHint: 'Inspect the current running deployment, fix the timeout condition, then deploy again.',
+      observedAt: '2025-01-02T20:10:00Z'
     }
   ]
 }
@@ -143,6 +245,9 @@ function buildNewExperienceFetch(role, overrides = {}) {
     deliveryGroups: newExperienceDeliveryGroups,
     serviceStatusesByService: newExperienceServiceStatuses,
     deploymentHistoryByService: newExperienceDeploymentHistoryByService,
+    deploymentDetailsById: newExperienceDeploymentDetailsById,
+    deploymentTimelineById: newExperienceDeploymentTimelineById,
+    deploymentFailuresById: newExperienceDeploymentFailuresById,
     ...overrides
   })
 }
@@ -172,6 +277,9 @@ const buildFetchMock = ({
   buildRunUrl,
   serviceStatusesByService,
   deploymentHistoryByService,
+  deploymentDetailsById,
+  deploymentTimelineById,
+  deploymentFailuresById,
   failServices,
   failDeliveryGroups,
   failEnvironments,
@@ -593,14 +701,17 @@ const buildFetchMock = ({
       if (Array.isArray(failDeploymentsFor) && failDeploymentsFor.includes(serviceName)) {
         return Promise.reject(new Error(`Failed to load deployments for ${serviceName}`))
       }
-      const configuredHistory = deploymentHistoryByService?.[serviceName]
-      if (configuredHistory) {
-        return ok(
-          configuredHistory.map((item) => ({
-            ...item,
-            environment: item.environment || environment
-          }))
-        )
+      if (deploymentHistoryByService) {
+        if (Object.prototype.hasOwnProperty.call(deploymentHistoryByService, serviceName)) {
+          const configuredHistory = deploymentHistoryByService[serviceName]
+          return ok(
+            (configuredHistory || []).map((item) => ({
+              ...item,
+              environment: item.environment || environment
+            }))
+          )
+        }
+        return ok([])
       }
       return ok([
         {
@@ -626,6 +737,12 @@ const buildFetchMock = ({
         }
       ])
     }
+    if (pathname.startsWith('/v1/deployments/') && !pathname.endsWith('/failures') && !pathname.endsWith('/timeline')) {
+      const deploymentKey = pathname.split('/').pop()
+      if (deploymentDetailsById && Object.prototype.hasOwnProperty.call(deploymentDetailsById, deploymentKey)) {
+        return ok(deploymentDetailsById[deploymentKey])
+      }
+    }
     if (pathname === '/v1/deployments/dep-1') {
       return ok({
         id: 'dep-1',
@@ -638,8 +755,28 @@ const buildFetchMock = ({
         engineExecutionUrl: 'https://spinnaker.example/executions/dep-1'
       })
     }
+    if (pathname.startsWith('/v1/deployments/') && pathname.endsWith('/failures')) {
+      const deploymentKey = pathname.split('/')[3]
+      if (deploymentKey === 'dep-1') {
+        return ok(failures || [])
+      }
+      if (deploymentFailuresById && Object.prototype.hasOwnProperty.call(deploymentFailuresById, deploymentKey)) {
+        return ok(deploymentFailuresById[deploymentKey])
+      }
+      return ok([])
+    }
     if (pathname === '/v1/deployments/dep-1/failures') {
       return ok(failures || [])
+    }
+    if (pathname.startsWith('/v1/deployments/') && pathname.endsWith('/timeline')) {
+      const deploymentKey = pathname.split('/')[3]
+      if (deploymentKey === 'dep-1') {
+        return ok(timeline || [])
+      }
+      if (deploymentTimelineById && Object.prototype.hasOwnProperty.call(deploymentTimelineById, deploymentKey)) {
+        return ok(deploymentTimelineById[deploymentKey])
+      }
+      return ok([])
     }
     if (pathname === '/v1/deployments/dep-1/timeline') {
       return ok(timeline || [])
@@ -1347,11 +1484,7 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/deployments/9831')
 
     await view.findByRole('heading', { name: 'Deployment' })
@@ -1359,6 +1492,7 @@ export async function runAllTests() {
     await view.findByText('Deployment summary')
     await view.findByText('Deployment timeline')
     await view.findByText('Current running context')
+    await view.findAllByText('DXCP recorded a successful deployment outcome.')
     assert.ok(view.getAllByText('Succeeded').length >= 1)
     assert.ok(view.getByRole('link', { name: 'Open Application' }))
     assert.ok(view.getByRole('link', { name: 'Open Deployments' }))
@@ -1373,11 +1507,7 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/deployments')
 
     await view.findByText('payments-api · v1.33.0')
@@ -1395,26 +1525,19 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/deployments')
 
     await view.findByRole('heading', { name: 'Deployments' })
-    await view.findByText('Recent deployment activity across applications')
+    await view.findByText('Recent deployment activity across accessible applications')
     await view.findByText('Recent deployment activity')
-    await view.findByText(
-      '3 deployments in the last 7 days for sandbox. Recent activity stays bounded so this page supports detail handoff without becoming archive-first.'
-    )
+    await view.findByText(/Deployment history stays bounded/)
     await view.findByText('payments-api · v1.33.0')
     await view.findByText('payments-api · v1.31.9')
     await view.findAllByText('Failed')
     const openLinks = view.getAllByRole('link', { name: 'Open' })
     assert.ok(openLinks.length >= 3)
     assert.equal(openLinks[0].getAttribute('href'), '/new/deployments/9842')
-    assert.ok(view.getByRole('button', { name: 'Load older deployments' }))
   })
 
   await runTest('New experience deployments route preserves structure for empty state', async () => {
@@ -1426,20 +1549,18 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      deploymentHistoryByService: {}
     })
-    const view = renderApp('/new/deployments/empty')
+    const view = renderApp('/new/deployments')
 
     await view.findByRole('heading', { name: 'Deployments' })
     await view.findByText('Recent deployment activity')
     await view.findByText('No deployments recorded yet')
     await view.findByText(
-      'The recent deployment window is valid, but there is no deployment activity to browse yet. Open an application to begin from object context instead of turning this page into a placeholder archive.'
+      'No deployment records are available from the accessible application set yet. Open an application to begin from object context when the first deployment is ready.'
     )
-    assert.ok(view.getByRole('link', { name: 'Open Deploy Workflow' }))
+    assert.ok(view.getAllByRole('link', { name: 'Open Applications' }).length >= 1)
   })
 
   await runTest('New experience deployments route distinguishes no-results state from empty history', async () => {
@@ -1451,18 +1572,12 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
-    const view = renderApp('/new/deployments/no-results')
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
+    const view = renderApp('/new/deployments?service=billing-worker&outcome=Failed')
 
     await view.findByText('No deployments match this scope')
-    await view.findByText(
-      'Try a broader outcome or time window to continue browsing. This is different from empty history because deployment records exist outside the current filters.'
-    )
-    assert.ok(view.getByRole('link', { name: 'Clear filters' }))
+    await view.findByText('Deployment records are available on this route, but none match the current application and outcome scope.')
+    assert.ok(view.getByRole('button', { name: 'Clear filters' }))
   })
 
   await runTest('New experience deployments route shows degraded-read notice without collapsing the collection', async () => {
@@ -1474,19 +1589,50 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      failDeploymentsFor: ['billing-worker']
     })
-    const view = renderApp('/new/deployments/degraded-read')
+    const view = renderApp('/new/deployments')
 
-    await view.findByText('Supporting reads are degraded')
-    await view.findByText(
-      'Visible rows remain useful for scan and handoff, but freshness and supporting evidence may lag. Open deployment detail for the authoritative record before acting on a stale assumption.'
-    )
+    await view.findAllByText('Supporting reads are degraded')
+    await view.findByText('Deployment history could not be refreshed for billing-worker.')
     await view.findByText('payments-api · v1.33.0')
     await view.findByText('payments-api · v1.31.9')
+  })
+
+  await runTest('New experience deployment detail shows failed narrative in DXCP language', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
+    const view = renderApp('/new/deployments/9819')
+
+    await view.findByText('Failure narrative')
+    await view.findByText('Infrastructure')
+    await view.findByText('Verification did not pass after traffic cutover began.')
+    await view.findByText('Inspect the current running deployment, fix the timeout condition, then deploy again.')
+  })
+
+  await runTest('New experience deployment detail shows in-progress state without inventing a failed outcome', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
+    const view = renderApp('/new/deployments/9842')
+
+    await view.findAllByText('In progress')
+    await view.findByText('Deployment still in progress')
+    assert.equal(view.queryByText('Failure narrative'), null)
   })
 
   await runTest('New experience insights route shows restrained aggregate reading and drill-down paths', async () => {

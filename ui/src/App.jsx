@@ -4320,18 +4320,18 @@ export default function App() {
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications" replace />} />
             <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} api={api} />} />
-            <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} />} />
+            <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />} />
             <Route
               path="/new/deployments/empty"
-              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="empty" />}
+              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
             />
             <Route
               path="/new/deployments/no-results"
-              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="no-results" />}
+              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
             />
             <Route
               path="/new/deployments/degraded-read"
-              element={<NewExperienceDeploymentsPage role={derivedRole} scenario="degraded-read" />}
+              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
             />
             <Route path="/new/insights" element={<NewExperienceInsightsPage role={derivedRole} />} />
             <Route path="/new/insights/:scenario" element={<NewExperienceInsightsPage role={derivedRole} />} />
@@ -4349,7 +4349,7 @@ export default function App() {
             />
             <Route
               path="/new/deployments/:deploymentId"
-              element={<NewExperienceDeploymentDetailPage role={derivedRole} />}
+              element={<NewExperienceDeploymentDetailPage role={derivedRole} api={api} />}
             />
             <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} />} />
             <Route path="/new/admin/:scenario" element={<NewExperienceAdminPage role={derivedRole} />} />

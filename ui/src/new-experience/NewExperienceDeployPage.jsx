@@ -841,13 +841,14 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                   title="Deployment created"
                   tone="neutral"
                   actions={[
-                    { label: 'Open Legacy Deployment', to: `/deployments/${submitState.deploymentId}` },
+                    { label: 'Open Deployment', to: `/new/deployments/${submitState.deploymentId}` },
+                    { label: 'Open Legacy Deployment', to: `/deployments/${submitState.deploymentId}`, secondary: true },
                     { label: 'Open Application', to: `/new/applications/${applicationName}`, secondary: true }
                   ]}
                 >
                   {submitState.deploymentId
-                    ? `DXCP created Deployment ${submitState.deploymentId}. Use the deployment record to follow progress while /new deployment detail remains in rollout.`
-                    : 'DXCP created the Deployment record. Use the deployment record to follow progress while /new deployment detail remains in rollout.'}
+                    ? `DXCP created Deployment ${submitState.deploymentId}. Use the deployment record to follow progress from the new deployment detail route.`
+                    : 'DXCP created the Deployment record. Use the deployment record to follow progress from the new deployment detail route.'}
                 </NewExplanation>
               ) : null}
 

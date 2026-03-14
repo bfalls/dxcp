@@ -339,6 +339,7 @@ function ApplicationDetail({ role, api }) {
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
   const returnTo = location.state?.returnTo || null
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
+  const deploymentsRoute = `/new/deployments?service=${encodeURIComponent(applicationName)}`
   const [detailState, setDetailState] = useState({
     kind: 'loading',
     viewModel: null,
@@ -420,7 +421,7 @@ function ApplicationDetail({ role, api }) {
 
   const secondaryActions = [
     { label: 'Open Applications', to: '/new/applications', description: 'Return to the application chooser.' },
-    { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployments without leaving the new experience.' },
+    { label: 'Open Deployments', to: deploymentsRoute, description: 'Browse recent deployments for this application.' },
     { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshDetail({ bypassCache: true }), disabled: isRefreshing || isLoading }
   ]
 
