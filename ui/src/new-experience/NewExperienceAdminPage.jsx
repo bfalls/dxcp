@@ -1,150 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
-
-const BASE_GROUP = {
-  id: 'payments-core',
-  name: 'Payments Core',
-  owner: 'Payments Platform',
-  description: 'Governs sandbox, staging, and production delivery behavior for payment-path applications.',
-  applicationsCount: 5,
-  environments: ['sandbox', 'staging', 'production'],
-  allowedStrategies: ['Blue-Green', 'Rolling'],
-  guardrails: {
-    maxConcurrentDeployments: 1,
-    dailyDeployQuota: 10,
-    dailyRollbackQuota: 3
-  },
-  lastChanged: 'March 10, 2026 at 09:18 AM UTC'
-}
-
-function buildDraftForScenario(scenario) {
-  if (scenario === 'warnings' || scenario === 'blocked-save') {
-    return {
-      ...BASE_GROUP,
-      allowedStrategies: ['Blue-Green'],
-      guardrails: {
-        ...BASE_GROUP.guardrails,
-        dailyDeployQuota: 8
-      }
-    }
-  }
-
-  if (scenario === 'errors') {
-    return {
-      ...BASE_GROUP,
-      allowedStrategies: [],
-      guardrails: {
-        ...BASE_GROUP.guardrails,
-        dailyDeployQuota: 2
-      }
-    }
-  }
-
-  return BASE_GROUP
-}
-
-function formatStrategies(strategies) {
-  return strategies.length > 0 ? strategies.join(', ') : 'None selected'
-}
-
-function buildValidation(draft, scenario) {
-  const warnings = []
-  const errors = []
-
-  if (draft.guardrails.dailyDeployQuota < BASE_GROUP.guardrails.dailyDeployQuota) {
-    warnings.push(
-      'Future deployments in sandbox and staging will stop earlier each day after the lower deploy quota is reached.'
-    )
-  }
-
-  if (!draft.allowedStrategies.includes('Rolling')) {
-    warnings.push('5 Applications would no longer be allowed to use Rolling.')
-  }
-
-  if (draft.allowedStrategies.length === 0) {
-    errors.push('At least one deployment strategy must remain allowed before DXCP can save this Deployment Group.')
-  }
-
-  if (draft.guardrails.dailyDeployQuota < draft.guardrails.dailyRollbackQuota) {
-    errors.push('Daily deploy quota must stay greater than or equal to the daily rollback quota.')
-  }
-
-  if (scenario === 'blocked-save') {
-    warnings.push('Policy review is complete, but platform-wide read-only mode is active.')
-  }
-
-  return { warnings, errors }
-}
-
-function buildImpactPreview(draft, base, validation) {
-  const newlyBlocked = []
-  const newlyAllowed = []
-  const unchanged = ['Current running deployments stay unchanged until a future deployment is requested.']
-
-  if (draft.guardrails.dailyDeployQuota < base.guardrails.dailyDeployQuota) {
-    newlyBlocked.push(
-      `Future deployments will stop after ${draft.guardrails.dailyDeployQuota} deploys in one day for ${draft.name}.`
-    )
-  }
-
-  if (!draft.allowedStrategies.includes('Rolling') && base.allowedStrategies.includes('Rolling')) {
-    newlyBlocked.push(`${draft.applicationsCount} governed Applications would lose access to Rolling.`)
-  }
-
-  if (draft.allowedStrategies.includes('Rolling') && !base.allowedStrategies.includes('Rolling')) {
-    newlyAllowed.push(`${draft.applicationsCount} governed Applications would regain access to Rolling.`)
-  }
-
-  if (draft.guardrails.dailyDeployQuota > base.guardrails.dailyDeployQuota) {
-    newlyAllowed.push(
-      `Future deployments could continue until ${draft.guardrails.dailyDeployQuota} deploys in one day are reached.`
-    )
-  }
-
-  if (validation.errors.length > 0) {
-    unchanged.push('Impact preview is partial until blocking review errors are resolved.')
-  }
-
-  return { newlyBlocked, newlyAllowed, unchanged }
-}
-
-function buildChangeSummary(draft, base) {
-  const changes = []
-
-  if (draft.guardrails.dailyDeployQuota !== base.guardrails.dailyDeployQuota) {
-    changes.push({
-      label: 'Daily deploy quota',
-      current: `${base.guardrails.dailyDeployQuota} deploys/day`,
-      proposed: `${draft.guardrails.dailyDeployQuota} deploys/day`
-    })
-  }
-
-  if (formatStrategies(draft.allowedStrategies) !== formatStrategies(base.allowedStrategies)) {
-    changes.push({
-      label: 'Allowed strategies',
-      current: formatStrategies(base.allowedStrategies),
-      proposed: formatStrategies(draft.allowedStrategies)
-    })
-  }
-
-  return changes
-}
-
-function buildAuditSummary(draft, base) {
-  if (draft.guardrails.dailyDeployQuota !== base.guardrails.dailyDeployQuota) {
-    return 'Audit will record the new quota and the operator who changed delivery limits for this Deployment Group.'
-  }
-
-  if (formatStrategies(draft.allowedStrategies) !== formatStrategies(base.allowedStrategies)) {
-    return 'Audit will record which Applications gained or lost strategy access before the change becomes active.'
-  }
-
-  return 'Audit remains quiet until you stage a governance change.'
-}
+import {
+  buildAdminViewModel,
+  createAdminDraft,
+  loadAdminData,
+  reviewAdminGroupDraft,
+  saveAdminGroupDraft
+} from './newExperienceAdminData.js'
 
 function BlockedAdminState({ role }) {
   useNewExperienceAlertRail([
@@ -186,171 +52,338 @@ function BlockedAdminState({ role }) {
   )
 }
 
-function PlatformAdminAdminPage({ role, scenario }) {
-  const [baseGroup, setBaseGroup] = useState(BASE_GROUP)
-  const [draftGroup, setDraftGroup] = useState(buildDraftForScenario(scenario))
-  const [mode, setMode] = useState(scenario === 'default' ? 'view' : 'review')
+function formatStrategies(recipeIds, recipesById) {
+  const labels = recipeIds
+    .map((recipeId) => recipesById.get(recipeId)?.name || recipeId)
+    .filter(Boolean)
+  return labels.length > 0 ? labels.join(', ') : 'None selected'
+}
+
+export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
+  const [adminState, setAdminState] = useState({
+    kind: 'loading',
+    errorMessage: '',
+    viewModel: null
+  })
+  const [selectedGroupId, setSelectedGroupId] = useState('')
+  const [mode, setMode] = useState('view')
+  const [draft, setDraft] = useState(null)
+  const [review, setReview] = useState({ warnings: [], errors: [] })
   const [warningAcknowledged, setWarningAcknowledged] = useState(false)
   const [saveNote, setSaveNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  const refreshAdmin = useCallback(
+    async (options = {}) => {
+      setAdminState((current) => ({
+        kind: current.kind === 'ready' || current.kind === 'degraded' || current.kind === 'empty' ? 'refreshing' : 'loading',
+        errorMessage: '',
+        viewModel: current.viewModel
+      }))
+      const nextState = await loadAdminData(api, options)
+      setAdminState(nextState)
+    },
+    [api]
+  )
 
   useEffect(() => {
-    setBaseGroup(BASE_GROUP)
-    setDraftGroup(buildDraftForScenario(scenario))
-    setMode(scenario === 'default' ? 'view' : 'review')
-    setWarningAcknowledged(false)
-    setSaveNote('')
-  }, [scenario])
-
-  const validation = useMemo(
-    () => buildValidation(draftGroup, scenario),
-    [draftGroup, scenario]
-  )
-  const impactPreview = useMemo(
-    () => buildImpactPreview(draftGroup, baseGroup, validation),
-    [draftGroup, baseGroup, validation]
-  )
-  const changeSummary = useMemo(
-    () => buildChangeSummary(draftGroup, baseGroup),
-    [draftGroup, baseGroup]
-  )
-  const hasChanges = changeSummary.length > 0
-  const saveBlockedByScenario = scenario === 'blocked-save'
-  const saveRequiresWarningAcknowledgement = validation.warnings.length > 0 && scenario === 'warnings'
-  const canSave =
-    mode === 'review' &&
-    hasChanges &&
-    validation.errors.length === 0 &&
-    !saveBlockedByScenario &&
-    (!saveRequiresWarningAcknowledgement || warningAcknowledged)
-
-  function handleQuotaChange(event) {
-    const nextValue = Number(event.target.value)
-    setSaveNote('')
-    setDraftGroup((current) => ({
-      ...current,
-      guardrails: {
-        ...current.guardrails,
-        dailyDeployQuota: Number.isNaN(nextValue) ? 0 : nextValue
+    let active = true
+    const load = async () => {
+      setAdminState({ kind: 'loading', errorMessage: '', viewModel: null })
+      const nextState = await loadAdminData(api)
+      if (active) {
+        setAdminState(nextState)
       }
-    }))
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [api])
+
+  useEffect(() => {
+    const firstGroupId = adminState.viewModel?.groups?.[0]?.id || ''
+    setSelectedGroupId((current) => {
+      if (current && adminState.viewModel?.groups?.some((group) => group.id === current)) return current
+      return firstGroupId
+    })
+  }, [adminState.viewModel])
+
+  const viewModel = useMemo(
+    () => buildAdminViewModel(adminState, selectedGroupId, mode, draft, review, warningAcknowledged),
+    [adminState, selectedGroupId, mode, draft, review, warningAcknowledged]
+  )
+
+  useEffect(() => {
+    if (!viewModel?.baseGroup) return
+    setDraft((current) => (current ? current : createAdminDraft(viewModel.baseGroup)))
+  }, [viewModel?.baseGroup])
+
+  const isLoading = adminState.kind === 'loading'
+  const isRefreshing = adminState.kind === 'refreshing'
+  const isFailure = adminState.kind === 'failure'
+  const isEmpty = adminState.kind === 'empty'
+  const isDegraded = adminState.kind === 'degraded'
+
+  const alertRailItems = useMemo(() => {
+    if (isFailure) {
+      return [
+        {
+          id: 'admin-failure',
+          tone: 'danger',
+          title: 'Admin data could not be loaded',
+          body: adminState.errorMessage || 'DXCP could not load governance data right now. Refresh to try again.'
+        }
+      ]
+    }
+    if (isDegraded) {
+      return [
+        {
+          id: 'admin-degraded',
+          tone: 'warning',
+          title: 'Supporting reads are degraded',
+          body: 'The governance object remains available, but one or more supporting reads could not be refreshed.'
+        }
+      ]
+    }
+    if (viewModel?.saveBlockedBySettings) {
+      return [
+        {
+          id: 'admin-save-blocked',
+          tone: 'danger',
+          title: 'Save blocked',
+          body:
+            adminState.viewModel?.mutationAvailability === 'unknown'
+              ? 'Save remains blocked because mutation availability could not be confirmed on this route.'
+              : 'Save is blocked before mutation because DXCP is in read-only mode.'
+        }
+      ]
+    }
+    return []
+  }, [adminState.errorMessage, adminState.viewModel?.mutationAvailability, isDegraded, isFailure, viewModel?.saveBlockedBySettings])
+
+  useNewExperienceAlertRail(alertRailItems)
+
+  function resetReviewState(nextMode) {
+    setMode(nextMode)
+    setReview({ warnings: [], errors: [] })
+    setWarningAcknowledged(false)
+    setSaveError('')
+    setSaveNote('')
   }
 
-  function handleRollingToggle(event) {
-    const checked = event.target.checked
-    setSaveNote('')
-    setDraftGroup((current) => ({
+  function updateDraft(field, value) {
+    setDraft((current) => ({
       ...current,
-      allowedStrategies: checked
-        ? ['Blue-Green', 'Rolling']
-        : current.allowedStrategies.filter((strategy) => strategy !== 'Rolling')
+      [field]: value
     }))
+    setReview({ warnings: [], errors: [] })
+    setWarningAcknowledged(false)
+    setSaveError('')
+    setSaveNote('')
   }
 
-  function startEdit() {
+  function toggleRecipe(recipeId) {
+    setDraft((current) => {
+      const next = new Set(current.allowedRecipes)
+      if (next.has(recipeId)) {
+        next.delete(recipeId)
+      } else {
+        next.add(recipeId)
+      }
+      return {
+        ...current,
+        allowedRecipes: Array.from(next).sort()
+      }
+    })
+    setReview({ warnings: [], errors: [] })
+    setWarningAcknowledged(false)
+    setSaveError('')
     setSaveNote('')
-    setMode('edit')
   }
 
-  function moveToReview() {
+  async function moveToReview() {
+    if (!viewModel?.baseGroup || !draft) return
+    setReviewBusy(true)
+    setSaveError('')
     setSaveNote('')
+    const nextReview = await reviewAdminGroupDraft(api, viewModel.baseGroup, draft)
+    setReview({ warnings: nextReview.warnings, errors: nextReview.errors })
     setMode('review')
+    setWarningAcknowledged(false)
+    setReviewBusy(false)
   }
 
-  function returnToEdit() {
-    setSaveNote('')
-    setMode('edit')
-  }
-
-  function handleSave() {
-    if (!canSave) return
-    setBaseGroup(draftGroup)
+  async function handleSave() {
+    if (!viewModel?.baseGroup || !viewModel.canSave) return
+    const payloadReview = await reviewAdminGroupDraft(api, viewModel.baseGroup, draft)
+    if (payloadReview.errors.length > 0) {
+      setReview({ warnings: payloadReview.warnings, errors: payloadReview.errors })
+      setSaveError('Save remains blocked until the review errors are resolved.')
+      return
+    }
+    setSaveBusy(true)
+    const result = await saveAdminGroupDraft(api, viewModel.baseGroup.id, payloadReview.payload)
+    if (!result.ok) {
+      setSaveBusy(false)
+      setSaveError(result.errorMessage)
+      return
+    }
+    const nextState = await loadAdminData(api, { bypassCache: true })
+    setAdminState(nextState)
+    setSelectedGroupId(result.group?.id || viewModel.baseGroup.id)
     setMode('view')
-    setSaveNote('Deployment Group saved. Future deployments now use the reviewed quota and strategy access rules.')
+    setDraft(null)
+    setReview({ warnings: [], errors: [] })
+    setWarningAcknowledged(false)
+    setSaveBusy(false)
+    setSaveError('')
+    setSaveNote('Deployment Group saved. Future deployments now use the reviewed guardrail and Deployment Strategy rules.')
   }
 
   const primaryAction = (() => {
+    if (isFailure) {
+      return { label: 'Refresh', state: 'available', onClick: () => refreshAdmin({ bypassCache: true }) }
+    }
     if (mode === 'view') {
       return {
         label: 'Edit',
-        state: 'available',
-        onClick: startEdit,
+        state: viewModel?.baseGroup ? 'available' : 'disabled',
+        onClick: () => resetReviewState('edit'),
+        disabled: !viewModel?.baseGroup,
         description: 'Enter edit mode for this Deployment Group.'
       }
     }
-
     if (mode === 'edit') {
       return {
-        label: 'Review changes',
-        state: hasChanges ? 'available' : 'disabled',
+        label: reviewBusy ? 'Reviewing...' : 'Review changes',
+        state: viewModel?.hasChanges ? 'available' : 'disabled',
         onClick: moveToReview,
-        disabled: !hasChanges,
-        description: 'Open the review step before save.'
+        disabled: !viewModel?.hasChanges || reviewBusy,
+        description: 'Review the change impact before save.'
       }
     }
-
     return {
-      label: 'Save',
-      state: saveBlockedByScenario || validation.errors.length > 0 ? 'blocked' : canSave ? 'available' : 'disabled',
+      label: saveBusy ? 'Saving...' : 'Save',
+      state: viewModel?.saveBlockedBySettings || viewModel?.errors.length > 0 ? 'blocked' : viewModel?.canSave ? 'available' : 'disabled',
       onClick: handleSave,
-      disabled: !canSave,
+      disabled: !viewModel?.canSave || saveBusy,
       description: 'Save becomes available only after review is complete.'
     }
   })()
 
   const actionNote = (() => {
+    if (isFailure) {
+      return 'Admin remains unavailable until DXCP can load governance data for this route.'
+    }
     if (mode === 'view') {
       return 'Admin objects stay read-first. Enter Edit before DXCP exposes review and save actions.'
     }
     if (mode === 'edit') {
       return 'Review changes before save so impact, warnings, and blocked outcomes stay visible before mutation.'
     }
-    if (saveBlockedByScenario) {
-      return 'Save is blocked before mutation because DXCP is in read-only mode. Review remains visible so you can understand the impact without attempting a failed save.'
+    if (viewModel?.saveBlockedBySettings) {
+      return adminState.viewModel?.mutationAvailability === 'unknown'
+        ? 'Save is blocked before mutation because DXCP could not confirm mutation availability on this route.'
+        : 'Save is blocked before mutation because DXCP is in read-only mode. Review remains visible so you can understand the impact without attempting a failed save.'
     }
-    if (validation.errors.length > 0) {
+    if (viewModel?.errors.length > 0) {
       return 'Save is blocked before mutation. Resolve the blocking review errors and return to this review step.'
     }
-    if (saveRequiresWarningAcknowledgement && !warningAcknowledged) {
+    if (viewModel?.saveRequiresWarningAcknowledgement && !warningAcknowledged) {
       return 'Warnings do not block this change, but acknowledgement is required before Save becomes available.'
     }
-    return 'Review stays visible before save so the policy impact remains explicit, not implied.'
+    return 'Review stays visible before save so the governance impact remains explicit, not implied.'
   })()
-  const alertRailItems = useMemo(
-    () =>
-      saveBlockedByScenario
-        ? [
-            {
-              id: `admin-${mode}-${scenario}`,
-              tone: 'danger',
-              title: 'Save blocked',
-              body: actionNote
-            }
-          ]
-        : [],
-    [actionNote, mode, saveBlockedByScenario, scenario]
-  )
 
-  useNewExperienceAlertRail(alertRailItems)
+  if (role !== 'PLATFORM_ADMIN') {
+    return <BlockedAdminState role={role} />
+  }
+
+  if (isFailure) {
+    return (
+      <div className="new-admin-page">
+        <NewExperiencePageHeader
+          title="Admin"
+          objectIdentity="Admin workspace"
+          role={role}
+          stateSummaryItems={[{ label: 'Route state', value: 'Unavailable' }]}
+          primaryAction={primaryAction}
+          secondaryActions={[{ label: 'Open Applications', to: '/new/applications' }]}
+          actionNote={actionNote}
+        />
+        <NewStateBlock
+          eyebrow="Read failure"
+          title="Governance data is unavailable right now"
+          tone="danger"
+          actions={[
+            { label: 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }) },
+            { label: 'Open Applications', to: '/new/applications', secondary: true }
+          ]}
+        >
+          {adminState.errorMessage || 'DXCP could not load governance data right now. Refresh to try again.'}
+        </NewStateBlock>
+      </div>
+    )
+  }
+
+  if (isEmpty) {
+    return (
+      <div className="new-admin-page">
+        <NewExperiencePageHeader
+          title="Admin"
+          objectIdentity="Admin workspace"
+          role={role}
+          stateSummaryItems={[{ label: 'Workspace', value: 'Empty' }]}
+          primaryAction={{ label: 'Refresh', state: 'available', onClick: () => refreshAdmin({ bypassCache: true }) }}
+          secondaryActions={[{ label: 'Open Legacy Admin', to: '/admin' }]}
+          actionNote="No governance objects are available on this route yet."
+        />
+        <NewStateBlock
+          eyebrow="Empty"
+          title="No Deployment Groups are configured yet"
+          actions={[
+            { label: 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }) },
+            { label: 'Open Legacy Admin', to: '/admin', secondary: true }
+          ]}
+        >
+          DXCP did not return any Deployment Groups for this route yet. Governance review remains object-first once the first Deployment Group is available.
+        </NewStateBlock>
+      </div>
+    )
+  }
 
   return (
     <div className="new-admin-page">
       <NewExperiencePageHeader
         title="Admin"
-        objectIdentity="Deployment Group: Payments Core"
+        objectIdentity={`Deployment Group: ${viewModel?.baseGroup?.name || 'Deployment Group'}`}
         role={role}
         stateSummaryItems={[
           { label: 'Workspace', value: 'Deployment Groups' },
           { label: 'Mode', value: mode === 'view' ? 'Inspect' : mode === 'edit' ? 'Edit' : 'Review' },
-          { label: 'Pending changes', value: hasChanges ? `${changeSummary.length}` : 'None' }
+          { label: 'Pending changes', value: viewModel?.hasChanges ? `${viewModel.changeSummary.length}` : 'None' }
         ]}
         primaryAction={primaryAction}
         secondaryActions={[
-          mode !== 'view'
-            ? { label: 'Back to edit', onClick: returnToEdit, disabled: mode !== 'review' }
-            : { label: 'Open Applications', to: '/new/applications' },
+          mode === 'review'
+            ? { label: 'Back to edit', onClick: () => setMode('edit') }
+            : mode === 'edit'
+              ? { label: 'Cancel edit', onClick: () => resetReviewState('view') }
+              : { label: 'Open Applications', to: '/new/applications' },
+          { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }), disabled: isLoading || isRefreshing },
           { label: 'Open Legacy Admin', to: '/admin' }
         ]}
+        actionNote={actionNote}
       />
+
+      {isDegraded ? (
+        <NewExplanation title="Supporting reads are degraded" tone="warning">
+          {(adminState.viewModel?.degradedReasons || []).join(' ')}
+        </NewExplanation>
+      ) : null}
 
       <div className="new-admin-layout">
         <div className="new-admin-primary">
@@ -359,12 +392,17 @@ function PlatformAdminAdminPage({ role, scenario }) {
               {saveNote}
             </NewExplanation>
           ) : null}
+          {saveError ? (
+            <NewExplanation title="Save could not be completed" tone="danger">
+              {saveError}
+            </NewExplanation>
+          ) : null}
 
           <SectionCard className="new-admin-card">
             <div className="new-section-header">
               <div>
                 <h3>Governance object</h3>
-                <p className="helper">This selected Deployment Group keeps Admin object-first instead of collapsing into a generic settings list.</p>
+                <p className="helper">Admin stays object-first and review-first instead of collapsing into a generic settings list.</p>
               </div>
               <div className="links">
                 <Link className="link secondary" to="/new/deployments">
@@ -373,23 +411,40 @@ function PlatformAdminAdminPage({ role, scenario }) {
               </div>
             </div>
 
+            <label className="new-field" htmlFor="new-admin-group">
+              <span>Deployment Group</span>
+              <select
+                id="new-admin-group"
+                value={selectedGroupId}
+                onChange={(event) => {
+                  setSelectedGroupId(event.target.value)
+                  setDraft(null)
+                  resetReviewState('view')
+                }}
+              >
+                {(adminState.viewModel?.groups || []).map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <dl className="new-object-summary-grid" aria-label="Deployment Group summary">
               <dt>Deployment Group</dt>
-              <dd>{baseGroup.name}</dd>
+              <dd>{viewModel?.baseGroup?.name}</dd>
               <dt>Owner</dt>
-              <dd>{baseGroup.owner}</dd>
+              <dd>{viewModel?.baseGroup?.owner}</dd>
               <dt>Applications governed</dt>
-              <dd>{baseGroup.applicationsCount}</dd>
-              <dt>Environments</dt>
-              <dd>{baseGroup.environments.join(', ')}</dd>
-              <dt>Allowed strategies</dt>
-              <dd>{formatStrategies(baseGroup.allowedStrategies)}</dd>
+              <dd>{viewModel?.baseGroup?.services.length}</dd>
+              <dt>Allowed Deployment Strategies</dt>
+              <dd>{formatStrategies(viewModel?.baseGroup?.allowedRecipes || [], viewModel?.recipesById || new Map())}</dd>
               <dt>Current deploy quota</dt>
-              <dd>{baseGroup.guardrails.dailyDeployQuota} deploys/day</dd>
+              <dd>{viewModel?.baseGroup?.guardrails.dailyDeployQuota} deploys/day</dd>
               <dt>Current rollback quota</dt>
-              <dd>{baseGroup.guardrails.dailyRollbackQuota} rollbacks/day</dd>
-              <dt>Last changed</dt>
-              <dd>{baseGroup.lastChanged}</dd>
+              <dd>{viewModel?.baseGroup?.guardrails.dailyRollbackQuota} rollbacks/day</dd>
+              <dt>Current concurrency</dt>
+              <dd>{viewModel?.baseGroup?.guardrails.maxConcurrentDeployments} active deployment(s)</dd>
             </dl>
           </SectionCard>
 
@@ -410,10 +465,10 @@ function PlatformAdminAdminPage({ role, scenario }) {
             {mode === 'view' ? (
               <div className="new-explanation-stack">
                 <NewExplanation title="Current governance posture" tone="neutral">
-                  {baseGroup.description}
+                  {viewModel?.baseGroup?.description}
                 </NewExplanation>
                 <NewExplanation title="Current impact" tone="neutral">
-                  One active deployment at a time. Rolling remains allowed. Current running deployments stay unchanged until a future deployment is requested.
+                  Applications in this Deployment Group currently use the listed Deployment Strategies and guardrails for future deployments.
                 </NewExplanation>
               </div>
             ) : (
@@ -423,8 +478,8 @@ function PlatformAdminAdminPage({ role, scenario }) {
                   <input
                     aria-label="Daily deploy quota"
                     type="number"
-                    value={draftGroup.guardrails.dailyDeployQuota}
-                    onChange={handleQuotaChange}
+                    value={draft?.dailyDeployQuota || ''}
+                    onChange={(event) => updateDraft('dailyDeployQuota', event.target.value)}
                     readOnly={mode === 'review'}
                   />
                 </label>
@@ -433,27 +488,36 @@ function PlatformAdminAdminPage({ role, scenario }) {
                   <input
                     aria-label="Daily rollback quota"
                     type="number"
-                    value={draftGroup.guardrails.dailyRollbackQuota}
-                    readOnly
+                    value={draft?.dailyRollbackQuota || ''}
+                    onChange={(event) => updateDraft('dailyRollbackQuota', event.target.value)}
+                    readOnly={mode === 'review'}
+                  />
+                </label>
+                <label className="new-field">
+                  <span>Max concurrent deployments</span>
+                  <input
+                    aria-label="Max concurrent deployments"
+                    type="number"
+                    value={draft?.maxConcurrentDeployments || ''}
+                    onChange={(event) => updateDraft('maxConcurrentDeployments', event.target.value)}
+                    readOnly={mode === 'review'}
                   />
                 </label>
                 <label className="new-field new-field-full">
-                  <span>Allowed strategies</span>
+                  <span>Allowed Deployment Strategies</span>
                   <div className="new-admin-checkbox-row">
-                    <label className="new-admin-checkbox">
-                      <input checked disabled type="checkbox" />
-                      <span>Blue-Green</span>
-                    </label>
-                    <label className="new-admin-checkbox">
-                      <input
-                        aria-label="Rolling"
-                        checked={draftGroup.allowedStrategies.includes('Rolling')}
-                        onChange={handleRollingToggle}
-                        disabled={mode === 'review'}
-                        type="checkbox"
-                      />
-                      <span>Rolling</span>
-                    </label>
+                    {(viewModel?.availableRecipes || []).map((recipe) => (
+                      <label key={recipe.id} className="new-admin-checkbox">
+                        <input
+                          aria-label={recipe.name}
+                          checked={draft?.allowedRecipes?.includes(recipe.id) === true}
+                          onChange={() => toggleRecipe(recipe.id)}
+                          disabled={mode === 'review' || recipe.status === 'deprecated'}
+                          type="checkbox"
+                        />
+                        <span>{recipe.name}</span>
+                      </label>
+                    ))}
                   </div>
                 </label>
               </div>
@@ -462,7 +526,7 @@ function PlatformAdminAdminPage({ role, scenario }) {
             {mode === 'review' ? (
               <div className="new-admin-review-stack">
                 <div className="new-admin-comparison-list" aria-label="Pending change summary">
-                  {changeSummary.map((change) => (
+                  {viewModel?.changeSummary.map((change) => (
                     <div key={change.label} className="new-admin-comparison-row">
                       <strong>{change.label}</strong>
                       <div className="new-admin-comparison-values">
@@ -473,33 +537,35 @@ function PlatformAdminAdminPage({ role, scenario }) {
                   ))}
                 </div>
 
-                {validation.warnings.length > 0 ? (
+                {viewModel?.warnings.length > 0 ? (
                   <NewExplanation title="Warnings to review" tone="warning">
                     <ul className="new-admin-message-list">
-                      {validation.warnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
+                      {viewModel.warnings.map((warning) => (
+                        <li key={warning.id}>{warning.text}</li>
                       ))}
                     </ul>
                   </NewExplanation>
                 ) : null}
 
-                {validation.errors.length > 0 ? (
+                {viewModel?.errors.length > 0 ? (
                   <NewExplanation title="Errors blocking save" tone="danger">
                     <ul className="new-admin-message-list">
-                      {validation.errors.map((error) => (
-                        <li key={error}>{error}</li>
+                      {viewModel.errors.map((error) => (
+                        <li key={error.id}>{error.text}</li>
                       ))}
                     </ul>
                   </NewExplanation>
                 ) : null}
 
-                {saveBlockedByScenario ? (
+                {viewModel?.saveBlockedBySettings ? (
                   <NewExplanation title="Blocked save explanation" tone="danger">
-                    DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.
+                    {adminState.viewModel?.mutationAvailability === 'unknown'
+                      ? 'DXCP could not confirm mutation availability on this route. Review stays available, but Save remains blocked until the route can confirm mutation posture again.'
+                      : 'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'}
                   </NewExplanation>
                 ) : null}
 
-                {saveRequiresWarningAcknowledgement ? (
+                {viewModel?.saveRequiresWarningAcknowledgement ? (
                   <label className="new-admin-acknowledgement">
                     <input
                       checked={warningAcknowledged}
@@ -523,8 +589,8 @@ function PlatformAdminAdminPage({ role, scenario }) {
               <div>
                 <strong>Newly blocked</strong>
                 <ul className="new-supporting-list">
-                  {impactPreview.newlyBlocked.length > 0 ? (
-                    impactPreview.newlyBlocked.map((item) => <li key={item}>{item}</li>)
+                  {viewModel?.impactPreview.newlyBlocked.length > 0 ? (
+                    viewModel.impactPreview.newlyBlocked.map((item) => <li key={item}>{item}</li>)
                   ) : (
                     <li>No newly blocked behavior is predicted.</li>
                   )}
@@ -533,8 +599,8 @@ function PlatformAdminAdminPage({ role, scenario }) {
               <div>
                 <strong>Newly allowed</strong>
                 <ul className="new-supporting-list">
-                  {impactPreview.newlyAllowed.length > 0 ? (
-                    impactPreview.newlyAllowed.map((item) => <li key={item}>{item}</li>)
+                  {viewModel?.impactPreview.newlyAllowed.length > 0 ? (
+                    viewModel.impactPreview.newlyAllowed.map((item) => <li key={item}>{item}</li>)
                   ) : (
                     <li>No newly allowed behavior is predicted.</li>
                   )}
@@ -542,27 +608,25 @@ function PlatformAdminAdminPage({ role, scenario }) {
               </div>
             </div>
 
-            <div className="new-explanation-stack">
-              <NewExplanation title="Unchanged" tone="neutral">
-                <ul className="new-admin-message-list">
-                  {impactPreview.unchanged.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </NewExplanation>
-            </div>
+            <NewExplanation title="Unchanged" tone="neutral">
+              <ul className="new-admin-message-list">
+                {viewModel?.impactPreview.unchanged.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </NewExplanation>
           </SectionCard>
 
           <SectionCard className="new-admin-card">
             <h3>Validation summary</h3>
-            <p className="helper">Warnings and errors differ in both meaning and consequence.</p>
+            <p className="helper">Warnings, errors, and blocked save remain separate so review meaning stays legible before mutation.</p>
             <dl className="new-application-support-grid">
               <dt>Warnings</dt>
-              <dd>{validation.warnings.length}</dd>
+              <dd>{viewModel?.warnings.length}</dd>
               <dt>Errors</dt>
-              <dd>{validation.errors.length}</dd>
+              <dd>{viewModel?.errors.length}</dd>
               <dt>Save posture</dt>
-              <dd>{saveBlockedByScenario ? 'Blocked before mutation' : canSave ? 'Ready after review' : 'Needs review'}</dd>
+              <dd>{viewModel?.saveBlockedBySettings ? 'Blocked before mutation' : viewModel?.canSave ? 'Ready after review' : 'Needs review'}</dd>
             </dl>
           </SectionCard>
 
@@ -570,7 +634,7 @@ function PlatformAdminAdminPage({ role, scenario }) {
             <h3>Audit and review discipline</h3>
             <div className="new-explanation-stack">
               <NewExplanation title="Audit visibility" tone="neutral">
-                {buildAuditSummary(draftGroup, baseGroup)}
+                {viewModel?.auditSummary}
               </NewExplanation>
               <NewExplanation title="Legacy boundary" tone="neutral">
                 Admin remains contained under <code>/new/*</code> while the current Admin experience stays available during rollout.
@@ -581,16 +645,4 @@ function PlatformAdminAdminPage({ role, scenario }) {
       </div>
     </div>
   )
-}
-
-export default function NewExperienceAdminPage({ role = 'UNKNOWN' }) {
-  const { scenario = 'default' } = useParams()
-  const normalizedScenario =
-    ['default', 'review', 'warnings', 'errors', 'blocked-save'].includes(scenario) ? scenario : 'default'
-
-  if (role === 'PLATFORM_ADMIN') {
-    return <PlatformAdminAdminPage role={role} scenario={normalizedScenario} />
-  }
-
-  return <BlockedAdminState role={role} />
 }

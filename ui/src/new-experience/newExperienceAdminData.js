@@ -1,0 +1,444 @@
+function formatApiError(result, fallbackMessage) {
+  if (!result || typeof result !== 'object') return fallbackMessage
+  if (!result.code && !result.message) return fallbackMessage
+  return [result.code, result.message].filter(Boolean).join(': ') || fallbackMessage
+}
+
+function parseGuardrailValue(value, fallbackValue = null) {
+  if (value === null || value === undefined || value === '') return fallbackValue
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallbackValue
+}
+
+function normalizeGroup(group, defaults) {
+  const guardrails = group?.guardrails || {}
+  return {
+    id: group?.id || '',
+    name: group?.name || '',
+    owner: group?.owner || 'Not provided',
+    description: group?.description || 'No description provided.',
+    services: Array.isArray(group?.services) ? group.services.slice().sort() : [],
+    allowedRecipes: Array.isArray(group?.allowed_recipes) ? group.allowed_recipes.slice().sort() : [],
+    guardrails: {
+      maxConcurrentDeployments: parseGuardrailValue(
+        guardrails.max_concurrent_deployments,
+        parseGuardrailValue(group?.max_concurrent_deployments, 1)
+      ),
+      dailyDeployQuota: parseGuardrailValue(
+        guardrails.daily_deploy_quota,
+        parseGuardrailValue(group?.daily_deploy_quota, defaults.dailyDeployQuota)
+      ),
+      dailyRollbackQuota: parseGuardrailValue(
+        guardrails.daily_rollback_quota,
+        parseGuardrailValue(group?.daily_rollback_quota, defaults.dailyRollbackQuota)
+      )
+    }
+  }
+}
+
+function normalizeRecipe(recipe) {
+  return {
+    id: recipe?.id || '',
+    name: recipe?.name || recipe?.id || 'Deployment Strategy',
+    status: String(recipe?.status || 'active').toLowerCase(),
+    summary: recipe?.effective_behavior_summary || recipe?.description || ''
+  }
+}
+
+function buildDraft(group) {
+  return {
+    id: group.id,
+    name: group.name,
+    owner: group.owner,
+    description: group.description,
+    services: group.services.slice(),
+    allowedRecipes: group.allowedRecipes.slice(),
+    dailyDeployQuota: String(group.guardrails.dailyDeployQuota ?? ''),
+    dailyRollbackQuota: String(group.guardrails.dailyRollbackQuota ?? ''),
+    maxConcurrentDeployments: String(group.guardrails.maxConcurrentDeployments ?? ''),
+    changeReason: ''
+  }
+}
+
+function formatStrategies(recipeIds, recipesById) {
+  const labels = recipeIds
+    .map((recipeId) => recipesById.get(recipeId)?.name || recipeId)
+    .filter(Boolean)
+  return labels.length > 0 ? labels.join(', ') : 'None selected'
+}
+
+function listDiff(currentItems, nextItems) {
+  const current = new Set(currentItems)
+  const next = new Set(nextItems)
+  return {
+    removed: Array.from(current).filter((item) => !next.has(item)),
+    added: Array.from(next).filter((item) => !current.has(item))
+  }
+}
+
+function normalizeValidationMessages(messages) {
+  const warnings = []
+  const errors = []
+
+  ;(Array.isArray(messages) ? messages : []).forEach((message, index) => {
+    const text = typeof message === 'string' ? message : message?.message || ''
+    if (!text) return
+    const type = String(message?.type || '').toUpperCase()
+    const normalized = { id: `${type || 'INFO'}-${index}`, text }
+    if (type === 'ERROR') {
+      errors.push(normalized)
+    } else if (type === 'WARNING') {
+      warnings.push(normalized)
+    } else {
+      warnings.push(normalized)
+    }
+  })
+
+  return { warnings, errors }
+}
+
+function buildPayload(baseGroup, draft) {
+  const dailyDeployQuota = Number(draft.dailyDeployQuota)
+  const dailyRollbackQuota = Number(draft.dailyRollbackQuota)
+  const maxConcurrentDeployments = Number(draft.maxConcurrentDeployments)
+  const localErrors = []
+
+  if (!Number.isInteger(dailyDeployQuota) || dailyDeployQuota <= 0) {
+    localErrors.push({ id: 'daily-deploy-quota', text: 'Daily deploy quota must be a positive integer.' })
+  }
+  if (!Number.isInteger(dailyRollbackQuota) || dailyRollbackQuota <= 0) {
+    localErrors.push({ id: 'daily-rollback-quota', text: 'Daily rollback quota must be a positive integer.' })
+  }
+  if (!Number.isInteger(maxConcurrentDeployments) || maxConcurrentDeployments <= 0) {
+    localErrors.push({ id: 'max-concurrent-deployments', text: 'Max concurrent deployments must be a positive integer.' })
+  }
+  if (draft.allowedRecipes.length === 0) {
+    localErrors.push({
+      id: 'allowed-recipes',
+      text: 'At least one Deployment Strategy must remain allowed before DXCP can save this Deployment Group.'
+    })
+  }
+
+  const payload = {
+    id: baseGroup.id,
+    name: draft.name,
+    description: draft.description || null,
+    owner: draft.owner || null,
+    services: draft.services.slice().sort(),
+    allowed_recipes: draft.allowedRecipes.slice().sort(),
+    guardrails: {
+      max_concurrent_deployments: maxConcurrentDeployments,
+      daily_deploy_quota: dailyDeployQuota,
+      daily_rollback_quota: dailyRollbackQuota
+    }
+  }
+  const changeReason = String(draft.changeReason || '').trim()
+  if (changeReason) {
+    payload.change_reason = changeReason
+  }
+
+  return { payload, localErrors }
+}
+
+function buildChangeSummary(baseGroup, draft, recipesById) {
+  const changes = []
+  if (String(baseGroup.guardrails.dailyDeployQuota) !== String(draft.dailyDeployQuota)) {
+    changes.push({
+      label: 'Daily deploy quota',
+      current: `${baseGroup.guardrails.dailyDeployQuota} deploys/day`,
+      proposed: `${draft.dailyDeployQuota} deploys/day`
+    })
+  }
+  if (String(baseGroup.guardrails.dailyRollbackQuota) !== String(draft.dailyRollbackQuota)) {
+    changes.push({
+      label: 'Daily rollback quota',
+      current: `${baseGroup.guardrails.dailyRollbackQuota} rollbacks/day`,
+      proposed: `${draft.dailyRollbackQuota} rollbacks/day`
+    })
+  }
+  if (String(baseGroup.guardrails.maxConcurrentDeployments) !== String(draft.maxConcurrentDeployments)) {
+    changes.push({
+      label: 'Max concurrent deployments',
+      current: `${baseGroup.guardrails.maxConcurrentDeployments}`,
+      proposed: `${draft.maxConcurrentDeployments}`
+    })
+  }
+  if (formatStrategies(baseGroup.allowedRecipes, recipesById) !== formatStrategies(draft.allowedRecipes, recipesById)) {
+    changes.push({
+      label: 'Allowed Deployment Strategies',
+      current: formatStrategies(baseGroup.allowedRecipes, recipesById),
+      proposed: formatStrategies(draft.allowedRecipes, recipesById)
+    })
+  }
+  return changes
+}
+
+function buildImpactPreview(baseGroup, draft, recipesById, validation) {
+  const newlyBlocked = []
+  const newlyAllowed = []
+  const unchanged = ['Current running deployments stay unchanged until a future deployment is requested.']
+  const recipeDiff = listDiff(baseGroup.allowedRecipes, draft.allowedRecipes)
+
+  if (String(baseGroup.guardrails.dailyDeployQuota) !== String(draft.dailyDeployQuota)) {
+    const nextValue = Number(draft.dailyDeployQuota)
+    const previousValue = Number(baseGroup.guardrails.dailyDeployQuota)
+    if (Number.isFinite(nextValue) && Number.isFinite(previousValue)) {
+      if (nextValue < previousValue) {
+        newlyBlocked.push(`Future deployments will stop after ${nextValue} deploys in one day for ${baseGroup.name}.`)
+      } else if (nextValue > previousValue) {
+        newlyAllowed.push(`Future deployments may continue until ${nextValue} deploys in one day are reached.`)
+      }
+    }
+  }
+  if (String(baseGroup.guardrails.dailyRollbackQuota) !== String(draft.dailyRollbackQuota)) {
+    const nextValue = Number(draft.dailyRollbackQuota)
+    const previousValue = Number(baseGroup.guardrails.dailyRollbackQuota)
+    if (Number.isFinite(nextValue) && Number.isFinite(previousValue)) {
+      if (nextValue < previousValue) {
+        newlyBlocked.push(`Future rollback requests will stop after ${nextValue} rollbacks in one day for ${baseGroup.name}.`)
+      } else if (nextValue > previousValue) {
+        newlyAllowed.push(`Future rollback requests may continue until ${nextValue} rollbacks in one day are reached.`)
+      }
+    }
+  }
+
+  recipeDiff.removed.forEach((recipeId) => {
+    const label = recipesById.get(recipeId)?.name || recipeId
+    newlyBlocked.push(`Applications in this Deployment Group would lose access to ${label}.`)
+  })
+  recipeDiff.added.forEach((recipeId) => {
+    const label = recipesById.get(recipeId)?.name || recipeId
+    newlyAllowed.push(`Applications in this Deployment Group would gain access to ${label}.`)
+  })
+
+  if (validation.errors.length > 0) {
+    unchanged.push('Impact preview remains partial until blocking review errors are resolved.')
+  }
+
+  return { newlyBlocked, newlyAllowed, unchanged }
+}
+
+function buildAuditSummary(auditEvents, group) {
+  const relevantEvent =
+    (Array.isArray(auditEvents) ? auditEvents : []).find(
+      (event) => event?.target_id === group.id || event?.target_id === group.name
+    ) || null
+  if (!relevantEvent) {
+    return 'Audit remains quiet until DXCP records a reviewed governance change for this Deployment Group.'
+  }
+
+  const actor = relevantEvent.actor_id || 'Unknown actor'
+  const timestamp = relevantEvent.timestamp || 'Time not recorded'
+  const summary = relevantEvent.summary || relevantEvent.event_type || 'Recent audit activity was recorded.'
+  return `${summary} Last recorded by ${actor} at ${timestamp}.`
+}
+
+export async function loadAdminData(api, options = {}) {
+  const requestOptions = { ...options }
+  const [groupsResult, recipesResult, servicesResult, settingsResult, adminSettingsResult, auditResult] = await Promise.allSettled([
+    api.get('/delivery-groups', requestOptions),
+    api.get('/recipes', requestOptions),
+    api.get('/services', requestOptions),
+    api.get('/settings/public', requestOptions),
+    api.get('/settings/admin', requestOptions),
+    api.get('/audit/events', requestOptions)
+  ])
+
+  if (groupsResult.status === 'rejected') {
+    return {
+      kind: 'failure',
+      errorMessage: 'DXCP could not load governance data right now. Refresh to try again.',
+      viewModel: null
+    }
+  }
+
+  if (!Array.isArray(groupsResult.value)) {
+    return {
+      kind: 'failure',
+      errorMessage: formatApiError(groupsResult.value, 'DXCP could not load governance data right now. Refresh to try again.'),
+      viewModel: null
+    }
+  }
+
+  const adminDefaults = {
+    dailyDeployQuota:
+      adminSettingsResult.status === 'fulfilled' && !adminSettingsResult.value?.code
+        ? adminSettingsResult.value?.daily_deploy_quota ?? 25
+        : 25,
+    dailyRollbackQuota:
+      adminSettingsResult.status === 'fulfilled' && !adminSettingsResult.value?.code
+        ? adminSettingsResult.value?.daily_rollback_quota ?? 10
+        : 10
+  }
+
+  const groups = groupsResult.value
+    .map((group) => normalizeGroup(group, adminDefaults))
+    .filter((group) => group.id)
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  if (groups.length === 0) {
+    return {
+      kind: 'empty',
+      errorMessage: '',
+      viewModel: {
+        groups: [],
+        recipes: [],
+        services: [],
+        mutationsDisabled: false,
+        mutationAvailability: 'ready',
+        auditEvents: [],
+        degradedReasons: []
+      }
+    }
+  }
+
+  const degradedReasons = []
+  const recipes =
+    recipesResult.status === 'fulfilled' && Array.isArray(recipesResult.value)
+      ? recipesResult.value.map(normalizeRecipe).filter((recipe) => recipe.id).sort((left, right) => left.name.localeCompare(right.name))
+      : []
+  if (recipesResult.status === 'rejected' || (recipesResult.status === 'fulfilled' && !Array.isArray(recipesResult.value))) {
+    degradedReasons.push('Deployment Strategy context could not be refreshed.')
+  }
+
+  const services =
+    servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value)
+      ? servicesResult.value
+          .map((service) => service?.service_name || service?.name || '')
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
+      : []
+  if (servicesResult.status === 'rejected' || (servicesResult.status === 'fulfilled' && !Array.isArray(servicesResult.value))) {
+    degradedReasons.push('Application membership context could not be refreshed.')
+  }
+
+  const settings = settingsResult.status === 'fulfilled' ? settingsResult.value : null
+  const mutationAvailability =
+    settingsResult.status === 'rejected' || (settingsResult.status === 'fulfilled' && settings?.code)
+      ? 'unknown'
+      : 'ready'
+  if (mutationAvailability === 'unknown') {
+    degradedReasons.push('Mutation availability could not be confirmed from public settings.')
+  }
+
+  const auditEvents =
+    auditResult.status === 'fulfilled' && Array.isArray(auditResult.value)
+      ? auditResult.value
+      : []
+  if (auditResult.status === 'rejected' || (auditResult.status === 'fulfilled' && !Array.isArray(auditResult.value))) {
+    degradedReasons.push('Audit context could not be refreshed.')
+  }
+
+  return {
+    kind: degradedReasons.length > 0 ? 'degraded' : 'ready',
+    errorMessage: '',
+    viewModel: {
+      groups,
+      recipes,
+      services,
+      mutationsDisabled: settings?.mutations_disabled === true,
+      mutationAvailability,
+      auditEvents,
+      degradedReasons,
+      adminDefaults
+    }
+  }
+}
+
+export async function reviewAdminGroupDraft(api, baseGroup, draft) {
+  const { payload, localErrors } = buildPayload(baseGroup, draft)
+  if (localErrors.length > 0) {
+    return {
+      payload,
+      warnings: [],
+      errors: localErrors
+    }
+  }
+
+  try {
+    const result = await api.post('/admin/guardrails/validate', payload)
+    if (result?.code) {
+      return {
+        payload,
+        warnings: [],
+        errors: [{ id: 'validate-request', text: formatApiError(result, 'DXCP could not review this governance change.') }]
+      }
+    }
+
+    const normalized = normalizeValidationMessages(result?.messages)
+    return {
+      payload,
+      warnings: normalized.warnings,
+      errors: normalized.errors
+    }
+  } catch (error) {
+    return {
+      payload,
+      warnings: [],
+      errors: [{ id: 'validate-network', text: 'DXCP could not review this governance change right now. Refresh to try again.' }]
+    }
+  }
+}
+
+export async function saveAdminGroupDraft(api, groupId, payload) {
+  try {
+    const result = await api.put(`/delivery-groups/${encodeURIComponent(groupId)}`, payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not save this Deployment Group right now.')
+      }
+    }
+    return { ok: true, group: result }
+  } catch (error) {
+    return {
+      ok: false,
+      errorMessage: 'DXCP could not save this Deployment Group right now. Refresh to try again.'
+    }
+  }
+}
+
+export function buildAdminViewModel(state, selectedGroupId, mode, draft, review, warningAcknowledged) {
+  const recipesById = new Map((state.viewModel?.recipes || []).map((recipe) => [recipe.id, recipe]))
+  const baseGroup =
+    state.viewModel?.groups.find((group) => group.id === selectedGroupId) ||
+    state.viewModel?.groups[0] ||
+    null
+  if (!baseGroup) return null
+
+  const pendingDraft = draft || buildDraft(baseGroup)
+  const changeSummary = buildChangeSummary(baseGroup, pendingDraft, recipesById)
+  const hasChanges = changeSummary.length > 0
+  const warnings = review?.warnings || []
+  const errors = review?.errors || []
+  const saveBlockedBySettings =
+    state.viewModel?.mutationsDisabled === true || state.viewModel?.mutationAvailability === 'unknown'
+  const saveRequiresWarningAcknowledgement = warnings.length > 0
+  const canSave =
+    mode === 'review' &&
+    hasChanges &&
+    errors.length === 0 &&
+    !saveBlockedBySettings &&
+    (!saveRequiresWarningAcknowledgement || warningAcknowledged)
+
+  return {
+    baseGroup,
+    draft: pendingDraft,
+    recipesById,
+    changeSummary,
+    impactPreview: buildImpactPreview(baseGroup, pendingDraft, recipesById, { warnings, errors }),
+    warnings,
+    errors,
+    auditSummary: buildAuditSummary(state.viewModel?.auditEvents, baseGroup),
+    hasChanges,
+    saveBlockedBySettings,
+    canSave,
+    saveRequiresWarningAcknowledgement,
+    availableRecipes: state.viewModel?.recipes || [],
+    services: state.viewModel?.services || []
+  }
+}
+
+export function createAdminDraft(group) {
+  return buildDraft(group)
+}

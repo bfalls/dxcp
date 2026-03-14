@@ -1649,17 +1649,18 @@ export async function runAllTests() {
       deployAllowed: true,
       rollbackAllowed: false
     })
-    const view = renderApp('/new/insights')
+    const view = renderApp('/new/insights?service=payments-service')
 
     await view.findByRole('heading', { name: 'Insights' })
     await view.findByText('Recent delivery health and attention across DXCP')
     await view.findByText('Delivery health')
-    await view.findByText('Trend')
+    await view.findByText('Rollback share in the selected scope is 25.0%.')
     await view.findByText('Breakdown')
     await view.findByText('Attention')
-    await view.findByText('Recent notable activity')
-    await view.findByText('Payments Core rollback activity increased')
-    assert.ok(view.getAllByRole('link', { name: 'Inspect deployment' }).length >= 1)
+    await view.findByText('Failures by category')
+    await view.findByText('Deployments by Deployment Group')
+    await view.findByText('Rollback share is elevated enough to inspect')
+    assert.ok(view.getAllByRole('link', { name: 'View' }).length >= 1)
   })
 
   await runTest('New experience insights route preserves empty state without inventing dashboard bulk', async () => {
@@ -1671,12 +1672,28 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    const baseFetch = buildFetchMock({
       role: 'DELIVERY_OWNER',
       deployAllowed: true,
       rollbackAllowed: false
     })
-    const view = renderApp('/new/insights/empty')
+    globalThis.fetch = (url, options) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/insights/failures') {
+        return Promise.resolve(
+          ok({
+            rollbackRate: 0,
+            totalDeployments: 0,
+            totalRollbacks: 0,
+            failuresByCategory: [],
+            deploymentsByRecipe: [],
+            deploymentsByGroup: []
+          })
+        )
+      }
+      return baseFetch(url, options)
+    }
+    const view = renderApp('/new/insights')
 
     await view.findByText('No deployments in this time range')
     await view.findByText(
@@ -1694,18 +1711,22 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    const degradedFetch = buildFetchMock({
       role: 'DELIVERY_OWNER',
       deployAllowed: true,
       rollbackAllowed: false
     })
-    const degradedView = renderApp('/new/insights/degraded-read')
+    globalThis.fetch = (url, options) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/recipes') {
+        return Promise.reject(new Error('Failed to load recipes'))
+      }
+      return degradedFetch(url, options)
+    }
+    const degradedView = renderApp('/new/insights')
 
-    await degradedView.findByText('Supporting reads are degraded')
-    await degradedView.findByText('Deployment Group breakdown is temporarily unavailable')
-    await degradedView.findByText(
-      'Trend and other breakdowns remain available, but this grouping did not refresh. Open Deployments for the authoritative scoped list while the supporting read catches up.'
-    )
+    await degradedView.findAllByText('Supporting reads are degraded')
+    await degradedView.findByText('Deployment Strategy labels could not be refreshed.')
 
     cleanup()
 
@@ -1717,18 +1738,23 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    const failedFetch = buildFetchMock({
       role: 'DELIVERY_OWNER',
       deployAllowed: true,
       rollbackAllowed: false
     })
-    const failureView = renderApp('/new/insights/failure')
+    globalThis.fetch = (url, options) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/insights/failures') {
+        return Promise.reject(new Error('Failed to load insights'))
+      }
+      return failedFetch(url, options)
+    }
+    const failureView = renderApp('/new/insights')
 
     await failureView.findByText('Insights could not be loaded')
     await failureView.findByText('Aggregate delivery reading is unavailable right now')
-    await failureView.findByText(
-      'The new Insights route keeps the same header, scope controls, and refresh action so you can retry without losing page context.'
-    )
+    await failureView.findAllByRole('button', { name: 'Refresh' })
   })
 
   await runTest('New experience insights route exposes refresh behavior in the header without changing hierarchy', async () => {
@@ -1740,17 +1766,25 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
+    let insightsReads = 0
+    const countedFetch = buildFetchMock({
       role: 'DELIVERY_OWNER',
       deployAllowed: true,
       rollbackAllowed: false
     })
+    globalThis.fetch = (url, options) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/insights/failures') {
+        insightsReads += 1
+      }
+      return countedFetch(url, options)
+    }
     const view = renderApp('/new/insights')
 
     await view.findByRole('button', { name: 'Refresh' })
+    await waitFor(() => assert.equal(view.getByRole('button', { name: 'Refresh' }).disabled, false))
     fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
-    await view.findByText('Refresh update')
-    await view.findByText('Insights refreshed for the selected window without changing the page hierarchy.')
+    await waitFor(() => assert.equal(insightsReads >= 2, true))
   })
 
   await runTest('New experience admin route proves review-before-save with a completed mutation slice', async () => {
@@ -1765,7 +1799,23 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
-      rollbackAllowed: true
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'team-payments@example.com',
+          description: 'Payments guardrails.',
+          services: ['payments-service'],
+          allowed_recipes: ['bluegreen', 'rolling'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [
+        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
+        { id: 'rolling', name: 'Rolling', status: 'active' }
+      ],
+      servicesList: [{ service_name: 'payments-service' }]
     })
     const view = renderApp('/new/admin')
 
@@ -1783,7 +1833,7 @@ export async function runAllTests() {
     await view.findByText('Impact preview')
     fireEvent.click(view.getByRole('button', { name: 'Save' }))
     await view.findByText('Save complete')
-    await view.findByText('Deployment Group saved. Future deployments now use the reviewed quota and strategy access rules.')
+    await view.findByText('Deployment Group saved. Future deployments now use the reviewed guardrail and Deployment Strategy rules.')
   })
 
   await runTest('New experience admin route separates warnings from errors during review', async () => {
@@ -1798,12 +1848,38 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
-      rollbackAllowed: true
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'team-payments@example.com',
+          description: 'Payments guardrails.',
+          services: ['payments-service'],
+          allowed_recipes: ['bluegreen', 'rolling'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [
+        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
+        { id: 'rolling', name: 'Rolling', status: 'active' }
+      ],
+      servicesList: [{ service_name: 'payments-service' }],
+      guardrailValidation: {
+        validation_status: 'WARNING',
+        messages: [{ type: 'WARNING', field: 'allowed_recipes', message: 'Applications in this Deployment Group would lose access to Rolling.' }]
+      }
     })
-    const view = renderApp('/new/admin/warnings')
+    const view = renderApp('/new/admin')
 
+    await view.findByRole('heading', { name: 'Admin' })
+    await view.findByText('Deployment Group: Payments Core')
+    fireEvent.click(view.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(view.getByRole('checkbox', { name: 'Rolling' }))
+    await waitFor(() => assert.equal(view.getByRole('button', { name: 'Review changes' }).disabled, false))
+    fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
     await view.findAllByText('Warnings to review')
-    await view.findByText('5 Applications would no longer be allowed to use Rolling.')
+    await view.findAllByText('Applications in this Deployment Group would lose access to Rolling.')
     assert.equal(view.queryByText('Errors blocking save'), null)
     const saveButton = view.getByRole('button', { name: 'Save' })
     assert.equal(saveButton.disabled, true)
@@ -1823,14 +1899,37 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
-      rollbackAllowed: true
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'team-payments@example.com',
+          description: 'Payments guardrails.',
+          services: ['payments-service'],
+          allowed_recipes: ['bluegreen', 'rolling'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [
+        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
+        { id: 'rolling', name: 'Rolling', status: 'active' }
+      ],
+      servicesList: [{ service_name: 'payments-service' }],
+      guardrailValidation: {
+        validation_status: 'ERROR',
+        messages: [{ type: 'ERROR', field: 'guardrails', message: 'Daily deploy quota must stay greater than or equal to the daily rollback quota.' }]
+      }
     })
-    const errorView = renderApp('/new/admin/errors')
+    const errorView = renderApp('/new/admin')
 
+    await errorView.findByRole('heading', { name: 'Admin' })
+    await errorView.findByText('Deployment Group: Payments Core')
+    fireEvent.click(errorView.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(errorView.getByRole('checkbox', { name: 'Rolling' }))
+    await waitFor(() => assert.equal(errorView.getByRole('button', { name: 'Review changes' }).disabled, false))
+    fireEvent.click(errorView.getByRole('button', { name: 'Review changes' }))
     await errorView.findByText('Errors blocking save')
-    await errorView.findByText(
-      'At least one deployment strategy must remain allowed before DXCP can save this Deployment Group.'
-    )
     await errorView.findByText('Daily deploy quota must stay greater than or equal to the daily rollback quota.')
     assert.ok(errorView.getByRole('button', { name: 'Save' }).disabled)
 
@@ -1847,10 +1946,33 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
-      rollbackAllowed: true
+      rollbackAllowed: true,
+      mutationsDisabled: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'team-payments@example.com',
+          description: 'Payments guardrails.',
+          services: ['payments-service'],
+          allowed_recipes: ['bluegreen', 'rolling'],
+          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+        }
+      ],
+      recipes: [
+        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
+        { id: 'rolling', name: 'Rolling', status: 'active' }
+      ],
+      servicesList: [{ service_name: 'payments-service' }]
     })
-    const blockedView = renderApp('/new/admin/blocked-save')
+    const blockedView = renderApp('/new/admin')
 
+    await blockedView.findByRole('heading', { name: 'Admin' })
+    await blockedView.findByText('Deployment Group: Payments Core')
+    fireEvent.click(blockedView.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(blockedView.getByRole('checkbox', { name: 'Rolling' }))
+    await waitFor(() => assert.equal(blockedView.getByRole('button', { name: 'Review changes' }).disabled, false))
+    fireEvent.click(blockedView.getByRole('button', { name: 'Review changes' }))
     await blockedView.findByText('Blocked save explanation')
     await blockedView.findByText(
       'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'

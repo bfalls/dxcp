@@ -4333,8 +4333,11 @@ export default function App() {
               path="/new/deployments/degraded-read"
               element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
             />
-            <Route path="/new/insights" element={<NewExperienceInsightsPage role={derivedRole} />} />
-            <Route path="/new/insights/:scenario" element={<NewExperienceInsightsPage role={derivedRole} />} />
+            <Route path="/new/insights" element={<NewExperienceInsightsPage role={derivedRole} api={api} />} />
+            <Route
+              path="/new/insights/:scenario"
+              element={<NewExperienceInsightsPage role={derivedRole} api={api} />}
+            />
             <Route
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} api={api} />}
@@ -4351,8 +4354,8 @@ export default function App() {
               path="/new/deployments/:deploymentId"
               element={<NewExperienceDeploymentDetailPage role={derivedRole} api={api} />}
             />
-            <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} />} />
-            <Route path="/new/admin/:scenario" element={<NewExperienceAdminPage role={derivedRole} />} />
+            <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
+            <Route path="/new/admin/:scenario" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
             <Route path="*" element={<NewExperienceUnavailableRoutePage role={derivedRole} />} />
           </Routes>
         )}
