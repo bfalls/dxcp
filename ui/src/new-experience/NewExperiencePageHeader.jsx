@@ -14,14 +14,14 @@ function getActionStateTitle(state, label) {
   if (state === 'disabled') return `${label} not ready`
   if (state === 'read-only') return 'Read-only access'
   if (state === 'unavailable') return 'Unavailable on this route'
-  return 'Action note'
+  return 'Action guidance'
 }
 
 function getActionStateTone(state) {
   if (state === 'blocked') return 'danger'
+  if (state === 'disabled') return 'warning'
   if (state === 'read-only' || state === 'unavailable') return 'neutral'
-  if (state === 'disabled') return 'neutral'
-  return 'warning'
+  return 'neutral'
 }
 
 export default function NewExperiencePageHeader({

@@ -1,4 +1,5 @@
 const ACTIVE_DEPLOYMENT_STATES = ['ACTIVE', 'IN_PROGRESS', 'PENDING', 'RUNNING', 'QUEUED']
+const RAW_BACKEND_WORDING_RE = /\b(spinnaker|pipeline|stage|task|job|execution|manifest|orca|clouddriver|bake)\b/i
 
 function formatApiError(result, fallbackMessage) {
   if (!result || typeof result !== 'object') return fallbackMessage
@@ -97,21 +98,51 @@ function normalizeFailureCategory(value) {
   return 'Failure'
 }
 
+function normalizeEvidenceText(value) {
+  if (!value) return ''
+  return String(value).replace(/\s+/g, ' ').trim()
+}
+
+function sentenceCase(value) {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function normalizePrimaryNarrative(value, fallback) {
+  const raw = normalizeEvidenceText(value)
+  if (!raw) return fallback
+  if (RAW_BACKEND_WORDING_RE.test(raw)) return fallback
+
+  const normalized = raw
+    .replace(/\bservice\b/gi, 'application')
+    .replace(/\brecipe\b/gi, 'Deployment Strategy')
+    .replace(/\bdeliverygroup\b/gi, 'Deployment Group')
+    .replace(/\broll[- ]?forward\b/gi, 'deployment')
+
+  return sentenceCase(normalized)
+}
+
+function buildRawEvidence(label, value, normalizedValue) {
+  const raw = normalizeEvidenceText(value)
+  if (!raw) return null
+  if (normalizedValue && raw === normalizedValue) return null
+  return { label, value: raw }
+}
+
 function normalizeTimelineTitle(item) {
   const key = String(item?.key || '').toLowerCase()
   const rawLabel = String(item?.label || '').trim()
-  if (rawLabel) return rawLabel
   if (key === 'submitted') return 'Deployment requested'
   if (key === 'validated') return 'Readiness confirmed'
   if (key === 'in_progress' || key === 'active') return 'Deployment still in progress'
-  if (key === 'succeeded') return 'Deployment succeeded'
-  if (key === 'failed') return 'Deployment failed'
+  if (key === 'succeeded') return 'Deployment completed'
+  if (key === 'failed') return 'Deployment did not complete'
   if (key === 'rollback_started') return 'Rollback started'
-  if (key === 'rollback_failed') return 'Rollback failed'
+  if (key === 'rollback_failed') return 'Rollback did not complete'
   if (key === 'rollback_succeeded') return 'Rollback completed'
-  if (key === 'canceled') return 'Deployment canceled'
-  if (key === 'rolled_back') return 'Deployment rolled back'
-  return 'Deployment update'
+  if (key === 'canceled') return 'Deployment was canceled'
+  if (key === 'rolled_back') return 'Deployment was rolled back'
+  return normalizePrimaryNarrative(rawLabel, 'Deployment update')
 }
 
 function normalizeTimelineCategory(item) {
@@ -132,6 +163,29 @@ function normalizeTimelineTone(item) {
   return 'neutral'
 }
 
+function normalizeTimelineSummary(item, title) {
+  const key = String(item?.key || '').toLowerCase()
+  if (key === 'submitted') return 'DXCP recorded the deployment request and handed it to the delivery engine.'
+  if (key === 'validated') return 'DXCP confirmed the deployment intent was ready to proceed.'
+  if (key === 'in_progress' || key === 'active') return 'DXCP is still tracking this deployment as it moves through the selected plan.'
+  if (key === 'succeeded') return 'DXCP recorded that the new version completed successfully in the selected environment.'
+  if (key === 'failed') return 'DXCP recorded that this deployment did not complete successfully.'
+  if (key === 'rollback_started') return 'DXCP recorded that rollback work started for this deployment.'
+  if (key === 'rollback_failed') return 'DXCP recorded that rollback work did not complete successfully.'
+  if (key === 'rollback_succeeded' || key === 'rolled_back') {
+    return 'DXCP recorded that the previous running version was restored.'
+  }
+  if (key === 'canceled') return 'DXCP recorded that this deployment was canceled before completion.'
+  return normalizePrimaryNarrative(item?.detail, `${title} was recorded for this deployment.`)
+}
+
+function buildTimelineEvidence(item, title, summary) {
+  return [
+    buildRawEvidence('Original event label', item?.label, title),
+    buildRawEvidence('Original event detail', item?.detail, summary)
+  ].filter(Boolean)
+}
+
 function normalizeTimelineItems(items) {
   return (Array.isArray(items) ? items : [])
     .slice()
@@ -143,14 +197,19 @@ function normalizeTimelineItems(items) {
       if (Number.isNaN(rightAt)) return -1
       return leftAt - rightAt
     })
-    .map((item, index) => ({
-      id: item?.key || `event-${index}`,
-      category: normalizeTimelineCategory(item),
-      title: normalizeTimelineTitle(item),
-      tone: normalizeTimelineTone(item),
-      summary: item?.detail || normalizeTimelineTitle(item),
-      time: formatDateTime(item?.occurredAt)
-    }))
+    .map((item, index) => {
+      const title = normalizeTimelineTitle(item)
+      const summary = normalizeTimelineSummary(item, title)
+      return {
+        id: item?.key || `event-${index}`,
+        category: normalizeTimelineCategory(item),
+        title,
+        tone: normalizeTimelineTone(item),
+        summary,
+        time: formatDateTime(item?.occurredAt),
+        evidence: buildTimelineEvidence(item, title, summary)
+      }
+    })
 }
 
 function findDeliveryGroup(groups, serviceName) {
@@ -205,17 +264,89 @@ function buildCurrentRunningSummary(currentRunning, deploymentId, environmentLab
 function buildFailureNarrative(failures) {
   if (!Array.isArray(failures) || failures.length === 0) return null
   const primaryFailure = failures[0]
-  return {
-    category: normalizeFailureCategory(primaryFailure?.category),
-    whatFailed: primaryFailure?.summary || 'DXCP recorded a deployment failure.',
-    whyItFailed:
-      primaryFailure?.detail ||
-      'Additional failure evidence was not returned on this route.',
-    nextStep:
-      primaryFailure?.actionHint ||
-      'Review the deployment record and current running context before deploying again.',
-    observedAt: formatDateTime(primaryFailure?.observedAt)
+  const category = normalizeFailureCategory(primaryFailure?.category)
+  const whatFailedFallbackByCategory = {
+    Policy: 'Deployment policy prevented this deployment from continuing.',
+    Validation: 'DXCP could not confirm this deployment was valid to continue.',
+    Artifact: 'DXCP could not use the selected deployment version.',
+    Infrastructure: 'The deployment environment could not complete this deployment.',
+    Configuration: 'Configuration for this deployment could not be applied successfully.',
+    Application: 'The application could not complete deployment successfully.',
+    Timeout: 'The deployment took too long to complete.',
+    Rollback: 'Rollback work did not complete successfully.',
+    Failure: 'DXCP recorded a deployment failure.'
   }
+  const whyFailedFallbackByCategory = {
+    Policy: 'A guardrail or policy condition prevented the deployment from continuing.',
+    Validation: 'DXCP found a validation issue before the deployment could complete.',
+    Artifact: 'The selected version or its source could not be verified for deployment.',
+    Infrastructure: 'An environment dependency or platform condition prevented successful completion.',
+    Configuration: 'A deployment configuration issue prevented successful completion.',
+    Application: 'The application did not reach a successful running state during deployment.',
+    Timeout: 'The deployment remained in progress longer than DXCP could allow.',
+    Rollback: 'The deployment required rollback work that did not complete cleanly.',
+    Failure: 'Additional failure evidence was not returned on this route.'
+  }
+  const nextStepFallbackByCategory = {
+    Policy: 'Review the applicable Deployment Group guardrails before deploying again.',
+    Validation: 'Review the deployment plan and correct the validation issue before deploying again.',
+    Artifact: 'Confirm the selected version is available and approved before deploying again.',
+    Infrastructure: 'Review environment conditions and the deployment record before deploying again.',
+    Configuration: 'Review the deployment configuration and try again after it is corrected.',
+    Application: 'Review the application change and current running context before deploying again.',
+    Timeout: 'Review the deployment record and current running context before retrying.',
+    Rollback: 'Review rollback evidence and current running context before attempting another change.',
+    Failure: 'Review the deployment record and current running context before deploying again.'
+  }
+
+  const whatFailed = normalizePrimaryNarrative(
+    primaryFailure?.summary,
+    whatFailedFallbackByCategory[category] || whatFailedFallbackByCategory.Failure
+  )
+  const whyItFailed = normalizePrimaryNarrative(
+    primaryFailure?.detail,
+    whyFailedFallbackByCategory[category] || whyFailedFallbackByCategory.Failure
+  )
+  const nextStep = normalizePrimaryNarrative(
+    primaryFailure?.actionHint,
+    nextStepFallbackByCategory[category] || nextStepFallbackByCategory.Failure
+  )
+  return {
+    category,
+    whatFailed,
+    whyItFailed,
+    nextStep,
+    observedAt: formatDateTime(primaryFailure?.observedAt),
+    evidence: [
+      buildRawEvidence('Original failure summary', primaryFailure?.summary, whatFailed),
+      buildRawEvidence('Original failure detail', primaryFailure?.detail, whyItFailed),
+      buildRawEvidence('Original next-step hint', primaryFailure?.actionHint, nextStep)
+    ].filter(Boolean)
+  }
+}
+
+function buildSupportingEvidence(failureNarrative, timeline) {
+  const entries = []
+
+  if (failureNarrative?.evidence?.length) {
+    entries.push({
+      id: 'failure',
+      title: 'Failure source wording',
+      items: failureNarrative.evidence
+    })
+  }
+
+  ;(Array.isArray(timeline) ? timeline : [])
+    .filter((event) => Array.isArray(event.evidence) && event.evidence.length > 0)
+    .forEach((event) => {
+      entries.push({
+        id: event.id,
+        title: `${event.title} source wording`,
+        items: event.evidence
+      })
+    })
+
+  return entries
 }
 
 function buildPolicyContext(deliveryGroup, recipe, recipes) {
@@ -446,6 +577,8 @@ export async function loadDeploymentDetailData(api, deploymentId, options = {}) 
   const status = normalizeStatus(detailPayload)
   const deliveryGroup = findDeliveryGroup(groups, serviceName)
   const recipe = findRecipe(recipes, detailPayload?.recipeId)
+  const timelineItems = normalizeTimelineItems(timeline)
+  const failureNarrative = buildFailureNarrative(failures)
   const viewModel = {
     id: detailPayload?.id || deploymentId,
     application: serviceName || 'Application not recorded',
@@ -468,8 +601,9 @@ export async function loadDeploymentDetailData(api, deploymentId, options = {}) 
       detailPayload?.id || deploymentId,
       environmentName
     ),
-    timeline: normalizeTimelineItems(timeline),
-    failureNarrative: buildFailureNarrative(failures),
+    timeline: timelineItems,
+    failureNarrative,
+    supportingEvidence: buildSupportingEvidence(failureNarrative, timelineItems),
     diagnostics: {
       engineExecutionId: detailPayload?.engineExecutionId || '',
       engineExecutionUrl: detailPayload?.engineExecutionUrl || ''

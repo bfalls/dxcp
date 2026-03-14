@@ -883,6 +883,8 @@ export default function App() {
   const defaultEntryPath = getDefaultEntryPath(loadExperienceChoice())
   const currentPath = location.pathname || '/'
   const isNewExperienceRoute = currentPath.startsWith('/new')
+  const initialPathRef = useRef(location.pathname || '/')
+  const initialExperienceChoiceRef = useRef(loadExperienceChoice())
   const lastViewRef = useRef('')
   const lastRouteKeyRef = useRef('')
   const deploymentsScrollRef = useRef(0)
@@ -4309,8 +4311,15 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (
+      initialPathRef.current === '/' &&
+      !initialExperienceChoiceRef.current &&
+      location.pathname === defaultEntryPath
+    ) {
+      return
+    }
     syncExperienceChoiceForPath(location.pathname)
-  }, [location.pathname])
+  }, [defaultEntryPath, location.pathname])
 
   if (isNewExperienceRoute) {
     return (
@@ -4328,23 +4337,7 @@ export default function App() {
             <Route path="/new/deploy" element={<Navigate to="/new/applications" replace />} />
             <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} api={api} />} />
             <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />} />
-            <Route
-              path="/new/deployments/empty"
-              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
-            />
-            <Route
-              path="/new/deployments/no-results"
-              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
-            />
-            <Route
-              path="/new/deployments/degraded-read"
-              element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />}
-            />
             <Route path="/new/insights" element={<NewExperienceInsightsPage role={derivedRole} api={api} />} />
-            <Route
-              path="/new/insights/:scenario"
-              element={<NewExperienceInsightsPage role={derivedRole} api={api} />}
-            />
             <Route
               path="/new/applications/:applicationName"
               element={<NewExperienceApplicationsPage role={derivedRole} api={api} />}
@@ -4354,15 +4347,10 @@ export default function App() {
               element={<NewExperienceDeployPage role={derivedRole} api={api} />}
             />
             <Route
-              path="/new/applications/:applicationName/deploy/:scenario"
-              element={<NewExperienceDeployPage role={derivedRole} api={api} />}
-            />
-            <Route
               path="/new/deployments/:deploymentId"
               element={<NewExperienceDeploymentDetailPage role={derivedRole} api={api} />}
             />
             <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
-            <Route path="/new/admin/:scenario" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
             <Route path="*" element={<NewExperienceUnavailableRoutePage role={derivedRole} />} />
           </Routes>
         )}

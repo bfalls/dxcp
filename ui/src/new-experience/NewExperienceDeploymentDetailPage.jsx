@@ -422,6 +422,30 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
             </SectionCard>
           ) : null}
 
+          {viewModel?.supportingEvidence?.length > 0 ? (
+            <SectionCard className="new-deployment-detail-card">
+              <h3>Supporting evidence</h3>
+              <p className="helper">Source wording stays secondary here when DXCP needs to preserve exact transport evidence for truthfulness.</p>
+              <details className="new-admin-diagnostics">
+                <summary>View source wording</summary>
+                <div className="new-explanation-stack">
+                  {viewModel.supportingEvidence.map((section) => (
+                    <NewExplanation key={section.id} title={section.title} tone="neutral">
+                      <dl className="new-application-support-grid">
+                        {section.items.map((item) => (
+                          <React.Fragment key={`${section.id}-${item.label}`}>
+                            <dt>{item.label}</dt>
+                            <dd>{item.value}</dd>
+                          </React.Fragment>
+                        ))}
+                      </dl>
+                    </NewExplanation>
+                  ))}
+                </div>
+              </details>
+            </SectionCard>
+          ) : null}
+
           <SectionCard className="new-deployment-detail-card">
             <h3>Diagnostics boundary</h3>
             {role === 'PLATFORM_ADMIN' && (viewModel?.diagnostics?.engineExecutionId || viewModel?.diagnostics?.engineExecutionUrl) ? (
