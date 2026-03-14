@@ -83,7 +83,7 @@ const SCENARIOS = {
       tone: 'neutral',
       body: 'The recent deployment window is valid, but there is no deployment activity to browse yet. Open an application to begin from object context instead of turning this page into a placeholder archive.',
       actions: [
-        { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true },
+        { label: 'Open Applications', to: '/new/applications', secondary: true },
         { label: 'Open Deploy Workflow', to: '/new/applications/payments-api/deploy' }
       ]
     }
@@ -110,7 +110,7 @@ const SCENARIOS = {
       body: 'Try a broader outcome or time window to continue browsing. This is different from empty history because deployment records exist outside the current filters.',
       actions: [
         { label: 'Clear filters', to: '/new/deployments' },
-        { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true }
+        { label: 'Open Applications', to: '/new/applications', secondary: true }
       ]
     }
   },
@@ -223,7 +223,7 @@ export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenari
         secondaryActions={[
           {
             label: 'Open Applications',
-            to: '/new/applications/payments-api',
+            to: '/new/applications',
             description: 'Return to the application object route.'
           }
         ]}

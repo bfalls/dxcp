@@ -4318,8 +4318,8 @@ export default function App() {
       >
         {authReady && isAuthenticated && (
           <Routes>
-            <Route path="/new" element={<Navigate to="/new/applications/payments-api" replace />} />
-            <Route path="/new/applications" element={<Navigate to="/new/applications/payments-api" replace />} />
+            <Route path="/new" element={<Navigate to="/new/applications" replace />} />
+            <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} />} />
             <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} />} />
             <Route
               path="/new/deployments/empty"

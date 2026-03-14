@@ -25,7 +25,7 @@ export default function NewExperienceUnavailableRoutePage({ role = 'UNKNOWN' }) 
         stateSummaryItems={[{ label: 'Route state', value: 'Unavailable' }]}
         primaryAction={{ label: 'Route', state: 'unavailable' }}
         secondaryActions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Applications', to: '/new/applications' },
           { label: 'Open Legacy', to: '/services' }
         ]}
       />
@@ -34,7 +34,7 @@ export default function NewExperienceUnavailableRoutePage({ role = 'UNKNOWN' }) 
         title="This route is not available in the new experience"
         tone="danger"
         actions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Applications', to: '/new/applications' },
           { label: 'Open Legacy', to: '/services', secondary: true }
         ]}
       >

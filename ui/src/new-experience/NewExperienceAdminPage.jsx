@@ -165,7 +165,7 @@ function BlockedAdminState({ role }) {
         stateSummaryItems={[{ label: 'Workspace access', value: 'Unavailable' }]}
         primaryAction={{ label: 'Admin', state: 'unavailable' }}
         secondaryActions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Applications', to: '/new/applications' },
           { label: 'Open Deployments', to: '/new/deployments' },
           { label: 'Open Insights', to: '/new/insights' }
         ]}
@@ -175,7 +175,7 @@ function BlockedAdminState({ role }) {
         title="Admin access required"
         tone="danger"
         actions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Applications', to: '/new/applications' },
           { label: 'Open Deployments', to: '/new/deployments', secondary: true },
           { label: 'Open Insights', to: '/new/insights', secondary: true }
         ]}
@@ -347,7 +347,7 @@ function PlatformAdminAdminPage({ role, scenario }) {
         secondaryActions={[
           mode !== 'view'
             ? { label: 'Back to edit', onClick: returnToEdit, disabled: mode !== 'review' }
-            : { label: 'Open Applications', to: '/new/applications/payments-api' },
+            : { label: 'Open Applications', to: '/new/applications' },
           { label: 'Open Legacy Admin', to: '/admin' }
         ]}
       />

@@ -89,7 +89,7 @@ const INSIGHTS_SCENARIOS = {
       {
         title: 'Checkout Reliability failures remain concentrated',
         detail: 'Recent failures cluster in one deployment group instead of appearing across DXCP. Open the application route to review current running state before redeploying.',
-        to: '/new/applications/payments-api'
+        to: '/new/applications'
       }
     ],
     notableActivity: [
@@ -139,7 +139,7 @@ const INSIGHTS_SCENARIOS = {
       eyebrow: 'Empty',
       title: 'No deployments in this time range',
       body: 'Insights keeps the same page structure when the selected scope has no delivery activity. Try a broader time window or clear scope filters before switching into a different object route.',
-      actions: [{ label: 'Open Applications', to: '/new/applications/payments-api', secondary: true }]
+      actions: [{ label: 'Open Applications', to: '/new/applications', secondary: true }]
     }
   },
   'degraded-read': {
@@ -253,7 +253,7 @@ const INSIGHTS_SCENARIOS = {
         body: 'The new Insights route keeps the same header, scope controls, and refresh action so you can retry without losing page context.',
         actions: [
           { label: 'Open Deployments', to: '/new/deployments' },
-          { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true }
+          { label: 'Open Applications', to: '/new/applications', secondary: true }
         ]
       }
     }

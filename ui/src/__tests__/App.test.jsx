@@ -817,6 +817,107 @@ export async function runAllTests() {
     await view.findByText('Supporting context')
   })
 
+  await runTest('New experience applications route reads as the primary chooser with clear application handoff', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications')
+
+    await view.findByText('Applications')
+    await view.findByText('Choose an application to continue in DXCP')
+    await view.findByText('Application selection')
+    await view.findByText('payments-api')
+    await view.findByText('billing-worker')
+    await view.findByText('web-frontend')
+    const chooserLinks = await view.findAllByRole('link', { name: 'Open Application' })
+    assert.equal(chooserLinks.length, 3)
+  })
+
+  await runTest('New experience applications route preserves empty and degraded chooser states', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+
+    const emptyView = renderApp('/new/applications?scenario=empty')
+    await emptyView.findByText('No accessible applications are available')
+    await emptyView.findByText(
+      'This role does not have an application record to open in the current proof data set yet. The chooser remains the correct entry route even when the available collection is empty.'
+    )
+    cleanup()
+
+    const degradedView = renderApp('/new/applications?scenario=degraded-read')
+    await degradedView.findAllByText('Supporting reads are degraded')
+    const degradedCopy = await degradedView.findAllByText(
+      'Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.'
+    )
+    assert.ok(degradedCopy.length >= 2)
+  })
+
+  await runTest('New experience applications route distinguishes no-results from empty chooser state', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications?q=does-not-match')
+
+    await view.findByText('No applications match this search')
+    await view.findByText(
+      'Try a different application name, owner, deployment group, or environment. This is different from an empty chooser because accessible application records exist outside the current search.'
+    )
+    assert.ok(view.getByRole('button', { name: 'Clear search' }))
+  })
+
+  await runTest('New experience application detail preserves chooser return context when opened from the chooser', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false
+    })
+    const view = renderApp('/new/applications')
+
+    const chooserAction = await view.findAllByRole('link', { name: 'Open Application' })
+    fireEvent.click(chooserAction[0])
+    await view.findByText('Opened from Applications')
+    assert.ok(view.getByRole('link', { name: 'Back to Applications' }))
+  })
+
   await runTest('New experience shows read-only application posture for observers', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

@@ -19,7 +19,7 @@ export default function NewExperienceUnavailableDeploymentPage() {
         title="Deployment detail is not available on this route"
         tone="danger"
         actions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true },
+          { label: 'Open Applications', to: '/new/applications', secondary: true },
           { label: 'Open Legacy Deployment', to: '/deployments/dep-1' }
         ]}
       >

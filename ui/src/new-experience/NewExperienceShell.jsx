@@ -42,7 +42,7 @@ export default function NewExperienceShell({
                 <span>New Experience Preview</span>
               </div>
               <nav className="new-shell-nav-links" aria-label="New experience navigation">
-                <NavLink to="/new/applications/payments-api">Applications</NavLink>
+                <NavLink to="/new/applications">Applications</NavLink>
                 <NavLink to="/new/deployments">Deployments</NavLink>
                 <NavLink to="/new/insights">Insights</NavLink>
                 {showAdminNav ? <NavLink to="/new/admin">Admin</NavLink> : null}
