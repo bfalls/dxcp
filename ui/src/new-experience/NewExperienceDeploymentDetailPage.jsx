@@ -330,6 +330,24 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
   const { deploymentId = '9831' } = useParams()
   const location = useLocation()
   const fixture = DEPLOYMENT_FIXTURES[deploymentId]
+  const returnTo = location.state?.returnTo || null
+  const primaryActionState = fixture ? deploymentPrimaryActionState(role, fixture) : 'unavailable'
+  const alertRailItems = useMemo(() => {
+    if (!fixture || primaryActionState === 'available') {
+      return []
+    }
+
+    return [
+      {
+        id: `deployment-${deploymentId}-action`,
+        tone: primaryActionState === 'blocked' ? 'danger' : 'neutral',
+        title: primaryActionState === 'blocked' ? 'Rollback blocked' : 'Read-only access',
+        body: deploymentActionNote(role, fixture)
+      }
+    ]
+  }, [deploymentId, fixture, primaryActionState, role])
+
+  useNewExperienceAlertRail(alertRailItems)
 
   if (!fixture) {
     return (
@@ -356,25 +374,6 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
       </>
     )
   }
-
-  const returnTo = location.state?.returnTo || null
-  const primaryActionState = deploymentPrimaryActionState(role, fixture)
-  const alertRailItems = useMemo(() => {
-    if (primaryActionState === 'available') {
-      return []
-    }
-
-    return [
-      {
-        id: `deployment-${deploymentId}-action`,
-        tone: primaryActionState === 'blocked' ? 'danger' : 'neutral',
-        title: primaryActionState === 'blocked' ? 'Rollback blocked' : 'Read-only access',
-        body: deploymentActionNote(role, fixture)
-      }
-    ]
-  }, [deploymentId, fixture, primaryActionState, role])
-
-  useNewExperienceAlertRail(alertRailItems)
 
   return (
     <div className="new-deployment-detail-page">
