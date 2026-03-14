@@ -325,6 +325,12 @@ function buildSecondaryActions(fixture, returnTo) {
   return actions
 }
 
+function returnToTitle(returnTo) {
+  if (returnTo?.title) return returnTo.title
+  if (returnTo?.kind === 'application') return 'Opened from Application'
+  return 'Opened from Deployments'
+}
+
 export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) {
   const { deploymentId = '9831' } = useParams()
   const location = useLocation()
@@ -381,7 +387,7 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN' }) 
         <SectionCard className="new-detail-context-card">
           <div className="new-detail-context-row">
             <div>
-              <strong>Opened from Deployments</strong>
+              <strong>{returnToTitle(returnTo)}</strong>
               <p className="helper">
                 {returnTo.scopeSummary ||
                   'Browse continuity stays visible so you can return to the same collection story without losing place.'}

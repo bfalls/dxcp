@@ -67,10 +67,17 @@ const newExperienceServiceStatuses = {
     service: 'payments-api',
     environment: 'sandbox',
     hasDeployments: true,
+    currentRunning: {
+      environment: 'sandbox',
+      version: 'v1.32.1',
+      deploymentId: '9831',
+      deploymentKind: 'ROLL_FORWARD',
+      derivedAt: '2025-01-03T00:03:00Z'
+    },
     latest: {
-      id: 'dep-payments',
+      id: '9842',
       state: 'IN_PROGRESS',
-      version: '1.33.0',
+      version: 'v1.33.0',
       createdAt: '2025-01-03T00:00:00Z',
       updatedAt: '2025-01-03T00:05:00Z'
     }
@@ -103,6 +110,30 @@ const newExperienceServiceStatuses = {
   }
 }
 
+const newExperienceDeploymentHistoryByService = {
+  'payments-api': [
+    {
+      id: '9842',
+      state: 'IN_PROGRESS',
+      environment: 'sandbox',
+      version: 'v1.33.0',
+      createdAt: '2025-01-03T00:00:00Z',
+      updatedAt: '2025-01-03T00:05:00Z',
+      deliveryGroupId: 'payments'
+    },
+    {
+      id: '9831',
+      state: 'SUCCEEDED',
+      outcome: 'SUCCEEDED',
+      environment: 'sandbox',
+      version: 'v1.32.1',
+      createdAt: '2025-01-02T23:40:00Z',
+      updatedAt: '2025-01-03T00:03:00Z',
+      deliveryGroupId: 'payments'
+    }
+  ]
+}
+
 function buildNewExperienceFetch(role, overrides = {}) {
   return buildFetchMock({
     role,
@@ -111,6 +142,7 @@ function buildNewExperienceFetch(role, overrides = {}) {
     servicesList: newExperienceServicesList,
     deliveryGroups: newExperienceDeliveryGroups,
     serviceStatusesByService: newExperienceServiceStatuses,
+    deploymentHistoryByService: newExperienceDeploymentHistoryByService,
     ...overrides
   })
 }
@@ -139,10 +171,13 @@ const buildFetchMock = ({
   buildCommitUrl,
   buildRunUrl,
   serviceStatusesByService,
+  deploymentHistoryByService,
   failServices,
   failDeliveryGroups,
   failEnvironments,
-  failServiceStatusFor
+  failServiceStatusFor,
+  failDeploymentsFor,
+  mutationsDisabled
 }) => {
   let groups = deliveryGroups || [
     {
@@ -298,7 +333,7 @@ const buildFetchMock = ({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600,
-        mutations_disabled: false
+        mutations_disabled: mutationsDisabled === true
       })
     }
     if (pathname === '/v1/admin/system/mutations-disabled' && (!options.method || options.method === 'GET')) {
@@ -553,7 +588,20 @@ const buildFetchMock = ({
       return ok(groups)
     }
     if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
+      const serviceName = parsed.searchParams.get('service') || ''
       const environment = parsed.searchParams.get('environment') || 'sandbox'
+      if (Array.isArray(failDeploymentsFor) && failDeploymentsFor.includes(serviceName)) {
+        return Promise.reject(new Error(`Failed to load deployments for ${serviceName}`))
+      }
+      const configuredHistory = deploymentHistoryByService?.[serviceName]
+      if (configuredHistory) {
+        return ok(
+          configuredHistory.map((item) => ({
+            ...item,
+            environment: item.environment || environment
+          }))
+        )
+      }
       return ok([
         {
           id: 'dep-1',
@@ -898,32 +946,24 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications/payments-api')
 
     await view.findByText('Application')
     await view.findByText('payments-api')
+    await view.findAllByText('Application summary')
     await view.findByText('Current running summary')
-    await view.findByText('Recent state summary')
+    await view.findByText('Recent deployment state')
     await view.findByText('Application owner')
     await view.findByText('Payments Platform')
     await view.findAllByText('Current version')
     await view.findAllByText('v1.32.1')
     await view.findByText('Deploy blocked')
-    await view.findByText(
-      'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
-    )
+    await view.findByText('Deploy is blocked because Deployment 9842 is still in progress for sandbox. Open that deployment to follow the current work before starting another deploy.')
     assert.ok(view.getByRole('link', { name: 'Open deploy workflow' }))
     assert.ok(view.getByRole('link', { name: 'Open current deployment detail' }))
-    assert.ok(view.getByRole('link', { name: 'Open active deployment' }))
-    await view.findByText('Supporting reads are degraded')
-    await view.findByText(
-      'Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.'
-    )
+    assert.ok(view.getByRole('link', { name: 'Open deployment 9842' }))
+    await view.findByText(/Max 1 active deployment at a time/)
     await view.findByText('Guardrail posture')
     await view.findByText('Permission-limited detail')
     await view.findByText('Supporting context')
@@ -1042,21 +1082,53 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'OBSERVER',
-      deployAllowed: false,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('OBSERVER')
     const view = renderApp('/new/applications/payments-api')
 
     await view.findByText('Read-only access')
     await view.findByText(
-      'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
+      'Observers can inspect the application summary, current running state, and recent deployment state here, but deploy remains read-only on this route.'
     )
     await view.findByText('Read-only')
     await view.findByText('Open deploy workflow')
-    await view.findByText('Recent state summary')
+    await view.findByText('Recent deployment state')
     assert.equal(view.queryByRole('link', { name: 'Admin' }), null)
+  })
+
+  await runTest('New experience application route shows a degraded application object page when supporting reads fail', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      failServiceStatusFor: ['payments-api'],
+      failDeploymentsFor: ['payments-api']
+    })
+    const view = renderApp('/new/applications/payments-api')
+
+    await view.findAllByText('Supporting application reads are degraded')
+    await view.findByText('Running state is unavailable')
+    await view.findByText('No recent deployment state is available')
+  })
+
+  await runTest('New experience application route shows a failure state when the application record cannot load', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', { failServices: true })
+    const view = renderApp('/new/applications/payments-api')
+
+    await view.findAllByText('Application detail could not be loaded')
+    await view.findAllByText('DXCP could not load this application record right now. Refresh to try again.')
   })
 
   await runTest('New experience deploy route shows enabled deploy intent with readiness review', async () => {

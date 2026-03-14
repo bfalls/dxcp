@@ -1,61 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
-import { loadApplicationsChooserData } from './newExperienceApplicationsData.js'
-
-const APPLICATION_DETAIL_FIXTURE = {
-  owner: 'Payments Platform',
-  environment: 'sandbox',
-  currentVersion: 'v1.32.1',
-  currentOutcome: 'Succeeded',
-  deploymentGroup: 'Payments Core',
-  runningSince: '12 minutes',
-  lastChange: 'Deployment 9831 completed 12 minutes ago.',
-  activeDeployment: {
-    id: '9842',
-    version: 'v1.33.0',
-    summary: 'A newer candidate is progressing through sandbox now.',
-    startedAt: 'Started 2 minutes ago'
-  },
-  recentState: [
-    {
-      label: 'Active deployment',
-      state: 'Active',
-      detail: 'v1.33.0 is moving through sandbox.',
-      timestamp: 'Started 2 minutes ago',
-      linkLabel: 'Open active deployment',
-      to: '/new/deployments/9842'
-    },
-    {
-      label: 'Latest completed deployment',
-      state: 'Succeeded',
-      detail: 'v1.32.1 became current in sandbox.',
-      timestamp: '12 minutes ago',
-      linkLabel: 'Open deployment 9831',
-      to: '/new/deployments/9831'
-    },
-    {
-      label: 'Recent state signal',
-      state: 'Stable',
-      detail: 'No rollback has been recorded in the last 7 days.',
-      timestamp: 'As of this refresh'
-    }
-  ],
-  support: {
-    releasePath: 'Deploy through the current DXCP deploy workflow.',
-    policyPosture: 'One active deployment at a time in sandbox.',
-    diagnostics: 'Detailed execution diagnostics remain limited to platform admins.'
-  }
-}
-
-function toneForState(state) {
-  if (state === 'Succeeded' || state === 'Stable') return 'info'
-  if (state === 'Active') return 'warn'
-  return 'neutral'
-}
+import { loadApplicationDetailData, loadApplicationsChooserData } from './newExperienceApplicationsData.js'
 
 function roleAccessLabel(role) {
   if (role === 'PLATFORM_ADMIN') return 'Platform-admin access'
@@ -77,6 +26,16 @@ function buildChooserReturnTo(location, visibleCount, searchTerm) {
     to: `/new/applications${query}`,
     label: 'Back to Applications',
     scopeSummary: `${visibleCount} accessible application${visibleCount === 1 ? '' : 's'}${suffix}.`
+  }
+}
+
+function buildApplicationReturnTo(applicationName) {
+  return {
+    kind: 'application',
+    title: 'Opened from Application',
+    to: `/new/applications/${applicationName}`,
+    label: 'Back to Application',
+    scopeSummary: 'Return to the application record without losing application-level context.'
   }
 }
 
@@ -372,25 +331,110 @@ function ApplicationsChooser({ role, api }) {
   )
 }
 
-function ApplicationDetail({ role }) {
+function ApplicationDetail({ role, api }) {
   const { applicationName = 'payments-api' } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const isReadOnly = role === 'OBSERVER'
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
   const returnTo = location.state?.returnTo || null
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
+  const [detailState, setDetailState] = useState({
+    kind: 'loading',
+    viewModel: null,
+    degradedReasons: [],
+    errorMessage: ''
+  })
+
+  const refreshDetail = useCallback(
+    async (options = {}) => {
+      setDetailState((current) => ({
+        kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
+        viewModel: current.viewModel,
+        degradedReasons: [],
+        errorMessage: ''
+      }))
+      const nextState = await loadApplicationDetailData(api, applicationName, role, options)
+      setDetailState(nextState)
+    },
+    [api, applicationName, role]
+  )
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      setDetailState({ kind: 'loading', viewModel: null, degradedReasons: [], errorMessage: '' })
+      const nextState = await loadApplicationDetailData(api, applicationName, role)
+      if (active) {
+        setDetailState(nextState)
+      }
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [api, applicationName, role])
+
+  const viewModel = detailState.viewModel
+  const isLoading = detailState.kind === 'loading'
+  const isRefreshing = detailState.kind === 'refreshing'
+  const isFailure = detailState.kind === 'failure'
+  const isUnavailable = detailState.kind === 'unavailable'
+  const isDegraded = detailState.kind === 'degraded'
+  const alertRailItems = useMemo(() => {
+    if (isFailure) {
+      return [
+        {
+          id: 'application-detail-failure',
+          tone: 'danger',
+          title: 'Application detail could not be loaded',
+          body: detailState.errorMessage || 'DXCP could not load this application record right now. Refresh to try again.'
+        }
+      ]
+    }
+    if (isUnavailable) {
+      return [
+        {
+          id: 'application-detail-unavailable',
+          tone: 'danger',
+          title: 'Application route is unavailable',
+          body: detailState.errorMessage || 'This application is not available from the accessible DXCP application set on this route.'
+        }
+      ]
+    }
+    if (isDegraded) {
+      return [
+        {
+          id: 'application-detail-degraded',
+          tone: 'warning',
+          title: 'Supporting application reads are degraded',
+          body:
+            'Application identity remains available, but one or more supporting reads are stale or missing. Open deployment detail for authoritative deployment records before acting on uncertain supporting state.'
+        }
+      ]
+    }
+    return []
+  }, [detailState.errorMessage, isDegraded, isFailure, isUnavailable])
+
+  useNewExperienceAlertRail(alertRailItems)
 
   const secondaryActions = [
     { label: 'Open Applications', to: '/new/applications', description: 'Return to the application chooser.' },
     { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployments without leaving the new experience.' },
-    { label: 'Refresh', disabled: false }
+    { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshDetail({ bypassCache: true }), disabled: isRefreshing || isLoading }
   ]
 
   const primaryAction = {
     label: 'Deploy',
-    state: isReadOnly ? 'read-only' : 'blocked',
-    description: isReadOnly ? 'Observers can inspect deploy readiness but cannot deploy.' : 'Deploy is blocked by an active deployment.'
+    state: viewModel?.actionPosture?.state || (isReadOnly ? 'read-only' : 'unavailable'),
+    onClick:
+      viewModel?.actionPosture?.state === 'available'
+        ? () => navigate(newDeployRoute)
+        : undefined,
+    description: viewModel?.actionPosture?.note || 'Deploy handoff is unavailable on this route.'
   }
+
+  const deploymentReturnTo = buildApplicationReturnTo(applicationName)
 
   return (
     <div className="new-application-page">
@@ -398,18 +442,10 @@ function ApplicationDetail({ role }) {
         title="Application"
         objectIdentity={applicationName}
         role={role}
-        stateSummaryItems={[
-          { label: 'Environment', value: APPLICATION_DETAIL_FIXTURE.environment },
-          { label: 'Current version', value: APPLICATION_DETAIL_FIXTURE.currentVersion },
-          { label: 'Recent state', value: APPLICATION_DETAIL_FIXTURE.currentOutcome }
-        ]}
+        stateSummaryItems={viewModel?.stateSummaryItems || [{ label: 'Application state', value: isLoading ? 'Loading' : 'Unavailable' }]}
         primaryAction={primaryAction}
         secondaryActions={secondaryActions}
-        actionNote={
-          isReadOnly
-            ? 'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
-            : 'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
-        }
+        actionNote={viewModel?.actionPosture?.note || 'Application detail is loading.'}
       />
 
       {returnTo?.kind === 'applications-chooser' ? (
@@ -428,113 +464,204 @@ function ApplicationDetail({ role }) {
         </SectionCard>
       ) : null}
 
-      {applicationName !== 'payments-api' ? (
-        <NewExplanation title="Application detail stays preview-only on this route" tone="warning">
-          You reached the application object route from the real applications chooser. Real application-detail data wiring remains in a later slice, so the object route keeps its existing proof structure for now.
-        </NewExplanation>
+      {isFailure ? (
+        <NewStateBlock
+          eyebrow="Failure"
+          title="Application detail could not be loaded"
+          tone="danger"
+          actions={[
+            { label: 'Refresh', onClick: () => refreshDetail({ bypassCache: true }) },
+            { label: 'Open Applications', to: '/new/applications', secondary: true }
+          ]}
+        >
+          {detailState.errorMessage || 'DXCP could not load this application record right now. Refresh to try again.'}
+        </NewStateBlock>
       ) : null}
 
-      <div className="new-application-layout">
-        <div className="new-application-primary">
-          <SectionCard className="new-application-card">
+      {isUnavailable ? (
+        <NewStateBlock
+          eyebrow="Unavailable route"
+          title="Application detail is not available on this route"
+          tone="danger"
+          actions={[
+            { label: 'Open Applications', to: '/new/applications' },
+            { label: 'Open Legacy', to: '/services', secondary: true }
+          ]}
+        >
+          {detailState.errorMessage || 'This application is not available from the accessible DXCP application set on this route.'}
+        </NewStateBlock>
+      ) : null}
+
+      {!isFailure && !isUnavailable ? (
+        <div className="new-application-layout">
+          <div className="new-application-primary">
+            <SectionCard className="new-application-card">
+              <div className="new-section-header">
+                <div>
+                  <h3>Application summary</h3>
+                  <p className="helper">Application identity and core DXCP summary stay first so this route reads as an object page, not a dashboard.</p>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <NewStateBlock eyebrow="Loading" title="Loading application summary">
+                  DXCP is loading the application record so summary, running state, and recent deployment state stay tied to real application data.
+                </NewStateBlock>
+              ) : (
+                <dl className="new-object-summary-grid" aria-label="Application summary">
+                  <dt>Application owner</dt>
+                  <dd>{viewModel?.summary.owner}</dd>
+                  <dt>Deployment group</dt>
+                  <dd>{viewModel?.summary.deploymentGroup}</dd>
+                  <dt>Environment</dt>
+                  <dd>{viewModel?.summary.environment}</dd>
+                  <dt>Application summary</dt>
+                  <dd>{viewModel?.summary.summary}</dd>
+                </dl>
+              )}
+            </SectionCard>
+
+            <SectionCard className="new-application-card">
             <div className="new-section-header">
               <div>
                 <h3>Current running summary</h3>
-                <p className="helper">Current state stays first so this page reads as the application record, not a browse surface.</p>
+                <p className="helper">Current running state stays primary and remains tied to the application record rather than a deployment feed.</p>
               </div>
               <div className="links">
                 <Link className="link secondary" to={newDeployRoute}>
                   Open deploy workflow
                 </Link>
-                <Link className="link" to="/new/deployments/9831">
-                  Open current deployment detail
-                </Link>
+                {viewModel?.currentRunning?.deploymentId ? (
+                  <Link
+                    className="link"
+                    to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
+                    state={{ returnTo: deploymentReturnTo }}
+                  >
+                    Open current deployment detail
+                  </Link>
+                ) : null}
               </div>
             </div>
 
-            <dl className="new-object-summary-grid" aria-label="Application identity and current running summary">
-              <dt>Application owner</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.owner}</dd>
-              <dt>Deployment group</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.deploymentGroup}</dd>
-              <dt>Environment</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.environment}</dd>
-              <dt>Current version</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.currentVersion}</dd>
-              <dt>Current state</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.currentOutcome}</dd>
-              <dt>Running since</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.runningSince}</dd>
-            </dl>
+            {isLoading ? (
+              <NewStateBlock eyebrow="Loading" title="Loading current running state">
+                DXCP is loading running-state data for this application.
+              </NewStateBlock>
+            ) : viewModel?.currentRunning?.kind === 'ready' ? (
+              <>
+                <dl className="new-object-summary-grid" aria-label="Current running summary">
+                  <dt>Current version</dt>
+                  <dd>{viewModel.currentRunning.version}</dd>
+                  <dt>Environment</dt>
+                  <dd>{viewModel.currentRunning.environment}</dd>
+                  <dt>Recorded</dt>
+                  <dd>{viewModel.currentRunning.recordedLabel}</dd>
+                  <dt>Deployment</dt>
+                  <dd>
+                    {viewModel.currentRunning.deploymentId ? (
+                      <Link
+                        className="link"
+                        to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
+                        state={{ returnTo: deploymentReturnTo }}
+                      >
+                        Deployment {viewModel.currentRunning.deploymentId}
+                      </Link>
+                    ) : (
+                      'Not recorded'
+                    )}
+                  </dd>
+                </dl>
 
-            <div className="new-running-callout">
-              <strong>{APPLICATION_DETAIL_FIXTURE.lastChange}</strong>
-              <p className="helper">{APPLICATION_DETAIL_FIXTURE.activeDeployment.summary}</p>
-              <Link className="link" to="/new/deployments/9842">
-                Open deployment {APPLICATION_DETAIL_FIXTURE.activeDeployment.id}
-              </Link>
-            </div>
-          </SectionCard>
+                <div className="new-running-callout">
+                  <strong>
+                    DXCP currently records {viewModel.currentRunning.version} as the running version for {applicationName} in {viewModel.currentRunning.environment}.
+                  </strong>
+                  <p className="helper">{viewModel.currentRunning.note}</p>
+                </div>
+              </>
+            ) : (
+              <NewExplanation title="Running state is unavailable" tone="warning">
+                {viewModel?.currentRunning?.explanation}
+              </NewExplanation>
+            )}
+            </SectionCard>
 
-          <SectionCard className="new-application-card">
+            <SectionCard className="new-application-card">
             <div className="new-section-header">
               <div>
-                <h3>Recent state summary</h3>
-                <p className="helper">Recent deployment state stays compact and only exposes the latest signals needed for the next handoff.</p>
+                <h3>Recent deployment state</h3>
+                <p className="helper">Recent deployment state stays restrained and only exposes the latest signals needed for the next handoff.</p>
               </div>
             </div>
 
-            <NewExplanation title="Supporting reads are degraded" tone="warning">
-              Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.
-            </NewExplanation>
+            {isDegraded ? (
+              <NewExplanation title="Supporting reads are degraded" tone="warning">
+                Recent application context remains usable, but one or more supporting reads are stale or missing. Open deployment detail for the authoritative deployment record before acting on uncertain supporting state.
+              </NewExplanation>
+            ) : null}
 
-            <div className="new-activity-list">
-              {APPLICATION_DETAIL_FIXTURE.recentState.map((item) => (
-                <div key={item.label} className="new-activity-row">
-                  <span className={`badge ${toneForState(item.state)}`}>{item.state}</span>
-                  <div className="new-activity-copy">
-                    <strong>{item.label}</strong>
-                    <span>{item.detail}</span>
+            {isLoading ? (
+              <NewStateBlock eyebrow="Loading" title="Loading recent deployment state">
+                DXCP is loading recent deployment records for this application.
+              </NewStateBlock>
+            ) : viewModel?.recentDeploymentSummary?.kind === 'empty' ? (
+              <NewStateBlock eyebrow="Empty" title="No recent deployment state is available">
+                DXCP has not returned recent deployment records for this application in the selected environment yet.
+              </NewStateBlock>
+            ) : (
+              <div className="new-activity-list">
+                {viewModel?.recentDeploymentSummary?.items.map((item) => (
+                  <div key={item.key} className="new-activity-row">
+                    <span className={`badge ${item.tone}`}>{item.state}</span>
+                    <div className="new-activity-copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.detail}</span>
+                    </div>
+                    <span>{item.timestamp}</span>
+                    {item.deploymentId ? (
+                      <Link
+                        className="link"
+                        to={`/new/deployments/${item.deploymentId}`}
+                        state={{ returnTo: deploymentReturnTo }}
+                      >
+                        Open deployment {item.deploymentId}
+                      </Link>
+                    ) : (
+                      <span className="helper">No deployment detail available</span>
+                    )}
                   </div>
-                  <span>{item.timestamp}</span>
-                  {item.to ? (
-                    <Link className="link" to={item.to}>
-                      {item.linkLabel}
-                    </Link>
-                  ) : (
-                    <span className="helper">No detail handoff needed</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </SectionCard>
+                ))}
+              </div>
+            )}
+            </SectionCard>
+          </div>
+
+          <aside className="new-application-support">
+            <SectionCard className="new-application-card new-application-support-card">
+              <h3>Supporting context</h3>
+              <p className="helper">This stays compact so the object identity and current state remain primary.</p>
+
+              <dl className="new-application-support-grid">
+                <dt>Release path</dt>
+                <dd>Deploy through the current DXCP deploy workflow for this application.</dd>
+                <dt>Deployment group</dt>
+                <dd>{viewModel?.summary.deploymentGroup || 'Not assigned'}</dd>
+              </dl>
+
+              <div className="new-explanation-stack">
+                <NewExplanation title="Guardrail posture" tone={viewModel?.guardrails?.length ? 'neutral' : 'warning'}>
+                  {viewModel?.guardrails?.length
+                    ? `Guardrails remain visible on the application record so deploy limits and next steps stay understandable before you open the deploy workflow. ${viewModel.guardrails.join('. ')}.`
+                    : 'Guardrail context could not be fully resolved for this application on this route.'}
+                </NewExplanation>
+                <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
+                  {viewModel?.diagnosticsBoundary}
+                </NewExplanation>
+              </div>
+            </SectionCard>
+          </aside>
         </div>
-
-        <aside className="new-application-support">
-          <SectionCard className="new-application-card new-application-support-card">
-            <h3>Supporting context</h3>
-            <p className="helper">This stays compact so the object identity and current state remain primary.</p>
-
-            <dl className="new-application-support-grid">
-              <dt>Release path</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.support.releasePath}</dd>
-              <dt>Policy posture</dt>
-              <dd>{APPLICATION_DETAIL_FIXTURE.support.policyPosture}</dd>
-            </dl>
-
-            <div className="new-explanation-stack">
-              <NewExplanation title="Guardrail posture" tone="neutral">
-                Guardrails remain visible on the application record so deploy limits and next steps stay understandable before you open the deploy workflow.
-              </NewExplanation>
-              <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
-                {isPlatformAdmin
-                  ? 'Platform-admin diagnostics remain secondary to the normalized deployment record on this route.'
-                  : APPLICATION_DETAIL_FIXTURE.support.diagnostics}
-              </NewExplanation>
-            </div>
-          </SectionCard>
-        </aside>
-      </div>
+      ) : null}
     </div>
   )
 }
@@ -543,7 +670,7 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN', api })
   const { applicationName } = useParams()
 
   if (applicationName) {
-    return <ApplicationDetail role={role} />
+    return <ApplicationDetail role={role} api={api} />
   }
 
   return <ApplicationsChooser role={role} api={api} />
