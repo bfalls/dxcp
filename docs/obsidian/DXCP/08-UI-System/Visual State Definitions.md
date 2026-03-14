@@ -131,6 +131,8 @@ The [[Shared UI Patterns#3. Alert Rail Pattern|Alert Rail]] remains the canonica
 
 Severity should be distinguished by meaning first, then by emphasis.
 
+Per [[Sticky Shell and Alert Presentation Decision]], page-level and route-level conditions use a compact sticky global alert strip, while action-level and section-level conditions use local explanation blocks near the affected work.
+
 ### Informational
 
 Use for non-blocking context that helps interpretation.
@@ -196,7 +198,7 @@ Blocked means the user can understand the action and would reasonably expect to 
 
 Visual rule:
 - keep the action visible when expectation is high
-- pair the blocked condition with a clear explanation in the alert rail or local explanation block
+- pair the blocked condition with a clear explanation in the compact global alert strip or a local explanation block, depending on scope
 - preserve the action’s identity so the user understands what is being denied
 
 Blocked should feel denied with explanation, not merely inactive.

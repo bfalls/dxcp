@@ -515,7 +515,7 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
           <SectionCard className="new-insights-card">
             <div className="new-section-header">
               <div>
-                <h3>Summary strip</h3>
+                <h3>Delivery health</h3>
                 <p className="helper">Aggregate summaries stay few, plain-language, and subordinate to the rest of the operational story.</p>
               </div>
             </div>

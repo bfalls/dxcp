@@ -812,7 +812,7 @@ export async function runAllTests() {
     await view.findByText(
       'Recent state is current enough to orient the next action, but supporting evidence may lag. Open the deployment detail route for the authoritative record.'
     )
-    await view.findByText('Mutation disabled')
+    await view.findByText('Guardrail posture')
     await view.findByText('Permission-limited detail')
     await view.findByText('Supporting context')
   })
@@ -1113,7 +1113,7 @@ export async function runAllTests() {
 
     await view.findByRole('heading', { name: 'Insights' })
     await view.findByText('Recent delivery health and attention across DXCP')
-    await view.findByText('Summary strip')
+    await view.findByText('Delivery health')
     await view.findByText('Trend')
     await view.findByText('Breakdown')
     await view.findByText('Attention')

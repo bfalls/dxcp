@@ -192,8 +192,8 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
             </dl>
 
             <div className="new-explanation-stack">
-              <NewExplanation title="Mutation disabled" tone="warning">
-                DXCP can pause mutating actions for maintenance without hiding the deploy handoff or the current application record.
+              <NewExplanation title="Guardrail posture" tone="neutral">
+                Guardrails remain visible on the application record so deploy limits and next steps stay understandable before you open the deploy workflow.
               </NewExplanation>
               <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
                 {isPlatformAdmin

@@ -93,7 +93,7 @@ Adaptation must always preserve meaning before density.
 ### Stable rules
 - The shell remains bounded.
 - Wide monitors add margin and breathing room, not stretched content.
-- The alert rail, page header, and body remain vertically ordered in the same way.
+- The sticky shell, compact global alert strip when active, page header, and body remain vertically ordered in the same way.
 
 ### Adaptive rules
 - Interior spacing may tighten modestly at narrower widths.
@@ -137,7 +137,8 @@ Adaptation must always preserve meaning before density.
 ## 3. [[Component Families#3. Alert, guardrail, and blocked-state explanation family|Alert, guardrail, and blocked-state explanation family]]
 
 ### Stable rules
-- Page-level blocked, warning, and failure explanation stays in the alert rail.
+- Page-level blocked, warning, failure, and degraded-read explanation stays in the compact global alert strip.
+- Action-level, section-level, and record-level explanation stays local to the affected region.
 - A blocked condition remains visible even when the triggering action is compressed.
 - Guardrail explanation remains in DXCP language first.
 

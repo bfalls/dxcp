@@ -79,19 +79,21 @@ Example:
 
 Behavior:
 
-- Scrolls with page content
-- Not fixed
+- Sticky only when an active page-level or route-level condition exists
+- Scrolls with page content when no active global condition exists
+- Remains compact and directly under the fixed Top Navigation
 
 Purpose:
 
-Communicate temporary system messages without permanently consuming
-screen space.
+Communicate page-level or route-level conditions without forcing users to lose critical warning context while scrolling.
 
 Rules:
 
 - Appears only when needed
-- May contain validation errors or system warnings
-- Multiple alerts should stack vertically
+- Uses a compact sticky global strip for active page-level or route-level conditions per [[Sticky Shell and Alert Presentation Decision]]
+- Local action, field, or section issues stay in-page near the affected content
+- May contain validation errors or system warnings when they affect the page as a whole
+- Multiple global alerts should stack vertically
 - Alerts disappear when the condition is resolved
 
 ---
@@ -255,10 +257,10 @@ Navigation remains visible
 Top Navigation is always fixed
 ```
 
-Temporary messages do not consume permanent space
+Temporary messages stay compact and only persist when they change page meaning
 
 ```
-Alert Rail scrolls with page
+Alert Rail becomes a compact sticky global strip only for active page-level or route-level conditions
 ```
 
 Operational data is scrollable

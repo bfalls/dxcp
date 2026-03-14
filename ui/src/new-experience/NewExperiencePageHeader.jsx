@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
 
 function formatRoleLabel(role) {
-  if (role === 'PLATFORM_ADMIN') return 'Platform admin'
-  if (role === 'DELIVERY_OWNER') return 'Delivery owner'
-  if (role === 'OBSERVER') return 'Observer'
-  return 'Unknown role'
+  if (role === 'PLATFORM_ADMIN') return 'Platform admin view'
+  if (role === 'DELIVERY_OWNER') return 'Delivery owner view'
+  if (role === 'OBSERVER') return 'Observer view'
+  return 'Role unavailable'
 }
 
 function getActionStateTitle(state, label) {
@@ -43,9 +43,11 @@ export default function NewExperiencePageHeader({
   return (
     <header className="new-page-header">
       <div className="new-page-header-identity">
-        <h2>{title}</h2>
+        <h1 className="new-page-header-eyebrow">{title}</h1>
         <div className="new-page-object-identity">{objectIdentity}</div>
-        <div className="new-page-role-note">{formatRoleLabel(role)}</div>
+        <div className="new-page-meta-row">
+          <div className="new-page-role-note">{formatRoleLabel(role)}</div>
+        </div>
         <div className="new-page-state-summary" aria-label="State summary">
           {stateSummaryItems.map((item) => (
             <span key={item.label} className="new-page-state-item">
@@ -96,7 +98,7 @@ export default function NewExperiencePageHeader({
                 }`}
                 type="button"
                 onClick={primaryAction.onClick}
-                disabled={primaryActionState === 'disabled' || primaryAction.disabled}
+                disabled={primaryActionState === 'blocked' || primaryActionState === 'disabled' || primaryAction.disabled}
                 aria-disabled={primaryActionState === 'blocked' ? 'true' : undefined}
                 aria-describedby={actionNoteId}
                 title={primaryAction.description || ''}

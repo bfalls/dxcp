@@ -93,6 +93,8 @@ That means:
 
 The system-wide top navigation is a persistent product shell, not a page-specific workspace.
 
+Per [[Sticky Shell and Alert Presentation Decision]], it remains sticky so users never lose navigation, authenticated account actions, or route orientation while scrolling.
+
 It should contain:
 - product identity on the left
 - primary section navigation in the middle or left-center
@@ -190,31 +192,40 @@ Optional second line:
 
 ### Purpose
 
-Provide one consistent place for page-level conditions that affect understanding or action.
+Provide one consistent place for page-level conditions that affect understanding or action while preserving local explanation near the affected work.
 
 ### Placement
 
-Directly below the top navigation and above the page header.
+Directly below the sticky top navigation and above the page header.
 
 ### Used for
 
-- blocked actions
+Global alert strip:
+- route-level blocked posture
 - policy explanations that affect the page as a whole
-- read failures
-- refresh failures
-- warning states
-- high-importance informational notices
+- route unavailable or route-level permission limitation
+- page-level degraded-read, read failure, or refresh failure
+- warning states that change whole-page interpretation
+
+Local in-page explanation:
+- blocked actions tied to one action or section
+- field-group validation or save blockers
+- row-level or section-level degraded evidence
+- section-local diagnostics or artifact problems
 
 ### Rules
 
-- The Alert Rail is the only page-level condition surface.
-- Multiple alerts may stack vertically.
-- Field-specific issues stay inline and do not move into the rail unless they escalate to page-level impact.
+- Per [[Sticky Shell and Alert Presentation Decision]], the page-level rail is a compact sticky global alert strip when an active global condition exists.
+- Multiple global alerts may stack vertically.
+- Field-specific and section-specific issues stay inline and do not move into the rail unless they escalate to page-level impact.
+- Use the global strip when the condition changes how the user should interpret the whole page or route.
+- Use local explanation when the condition only matters near the affected action, section, field group, or record.
 - Alerts should explain:
   1. what happened
   2. why
   3. what to do next
 - Alerts should be short and operational, not verbose diagnostics.
+- The sticky strip must stay compact by default and must not become a permanent oversized card.
 
 ### Notes
 

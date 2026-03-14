@@ -267,12 +267,16 @@ export default function NewExperienceDeploymentsPage({ role = 'UNKNOWN', scenari
           </div>
         )}
 
-        <div className="new-deployments-footer">
-          <button className="button secondary" type="button">
-            Load older deployments
-          </button>
-          <span className="helper">Older history stays deliberate so recent activity remains the default browse posture.</span>
-        </div>
+        {activeScenario.rows.length > 0 ? (
+          <div className="new-deployments-footer">
+            <button className="button secondary" type="button">
+              Load older deployments
+            </button>
+            <span className="helper">
+              Older history stays deliberate so recent activity remains the default browse posture.
+            </span>
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   )
