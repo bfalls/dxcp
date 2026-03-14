@@ -29,6 +29,92 @@ const renderApp = (initialPath = '/services') =>
     </MemoryRouter>
   )
 
+const newExperienceServicesList = [
+  { service_name: 'payments-api', description: 'Checkout and payment authorization workflows.' },
+  { service_name: 'billing-worker', description: 'Invoice generation and billing reconciliation.' },
+  { service_name: 'web-frontend', description: 'Customer-facing web experience and edge routing updates.' }
+]
+
+const newExperienceDeliveryGroups = [
+  {
+    id: 'payments',
+    name: 'Payments Core',
+    owner: 'Payments Platform',
+    services: ['payments-api'],
+    allowed_recipes: ['default'],
+    guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+  },
+  {
+    id: 'billing',
+    name: 'Billing Core',
+    owner: 'Finance Platform',
+    services: ['billing-worker'],
+    allowed_recipes: ['default'],
+    guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+  },
+  {
+    id: 'web',
+    name: 'Web Experience',
+    owner: 'Web Platform',
+    services: ['web-frontend'],
+    allowed_recipes: ['default'],
+    guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
+  }
+]
+
+const newExperienceServiceStatuses = {
+  'payments-api': {
+    service: 'payments-api',
+    environment: 'sandbox',
+    hasDeployments: true,
+    latest: {
+      id: 'dep-payments',
+      state: 'IN_PROGRESS',
+      version: '1.33.0',
+      createdAt: '2025-01-03T00:00:00Z',
+      updatedAt: '2025-01-03T00:05:00Z'
+    }
+  },
+  'billing-worker': {
+    service: 'billing-worker',
+    environment: 'sandbox',
+    hasDeployments: true,
+    latest: {
+      id: 'dep-billing',
+      state: 'SUCCEEDED',
+      outcome: 'SUCCEEDED',
+      version: '4.2.0',
+      createdAt: '2025-01-02T00:00:00Z',
+      updatedAt: '2025-01-02T00:05:00Z'
+    }
+  },
+  'web-frontend': {
+    service: 'web-frontend',
+    environment: 'sandbox',
+    hasDeployments: true,
+    latest: {
+      id: 'dep-web',
+      state: 'FAILED',
+      outcome: 'FAILED',
+      version: '8.4.1',
+      createdAt: '2025-01-01T00:00:00Z',
+      updatedAt: '2025-01-01T00:05:00Z'
+    }
+  }
+}
+
+function buildNewExperienceFetch(role, overrides = {}) {
+  return buildFetchMock({
+    role,
+    deployAllowed: role !== 'OBSERVER',
+    rollbackAllowed: false,
+    servicesList: newExperienceServicesList,
+    deliveryGroups: newExperienceDeliveryGroups,
+    serviceStatusesByService: newExperienceServiceStatuses,
+    ...overrides
+  })
+}
+
 const buildFetchMock = ({
   role,
   deployAllowed,
@@ -51,7 +137,12 @@ const buildFetchMock = ({
   uiExposureArtifactRefDisplay,
   uiExposureExternalLinksDisplay,
   buildCommitUrl,
-  buildRunUrl
+  buildRunUrl,
+  serviceStatusesByService,
+  failServices,
+  failDeliveryGroups,
+  failEnvironments,
+  failServiceStatusFor
 }) => {
   let groups = deliveryGroups || [
     {
@@ -333,6 +424,9 @@ const buildFetchMock = ({
       return ok({ service_id: serviceId, environment_id: environmentId, recipe_id: body.recipe_id })
     }
     if (pathname === '/v1/environments') {
+      if (failEnvironments) {
+        return Promise.reject(new Error('Failed to load environments'))
+      }
       return ok(resolveEnvironments())
     }
     if (pathname === '/v1/admin/guardrails/validate') {
@@ -406,10 +500,25 @@ const buildFetchMock = ({
       return withStatus(204, null)
     }
     if (pathname === '/v1/services') {
+      if (failServices) {
+        return Promise.reject(new Error('Failed to load services'))
+      }
       return ok(serviceList)
     }
     if (pathname.startsWith('/v1/services/') && pathname.endsWith('/delivery-status')) {
+      const serviceName = pathname.split('/')[3]
+      if (Array.isArray(failServiceStatusFor) && failServiceStatusFor.includes(serviceName)) {
+        return Promise.reject(new Error(`Failed to load delivery status for ${serviceName}`))
+      }
       const environment = parsed.searchParams.get('environment') || 'sandbox'
+      const configuredStatus = serviceStatusesByService?.[serviceName]
+      if (configuredStatus) {
+        return ok({
+          ...configuredStatus,
+          service: configuredStatus.service || serviceName,
+          environment: configuredStatus.environment || environment
+        })
+      }
       const promotionCandidate =
         environment === 'sandbox'
           ? {
@@ -421,7 +530,7 @@ const buildFetchMock = ({
             }
           : { eligible: false, reason: 'PROMOTION_AT_HIGHEST_ENVIRONMENT' }
       return ok({
-        service: 'demo-service',
+        service: serviceName || 'demo-service',
         environment,
         hasDeployments: true,
         promotionCandidate,
@@ -438,6 +547,9 @@ const buildFetchMock = ({
       return ok(recipeList)
     }
     if (pathname === '/v1/delivery-groups') {
+      if (failDeliveryGroups) {
+        return Promise.reject(new Error('Failed to load delivery groups'))
+      }
       return ok(groups)
     }
     if (pathname === '/v1/deployments' && parsed.searchParams.get('service')) {
@@ -826,11 +938,7 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications')
 
     await view.findByText('Applications')
@@ -852,20 +960,17 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', { servicesList: [] })
 
-    const emptyView = renderApp('/new/applications?scenario=empty')
+    const emptyView = renderApp('/new/applications')
     await emptyView.findByText('No accessible applications are available')
     await emptyView.findByText(
-      'This role does not have an application record to open in the current proof data set yet. The chooser remains the correct entry route even when the available collection is empty.'
+      'No application access records are available for the current user. The chooser remains the correct entry route even when the available collection is empty.'
     )
     cleanup()
 
-    const degradedView = renderApp('/new/applications?scenario=degraded-read')
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', { failDeliveryGroups: true, failServiceStatusFor: ['web-frontend'] })
+    const degradedView = renderApp('/new/applications')
     await degradedView.findAllByText('Supporting reads are degraded')
     const degradedCopy = await degradedView.findAllByText(
       'Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.'
@@ -882,11 +987,7 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications?q=does-not-match')
 
     await view.findByText('No applications match this search')
@@ -905,17 +1006,31 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
-    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications')
 
     const chooserAction = await view.findAllByRole('link', { name: 'Open Application' })
     fireEvent.click(chooserAction[0])
     await view.findByText('Opened from Applications')
     assert.ok(view.getByRole('link', { name: 'Back to Applications' }))
+  })
+
+  await runTest('New experience applications route shows a truthful failure state when application access cannot load', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', { failServices: true })
+    const view = renderApp('/new/applications')
+
+    await view.findByText('Accessible applications could not be loaded')
+    await view.findAllByText('Applications could not be loaded')
+    await view.findAllByText('DXCP could not load accessible applications right now. Refresh to try again.')
+    assert.equal(view.getAllByRole('button', { name: 'Refresh' }).length, 2)
   })
 
   await runTest('New experience shows read-only application posture for observers', async () => {

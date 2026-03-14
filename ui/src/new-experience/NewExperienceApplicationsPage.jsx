@@ -1,45 +1,10 @@
-import React, { useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
-
-const APPLICATION_CHOOSER_FIXTURES = [
-  {
-    name: 'payments-api',
-    summary: 'Checkout and payment authorization workflows.',
-    owner: 'Payments Platform',
-    deploymentGroup: 'Payments Core',
-    environment: 'sandbox',
-    recentState: 'Active deployment',
-    recentStateTone: 'warn',
-    recentStateDetail: 'A sandbox deployment is still progressing. Open the application to inspect the current record.',
-    visibility: ['DELIVERY_OWNER', 'OBSERVER', 'PLATFORM_ADMIN']
-  },
-  {
-    name: 'billing-worker',
-    summary: 'Invoice generation and billing reconciliation.',
-    owner: 'Finance Platform',
-    deploymentGroup: 'Billing Core',
-    environment: 'staging',
-    recentState: 'Stable',
-    recentStateTone: 'info',
-    recentStateDetail: 'No active deployment is in progress. The application record stays ready for the next delivery decision.',
-    visibility: ['DELIVERY_OWNER', 'PLATFORM_ADMIN']
-  },
-  {
-    name: 'web-frontend',
-    summary: 'Customer-facing web experience and edge routing updates.',
-    owner: 'Web Platform',
-    deploymentGroup: 'Web Experience',
-    environment: 'production',
-    recentState: 'Needs review',
-    recentStateTone: 'neutral',
-    recentStateDetail: 'Recent deployment history is visible from the application record before the next change.',
-    visibility: ['DELIVERY_OWNER', 'OBSERVER', 'PLATFORM_ADMIN']
-  }
-]
+import { loadApplicationsChooserData } from './newExperienceApplicationsData.js'
 
 const APPLICATION_DETAIL_FIXTURE = {
   owner: 'Payments Platform',
@@ -86,37 +51,6 @@ const APPLICATION_DETAIL_FIXTURE = {
   }
 }
 
-const CHOOSER_SCENARIOS = {
-  default: {
-    accessibleApplicationNames: null,
-    stateSummaryLabel: 'Accessible applications',
-    stateSummaryValue: 'Browse available applications',
-    resultsSummary:
-      'Choose an application to continue in its object record. The collection stays restrained so the next step remains obvious.',
-    explanation: null
-  },
-  empty: {
-    accessibleApplicationNames: [],
-    stateSummaryLabel: 'Accessible applications',
-    stateSummaryValue: 'Empty',
-    resultsSummary:
-      'No applications are available to open from this role context yet. The chooser stays present so the route remains the primary entry point.',
-    explanation: null
-  },
-  'degraded-read': {
-    accessibleApplicationNames: null,
-    stateSummaryLabel: 'Accessible applications',
-    stateSummaryValue: 'Degraded read',
-    resultsSummary:
-      'Visible applications remain available to open, but freshness and supporting evidence may lag until application access reads recover.',
-    explanation: {
-      title: 'Supporting reads are degraded',
-      tone: 'warning',
-      body: 'Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.'
-    }
-  }
-}
-
 function toneForState(state) {
   if (state === 'Succeeded' || state === 'Stable') return 'info'
   if (state === 'Active') return 'warn'
@@ -133,17 +67,6 @@ function roleAccessLabel(role) {
 function roleSearchPlaceholder(role) {
   if (role === 'OBSERVER') return 'Search accessible applications'
   return 'Search applications'
-}
-
-function getVisibleApplications(role, scenario) {
-  const activeScenario = CHOOSER_SCENARIOS[scenario] || CHOOSER_SCENARIOS.default
-  const allowedNames = activeScenario.accessibleApplicationNames
-  return APPLICATION_CHOOSER_FIXTURES.filter((application) => {
-    const visibleByRole = application.visibility.includes(role) || application.visibility.includes('UNKNOWN')
-    if (!visibleByRole) return false
-    if (!allowedNames) return true
-    return allowedNames.includes(application.name)
-  })
 }
 
 function buildChooserReturnTo(location, visibleCount, searchTerm) {
@@ -199,15 +122,48 @@ function ApplicationChooserCard({ application, returnTo, isReadOnly }) {
   )
 }
 
-function ApplicationsChooser({ role }) {
+function ApplicationsChooser({ role, api }) {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const scenarioParam = searchParams.get('scenario') || 'default'
-  const scenario = CHOOSER_SCENARIOS[scenarioParam] ? scenarioParam : 'default'
   const searchTerm = searchParams.get('q') || ''
   const isReadOnly = role === 'OBSERVER'
-  const activeScenario = CHOOSER_SCENARIOS[scenario]
-  const visibleApplications = useMemo(() => getVisibleApplications(role, scenario), [role, scenario])
+  const [chooserState, setChooserState] = useState({
+    kind: 'loading',
+    applications: [],
+    degradedReasons: [],
+    errorMessage: ''
+  })
+
+  const refreshChooserData = useCallback(
+    async (options = {}) => {
+      setChooserState((current) => ({
+        kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
+        applications: current.applications || [],
+        degradedReasons: [],
+        errorMessage: ''
+      }))
+      const nextState = await loadApplicationsChooserData(api, options)
+      setChooserState(nextState)
+    },
+    [api]
+  )
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      setChooserState({ kind: 'loading', applications: [], degradedReasons: [], errorMessage: '' })
+      const nextState = await loadApplicationsChooserData(api)
+      if (active) {
+        setChooserState(nextState)
+      }
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [api])
+
+  const visibleApplications = useMemo(() => chooserState.applications || [], [chooserState.applications])
   const normalizedSearchTerm = searchTerm.trim().toLowerCase()
   const filteredApplications = useMemo(() => {
     if (!normalizedSearchTerm) return visibleApplications
@@ -225,22 +181,39 @@ function ApplicationsChooser({ role }) {
     })
   }, [normalizedSearchTerm, visibleApplications])
 
+  const isLoading = chooserState.kind === 'loading'
+  const isRefreshing = chooserState.kind === 'refreshing'
+  const isFailure = chooserState.kind === 'failure'
+  const isDegraded = chooserState.kind === 'degraded'
   const hasVisibleApplications = visibleApplications.length > 0
   const hasNoResults = hasVisibleApplications && filteredApplications.length === 0
   const chooserReturnTo = buildChooserReturnTo(location, filteredApplications.length, searchTerm)
   const alertRailItems = useMemo(
-    () =>
-      activeScenario.explanation
-        ? [
-            {
-              id: `applications-${scenario}-notice`,
-              tone: activeScenario.explanation.tone,
-              title: activeScenario.explanation.title,
-              body: activeScenario.explanation.body
-            }
-          ]
-        : [],
-    [activeScenario, scenario]
+    () => {
+      if (isFailure) {
+        return [
+          {
+            id: 'applications-load-failure',
+            tone: 'danger',
+            title: 'Applications could not be loaded',
+            body: chooserState.errorMessage || 'DXCP could not load accessible applications right now. Refresh to try again.'
+          }
+        ]
+      }
+      if (isDegraded) {
+        return [
+          {
+            id: 'applications-degraded-read',
+            tone: 'warning',
+            title: 'Supporting reads are degraded',
+            body:
+              'Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.'
+          }
+        ]
+      }
+      return []
+    },
+    [chooserState.errorMessage, isDegraded, isFailure]
   )
 
   useNewExperienceAlertRail(alertRailItems)
@@ -276,12 +249,25 @@ function ApplicationsChooser({ role }) {
         objectIdentity="Choose an application to continue in DXCP"
         role={role}
         stateSummaryItems={[
-          { label: activeScenario.stateSummaryLabel, value: activeScenario.stateSummaryValue },
+          {
+            label: 'Accessible applications',
+            value:
+              isLoading
+                ? 'Loading'
+                : isFailure
+                  ? 'Unavailable'
+                  : isDegraded
+                    ? 'Degraded read'
+                    : filteredApplications.length > 0
+                      ? 'Browse available applications'
+                      : 'Empty'
+          },
           { label: 'Visible now', value: `${filteredApplications.length}` },
           { label: 'Access posture', value: roleAccessLabel(role) }
         ]}
         primaryAction={{ label: 'Choose below', state: 'available', onClick: jumpToChooser }}
         secondaryActions={[
+          { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshChooserData({ bypassCache: true }), disabled: isRefreshing || isLoading },
           { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployment activity.' }
         ]}
         actionNote={
@@ -310,20 +296,43 @@ function ApplicationsChooser({ role }) {
               onChange={handleSearchChange}
               placeholder={roleSearchPlaceholder(role)}
               aria-label="Search applications"
+              disabled={isLoading || isFailure}
             />
           </label>
           <div className="new-deployments-results-summary" aria-live="polite">
-            {activeScenario.resultsSummary}
+            {isLoading
+              ? 'Loading accessible applications so the chooser can stay anchored to real application access.'
+              : isFailure
+                ? 'Application access could not be read. Refresh to try again, or continue in the legacy experience if needed.'
+                : isDegraded
+                  ? 'Visible applications remain available to open, but freshness and supporting evidence may lag until application access reads recover.'
+                  : 'Choose an application to continue in its object record. The collection stays restrained so the next step remains obvious.'}
           </div>
         </div>
 
-        {activeScenario.explanation ? (
-          <NewExplanation title={activeScenario.explanation.title} tone={activeScenario.explanation.tone}>
-            {activeScenario.explanation.body}
+        {isDegraded ? (
+          <NewExplanation title="Supporting reads are degraded" tone="warning">
+            Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.
           </NewExplanation>
         ) : null}
 
-        {!hasVisibleApplications ? (
+        {isLoading ? (
+          <NewStateBlock eyebrow="Loading" title="Loading accessible applications">
+            DXCP is loading the applications you can open from this route now.
+          </NewStateBlock>
+        ) : isFailure ? (
+          <NewStateBlock
+            eyebrow="Failure"
+            title="Accessible applications could not be loaded"
+            tone="danger"
+            actions={[
+              { label: 'Refresh', onClick: () => refreshChooserData({ bypassCache: true }) },
+              { label: 'Open Legacy', to: '/services', secondary: true }
+            ]}
+          >
+            {chooserState.errorMessage || 'DXCP could not load accessible applications right now. Refresh to try again.'}
+          </NewStateBlock>
+        ) : !hasVisibleApplications ? (
           <NewStateBlock
             eyebrow="Empty"
             title="No accessible applications are available"
@@ -332,7 +341,7 @@ function ApplicationsChooser({ role }) {
               { label: 'Open Legacy', to: '/services', secondary: true }
             ]}
           >
-            This role does not have an application record to open in the current proof data set yet. The chooser remains the correct entry route even when the available collection is empty.
+            No application access records are available for the current user. The chooser remains the correct entry route even when the available collection is empty.
           </NewStateBlock>
         ) : hasNoResults ? (
           <NewStateBlock
@@ -370,33 +379,6 @@ function ApplicationDetail({ role }) {
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
   const returnTo = location.state?.returnTo || null
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
-  const isKnownApplication = APPLICATION_CHOOSER_FIXTURES.some((application) => application.name === applicationName)
-
-  if (!isKnownApplication) {
-    return (
-      <>
-        <NewExperiencePageHeader
-          title="Application"
-          objectIdentity={applicationName}
-          role={role}
-          stateSummaryItems={[{ label: 'Preview state', value: 'Not available' }]}
-          primaryAction={{ label: 'Open Application', state: 'unavailable' }}
-          secondaryActions={[{ label: 'Open Applications', to: '/new/applications' }]}
-        />
-        <NewStateBlock
-          eyebrow="Unavailable route"
-          title="Application detail is not available for this route"
-          tone="danger"
-          actions={[
-            { label: 'Open Applications', to: '/new/applications' },
-            { label: 'Open Legacy', to: '/services', secondary: true }
-          ]}
-        >
-          Open an accessible application from the primary chooser route, or continue in the legacy experience while rollout remains opt-in.
-        </NewStateBlock>
-      </>
-    )
-  }
 
   const secondaryActions = [
     { label: 'Open Applications', to: '/new/applications', description: 'Return to the application chooser.' },
@@ -444,6 +426,12 @@ function ApplicationDetail({ role }) {
             </Link>
           </div>
         </SectionCard>
+      ) : null}
+
+      {applicationName !== 'payments-api' ? (
+        <NewExplanation title="Application detail stays preview-only on this route" tone="warning">
+          You reached the application object route from the real applications chooser. Real application-detail data wiring remains in a later slice, so the object route keeps its existing proof structure for now.
+        </NewExplanation>
       ) : null}
 
       <div className="new-application-layout">
@@ -551,12 +539,12 @@ function ApplicationDetail({ role }) {
   )
 }
 
-export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
+export default function NewExperienceApplicationsPage({ role = 'UNKNOWN', api }) {
   const { applicationName } = useParams()
 
   if (applicationName) {
     return <ApplicationDetail role={role} />
   }
 
-  return <ApplicationsChooser role={role} />
+  return <ApplicationsChooser role={role} api={api} />
 }

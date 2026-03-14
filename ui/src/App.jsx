@@ -4319,7 +4319,7 @@ export default function App() {
         {authReady && isAuthenticated && (
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications" replace />} />
-            <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} />} />
+            <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} api={api} />} />
             <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} />} />
             <Route
               path="/new/deployments/empty"
@@ -4337,7 +4337,7 @@ export default function App() {
             <Route path="/new/insights/:scenario" element={<NewExperienceInsightsPage role={derivedRole} />} />
             <Route
               path="/new/applications/:applicationName"
-              element={<NewExperienceApplicationsPage role={derivedRole} />}
+              element={<NewExperienceApplicationsPage role={derivedRole} api={api} />}
             />
             <Route
               path="/new/applications/:applicationName/deploy"
