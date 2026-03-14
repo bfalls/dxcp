@@ -16,6 +16,7 @@ __pycache__/
 **/*.tar.gz
 **/*.tgz
 ui/dist/
+ui/artifacts/
 docs/generated/
 docs/obsidian/*.zip
 docs/obsidian/**/.obsidian/
