@@ -1298,6 +1298,11 @@ body {
   border-color: rgba(227, 176, 75, 0.45);
 }
 
+.new-readiness-item.pending,
+.new-readiness-item.checking {
+  border-color: rgba(183, 179, 166, 0.3);
+}
+
 .new-supporting-list {
   margin: 0;
   padding-left: 18px;

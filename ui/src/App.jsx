@@ -4341,11 +4341,11 @@ export default function App() {
             />
             <Route
               path="/new/applications/:applicationName/deploy"
-              element={<NewExperienceDeployPage role={derivedRole} />}
+              element={<NewExperienceDeployPage role={derivedRole} api={api} />}
             />
             <Route
               path="/new/applications/:applicationName/deploy/:scenario"
-              element={<NewExperienceDeployPage role={derivedRole} />}
+              element={<NewExperienceDeployPage role={derivedRole} api={api} />}
             />
             <Route
               path="/new/deployments/:deploymentId"

@@ -1,124 +1,635 @@
-import React from 'react'
-import { Link, useParams } from 'react-router-dom'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
-
-const DEPLOY_FIXTURE = {
-  deploymentGroup: 'Payments Core',
-  strategy: 'Blue-Green',
-  version: 'v1.33.0',
-  changeSummary: 'Release payment retry fixes and sandbox verification updates.',
-  guardrails: [
-    'One active deployment at a time in each environment.',
-    'Ten deploys per day across the deployment group.',
-    'Rollbacks stay available but remain separately quota-limited.'
-  ],
-  strategies: ['Blue-Green', 'Rolling'],
-  readinessBase: [
-    'Application context is confirmed.',
-    'Environment is selected.',
-    'Deployment strategy is allowed for this deployment group.',
-    'Version is eligible for deploy.',
-    'Change summary is provided.'
-  ]
-}
-
-function getScenario(role, requestedScenario) {
-  if (role === 'OBSERVER' || requestedScenario === 'read-only') {
-    return {
-      key: 'read-only',
-      environment: 'sandbox',
-      primaryActionState: 'read-only',
-      headerNote: 'Observers can review deploy intent and readiness, but only delivery owners can deploy from this workflow.',
-      localTitle: 'Read-only workflow',
-      localTone: 'warning',
-      localExplanation:
-        'This workflow remains visible so you can understand deploy requirements, current policy, and the next handoff without being invited into a blocked mutation path.',
-      readiness: [
-        ...DEPLOY_FIXTURE.readinessBase.map((item) => ({ label: item, status: 'met' })),
-        { label: 'Mutation access is available for this workflow.', status: 'view-only' }
-      ]
-    }
-  }
-
-  if (requestedScenario === 'blocked') {
-    return {
-      key: 'blocked',
-      environment: 'sandbox',
-      primaryActionState: 'blocked',
-      headerNote: 'Deploy is blocked because sandbox already has an active deployment for Payments Core.',
-      localTitle: 'Deploy blocked by policy',
-      localTone: 'danger',
-      localExplanation:
-        'Sandbox already has an active deployment for Payments Core. Wait for that deployment to complete, or open it to inspect progress before starting another deploy.',
-      readiness: [
-        ...DEPLOY_FIXTURE.readinessBase.map((item) => ({ label: item, status: 'met' })),
-        { label: 'No active deployment is already running for sandbox.', status: 'blocked' }
-      ]
-    }
-  }
-
-  if (requestedScenario === 'permission-limited') {
-    return {
-      key: 'permission-limited',
-      environment: 'production',
-      primaryActionState: 'blocked',
-      headerNote: 'Deploy is permission-limited because production deploys require platform-admin approval on this route.',
-      localTitle: 'Permission-limited deploy',
-      localTone: 'warning',
-      localExplanation:
-        'This intent is visible so you can review the deploy plan, but production deploys from this workflow are limited to platform admins. Return to the application or hand off to an authorized operator.',
-      readiness: [
-        ...DEPLOY_FIXTURE.readinessBase.map((item) => ({ label: item, status: 'met' })),
-        { label: 'Your role is allowed to deploy to production.', status: 'blocked' }
-      ]
-    }
-  }
-
-  return {
-    key: 'enabled',
-    environment: 'sandbox',
-    primaryActionState: 'available',
-    headerNote: 'Deploy stays in the page header so the primary action remains stable while you review readiness below.',
-    localTitle: 'Ready to deploy',
-    localTone: 'neutral',
-    localExplanation:
-      'DXCP is ready to create a deployment record with this intent. Review the readiness conditions and supporting guardrails, then deploy when you are satisfied with the plan.',
-    readiness: [
-      ...DEPLOY_FIXTURE.readinessBase.map((item) => ({ label: item, status: 'met' })),
-      { label: 'No active deployment is already running for sandbox.', status: 'met' }
-    ]
-  }
-}
+import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import {
+  loadDeployBaseData,
+  loadDeployEnvironmentContext,
+  validateDeployIntent
+} from './newExperienceDeployData.js'
 
 function readinessLabel(status) {
   if (status === 'blocked') return 'Blocked'
   if (status === 'view-only') return 'Read-only'
+  if (status === 'pending') return 'Needs input'
+  if (status === 'checking') return 'Checking'
   return 'Ready'
 }
 
 function readinessClass(status) {
   if (status === 'blocked') return 'new-readiness-item blocked'
   if (status === 'view-only') return 'new-readiness-item view-only'
+  if (status === 'pending') return 'new-readiness-item pending'
+  if (status === 'checking') return 'new-readiness-item checking'
   return 'new-readiness-item ready'
 }
 
-export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
-  const { applicationName = 'payments-api', scenario } = useParams()
-  const activeScenario = getScenario(role, scenario)
+function buildReturnTo(location, applicationName) {
+  return location.state?.returnTo || {
+    kind: 'application',
+    to: `/new/applications/${applicationName}`,
+    label: 'Back to Application',
+    scopeSummary: 'Return to the application record without losing application-level context.'
+  }
+}
+
+function mapValidationBlock(result, context, applicationName, selectedEnvironmentLabel) {
+  const groupName = context?.deliveryGroupName || 'this Deployment Group'
+  const activeDeploymentId = context?.activeDeployment?.id || ''
+  const activeDeploymentEnvironment = context?.activeDeployment?.environment || selectedEnvironmentLabel
+  const defaultActions = [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+
+  switch (result?.code) {
+    case 'CONCURRENCY_LIMIT_REACHED':
+    case 'DEPLOYMENT_LOCKED':
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: activeDeploymentId
+          ? `DXCP already has Deployment ${activeDeploymentId} in progress for ${activeDeploymentEnvironment}. Wait for that deployment to finish, or open it before starting another deploy.`
+          : `DXCP already has an active deployment in progress for ${activeDeploymentEnvironment}. Wait for that deployment to finish before starting another deploy.`,
+        actions: activeDeploymentId
+          ? [
+              { label: 'Open Active Deployment', to: `/new/deployments/${activeDeploymentId}` },
+              { label: 'Open Application', to: `/new/applications/${applicationName}`, secondary: true }
+            ]
+          : defaultActions,
+        blockedReadinessLabel: `No active deployment is already running for ${activeDeploymentEnvironment}.`
+      }
+    case 'QUOTA_EXCEEDED':
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: `DXCP has already reached the daily deploy quota for ${groupName}. Review recent deployments or wait for quota to reset before deploying again.`,
+        actions: [
+          { label: 'Open Deployments', to: '/new/deployments' },
+          { label: 'Open Application', to: `/new/applications/${applicationName}`, secondary: true }
+        ],
+        blockedReadinessLabel: 'Deployments remain within the daily deploy quota.'
+      }
+    case 'ENVIRONMENT_NOT_ALLOWED':
+      return {
+        title: 'Permission-limited deploy',
+        tone: 'warning',
+        body: `Your access does not allow deploys for ${selectedEnvironmentLabel} from this workflow. Review the deploy plan here, then hand off to an authorized operator if deployment still needs to proceed.`,
+        actions: defaultActions,
+        blockedReadinessLabel: `Your access allows deploys for ${selectedEnvironmentLabel}.`
+      }
+    case 'RECIPE_NOT_ALLOWED':
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: `The selected Deployment Strategy is not allowed for ${groupName}. Choose an allowed strategy before you deploy.`,
+        actions: defaultActions,
+        blockedReadinessLabel: 'The selected Deployment Strategy is allowed for this Deployment Group.'
+      }
+    case 'RECIPE_INCOMPATIBLE':
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'The selected Deployment Strategy is not compatible with this Application. Choose a different strategy before you deploy.',
+        actions: defaultActions,
+        blockedReadinessLabel: 'The selected Deployment Strategy is compatible with this Application.'
+      }
+    case 'RECIPE_DEPRECATED':
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'The selected Deployment Strategy is deprecated and cannot be used for new deployments. Choose a current strategy before you deploy.',
+        actions: defaultActions,
+        blockedReadinessLabel: 'The selected Deployment Strategy is current and available for new deployments.'
+      }
+    default:
+      return {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: result?.message || 'DXCP could not validate this deploy intent.',
+        actions: defaultActions,
+        blockedReadinessLabel:
+          result?.code === 'VERSION_NOT_FOUND'
+            ? 'The selected version is registered and deployable.'
+            : result?.code === 'INVALID_VERSION'
+              ? 'The selected version is in a deployable format.'
+              : result?.code === 'SERVICE_NOT_IN_DELIVERY_GROUP'
+                ? 'Deployment Group context is resolved for this Application.'
+                : result?.code === 'SERVICE_NOT_ALLOWLISTED'
+                  ? 'This Application remains deployable from this route.'
+                  : result?.code === 'MUTATIONS_DISABLED'
+                    ? 'Mutations are available for this workflow.'
+                    : result?.code === 'RATE_LIMITED'
+                      ? 'DXCP is currently accepting deploy requests for this workflow.'
+                      : 'DXCP has confirmed that guardrails allow this deploy now.'
+      }
+  }
+}
+
+function deriveDeployPosture({
+  role,
+  base,
+  selectedEnvironment,
+  selectedStrategy,
+  version,
+  changeSummary,
+  validationState,
+  environmentContext,
+  applicationName,
+  submitting
+}) {
+  const selectedEnvironmentLabel = selectedEnvironment?.label || selectedEnvironment?.name || 'the selected environment'
+  const selectedStrategyName = selectedStrategy?.name || 'the selected Deployment Strategy'
+
+  if (role === 'OBSERVER') {
+    return {
+      primaryActionState: 'read-only',
+      headerNote: 'Observers can review deploy intent and readiness, but deploy remains read-only on this workflow.',
+      local: {
+        title: 'Read-only workflow',
+        tone: 'warning',
+        body: 'This workflow remains visible so you can understand deploy requirements, current policy, and the next handoff without being invited into a blocked mutation path.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'Mutation access is available for this workflow.'
+    }
+  }
+
+  if (base?.mutationsDisabled === true) {
+    return {
+      primaryActionState: 'read-only',
+      headerNote: 'DXCP is currently in read-only mode. Deploy intent remains visible here, but deploy cannot proceed until mutations are re-enabled.',
+      local: {
+        title: 'Read-only workflow',
+        tone: 'warning',
+        body: 'DXCP is currently in read-only mode. You can still review deploy intent, readiness, and guardrails here without starting a failed mutation.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'Mutations are available for this workflow.'
+    }
+  }
+
+  if (base?.allowedActions?.actions?.deploy !== true) {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: 'Deploy is permission-limited for this Application on this route.',
+      local: {
+        title: 'Permission-limited deploy',
+        tone: 'warning',
+        body: `Your access does not include Deploy for ${applicationName}. You can review deploy intent and readiness here, then hand off to an authorized operator if deployment still needs to proceed.`,
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: `Your access allows Deploy for ${applicationName}.`
+    }
+  }
+
+  if (!base?.deliveryGroup?.id) {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: 'Deploy is blocked because Deployment Group context is missing on this route.',
+      local: {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'DXCP could not resolve Deployment Group context for this Application. Open the Application record while policy context is repaired.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'Deployment Group context is resolved for this Application.'
+    }
+  }
+
+  if (!selectedEnvironment?.name) {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: 'Deploy is blocked until DXCP can resolve an environment for this Application.',
+      local: {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'DXCP could not resolve environment context for this Application. Deploy intent remains visible, but deploy requires environment context first.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'Environment context is resolved for this workflow.'
+    }
+  }
+
+  if (!selectedStrategy?.id) {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'Choose an allowed Deployment Strategy before DXCP can validate this deploy intent.',
+      local: {
+        title: 'Complete deploy intent',
+        tone: 'warning',
+        body: 'Select the deploy target, choose a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
+        actions: []
+      },
+      blockedReadinessLabel: ''
+    }
+  }
+
+  if (selectedStrategy?.status === 'deprecated') {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: `Deploy is blocked because ${selectedStrategyName} is deprecated.`,
+      local: {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'The selected Deployment Strategy is deprecated and cannot be used for new deployments. Choose a current strategy before you deploy.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'The selected Deployment Strategy is current and available for new deployments.'
+    }
+  }
+
+  if (!version || !changeSummary.trim()) {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'Deploy becomes available after all required deploy intent inputs are complete and validated.',
+      local: {
+        title: 'Complete deploy intent',
+        tone: 'warning',
+        body: 'Select the deploy target, choose a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
+        actions: []
+      },
+      blockedReadinessLabel: ''
+    }
+  }
+
+  if (validationState.kind === 'checking') {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'DXCP is validating deploy readiness against current policy and guardrails.',
+      local: {
+        title: 'Checking readiness',
+        tone: 'warning',
+        body: 'DXCP is checking policy and readiness for this exact deploy intent before enabling Deploy.',
+        actions: []
+      },
+      blockedReadinessLabel: 'DXCP has confirmed that guardrails allow this deploy now.'
+    }
+  }
+
+  if (validationState.kind === 'blocked') {
+    const mappedBlock = mapValidationBlock(validationState.result, {
+      deliveryGroupName: base?.deliveryGroup?.name || 'this Deployment Group',
+      activeDeployment: environmentContext?.activeDeployment
+    }, applicationName, selectedEnvironmentLabel)
+    return {
+      primaryActionState: 'blocked',
+      headerNote: mappedBlock.body,
+      local: mappedBlock,
+      blockedReadinessLabel: mappedBlock.blockedReadinessLabel
+    }
+  }
+
+  if (validationState.kind === 'error') {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'Readiness could not be fully refreshed right now. Review the visible deploy intent and retry validation.',
+      local: {
+        title: 'Readiness could not be refreshed',
+        tone: 'warning',
+        body: validationState.errorMessage || 'DXCP could not validate this deploy intent right now.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'DXCP has confirmed that guardrails allow this deploy now.'
+    }
+  }
+
+  return {
+    primaryActionState: submitting ? 'disabled' : 'available',
+    headerNote: 'Deploy stays in the page header so the primary action remains stable while you review readiness below.',
+    local: {
+      title: 'Ready to deploy',
+      tone: 'neutral',
+      body: 'DXCP has validated this deploy intent against current policy and readiness conditions. Review the plan, then deploy when you are satisfied with the change.',
+      actions: []
+    },
+    blockedReadinessLabel: 'DXCP has confirmed that guardrails allow this deploy now.'
+  }
+}
+
+function buildReadinessItems({ base, selectedEnvironment, selectedStrategy, version, changeSummary, posture, validationState }) {
+  const items = [
+    {
+      label: 'Application context is confirmed.',
+      status: base?.service?.name ? 'met' : 'blocked'
+    },
+    {
+      label: 'Environment is selected.',
+      status: selectedEnvironment?.name ? 'met' : 'blocked'
+    },
+    {
+      label: 'Deployment Strategy is allowed for this Deployment Group.',
+      status: !selectedStrategy?.id ? 'pending' : selectedStrategy.status === 'deprecated' ? 'blocked' : 'met'
+    },
+    {
+      label: 'Version is registered and deployable.',
+      status:
+        !version
+          ? 'pending'
+          : posture.blockedReadinessLabel === 'The selected version is registered and deployable.' && posture.primaryActionState === 'blocked'
+            ? 'blocked'
+            : 'met'
+    },
+    {
+      label: 'Change summary is provided.',
+      status: changeSummary.trim() ? 'met' : 'pending'
+    }
+  ]
+
+  if (posture.blockedReadinessLabel) {
+    items.push({
+      label: posture.blockedReadinessLabel,
+      status:
+        posture.primaryActionState === 'read-only'
+          ? 'view-only'
+          : posture.primaryActionState === 'blocked'
+            ? 'blocked'
+            : validationState.kind === 'checking'
+              ? 'checking'
+              : validationState.kind === 'ready'
+                ? 'met'
+                : 'pending'
+    })
+  }
+
+  return items
+}
+
+function combineDegradedReasons(baseState, environmentState) {
+  return [...(baseState.degradedReasons || []), ...(environmentState.degradedReasons || [])].filter(Boolean)
+}
+
+export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
+  const { applicationName = 'payments-api' } = useParams()
+  const location = useLocation()
+  const returnTo = buildReturnTo(location, applicationName)
+  const [baseState, setBaseState] = useState({
+    kind: 'loading',
+    base: null,
+    degradedReasons: [],
+    errorMessage: ''
+  })
+  const [environmentName, setEnvironmentName] = useState('')
+  const [strategyId, setStrategyId] = useState('')
+  const [version, setVersion] = useState('')
+  const [changeSummary, setChangeSummary] = useState('')
+  const [environmentState, setEnvironmentState] = useState({
+    kind: 'idle',
+    context: { activeDeployment: null, policySummary: null, deliveryStatus: null },
+    degradedReasons: [],
+    errorMessage: ''
+  })
+  const [validationState, setValidationState] = useState({
+    kind: 'idle',
+    result: null,
+    errorMessage: '',
+    diagnostics: null
+  })
+  const [submitState, setSubmitState] = useState({
+    kind: 'idle',
+    deploymentId: '',
+    errorMessage: ''
+  })
+
+  const refreshBase = useCallback(
+    async (options = {}) => {
+      setBaseState((current) => ({
+        kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
+        base: current.base,
+        degradedReasons: [],
+        errorMessage: ''
+      }))
+      const nextState = await loadDeployBaseData(api, applicationName, options)
+      setBaseState(nextState)
+    },
+    [api, applicationName]
+  )
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      const nextState = await loadDeployBaseData(api, applicationName)
+      if (active) {
+        setBaseState(nextState)
+      }
+    }
+    load()
+    return () => {
+      active = false
+    }
+  }, [api, applicationName])
+
+  useEffect(() => {
+    const base = baseState.base
+    if (!base) return
+    if (!environmentName && base.defaultEnvironmentName) setEnvironmentName(base.defaultEnvironmentName)
+    if (!strategyId && base.defaultStrategyId) setStrategyId(base.defaultStrategyId)
+    if (!version && base.defaultVersion) setVersion(base.defaultVersion)
+  }, [baseState.base, environmentName, strategyId, version])
+
+  useEffect(() => {
+    if (!baseState.base || !environmentName) {
+      setEnvironmentState({
+        kind: 'idle',
+        context: { activeDeployment: null, policySummary: null, deliveryStatus: null },
+        degradedReasons: [],
+        errorMessage: ''
+      })
+      return
+    }
+    let active = true
+    setEnvironmentState((current) => ({
+      kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
+      context: current.context,
+      degradedReasons: [],
+      errorMessage: ''
+    }))
+    loadDeployEnvironmentContext(api, applicationName, environmentName, strategyId).then((nextState) => {
+      if (active) setEnvironmentState(nextState)
+    })
+    return () => {
+      active = false
+    }
+  }, [api, applicationName, baseState.base, environmentName, strategyId])
+
+  useEffect(() => {
+    const base = baseState.base
+    const selectedStrategy = base?.allowedStrategies?.find((item) => item.id === strategyId) || null
+    if (
+      !base ||
+      role === 'OBSERVER' ||
+      base.mutationsDisabled === true ||
+      base.allowedActions?.actions?.deploy !== true ||
+      !environmentName ||
+      !strategyId ||
+      !version ||
+      !changeSummary.trim() ||
+      selectedStrategy?.status === 'deprecated'
+    ) {
+      setValidationState({ kind: 'idle', result: null, errorMessage: '', diagnostics: null })
+      return
+    }
+
+    let active = true
+    setValidationState((current) => ({
+      kind: 'checking',
+      result: current.result,
+      errorMessage: '',
+      diagnostics: null
+    }))
+    const timeoutId = window.setTimeout(() => {
+      validateDeployIntent(api, {
+        service: applicationName,
+        environment: environmentName,
+        recipeId: strategyId,
+        version,
+        changeSummary: changeSummary.trim()
+      }).then((nextState) => {
+        if (active) setValidationState(nextState)
+      })
+    }, 150)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [api, applicationName, baseState.base, changeSummary, environmentName, role, strategyId, version])
+
+  const base = baseState.base
+  const selectedEnvironment = useMemo(
+    () => base?.environments?.find((item) => item.name === environmentName) || null,
+    [base?.environments, environmentName]
+  )
+  const selectedStrategy = useMemo(
+    () => base?.allowedStrategies?.find((item) => item.id === strategyId) || null,
+    [base?.allowedStrategies, strategyId]
+  )
+  const posture = useMemo(
+    () =>
+      deriveDeployPosture({
+        role,
+        base,
+        selectedEnvironment,
+        selectedStrategy,
+        version,
+        changeSummary,
+        validationState,
+        environmentContext: environmentState.context,
+        applicationName,
+        submitting: submitState.kind === 'submitting'
+      }),
+    [applicationName, base, changeSummary, environmentState.context, role, selectedEnvironment, selectedStrategy, submitState.kind, validationState, version]
+  )
+  const readinessItems = useMemo(
+    () =>
+      buildReadinessItems({
+        base,
+        selectedEnvironment,
+        selectedStrategy,
+        version,
+        changeSummary,
+        posture,
+        validationState
+      }),
+    [base, changeSummary, posture, selectedEnvironment, selectedStrategy, validationState, version]
+  )
+  const degradedReasons = combineDegradedReasons(baseState, environmentState)
+
+  const handleDeploy = async () => {
+    if (posture.primaryActionState !== 'available') return
+    setSubmitState({ kind: 'submitting', deploymentId: '', errorMessage: '' })
+    const result = await api.post('/deployments', {
+      service: applicationName,
+      environment: environmentName,
+      version,
+      changeSummary: changeSummary.trim(),
+      recipeId: strategyId
+    })
+    if (result && result.code) {
+      setSubmitState({
+        kind: 'error',
+        deploymentId: '',
+        errorMessage: result.message || 'DXCP could not create the Deployment record.'
+      })
+      return
+    }
+    setSubmitState({
+      kind: 'success',
+      deploymentId: result?.id || '',
+      errorMessage: ''
+    })
+  }
 
   const secondaryActions = [
     {
-      label: 'Open Application',
-      to: `/new/applications/${applicationName}`,
+      label: returnTo.label || 'Back to Application',
+      to: returnTo.to || `/new/applications/${applicationName}`,
       description: 'Return to the application record without leaving the new experience.'
     },
     {
-      label: 'Open Legacy Deploy',
-      to: '/deploy',
-      description: 'Use the current deploy workflow in the legacy experience during rollout.'
+      label: baseState.kind === 'refreshing' ? 'Refreshing...' : 'Refresh',
+      onClick: () => refreshBase({ bypassCache: true }),
+      disabled: baseState.kind === 'loading' || baseState.kind === 'refreshing',
+      description: 'Refresh deploy inputs and supporting policy context.'
     }
+  ]
+
+  if (baseState.kind === 'failure') {
+    return (
+      <div className="new-deploy-page">
+        <NewExperiencePageHeader
+          title="Deploy Application"
+          objectIdentity={`Application: ${applicationName}`}
+          role={role}
+          stateSummaryItems={[{ label: 'Workflow state', value: 'Unavailable' }]}
+          primaryAction={{ label: 'Deploy', state: 'unavailable', description: 'Deploy is unavailable on this route.' }}
+          secondaryActions={secondaryActions}
+          actionNote="Deploy is unavailable until DXCP can load the deploy workflow."
+        />
+        <NewStateBlock
+          eyebrow="Failure"
+          title="Deploy workflow could not be loaded"
+          tone="danger"
+          actions={[
+            { label: 'Refresh', onClick: () => refreshBase({ bypassCache: true }) },
+            { label: 'Open Application', to: `/new/applications/${applicationName}`, secondary: true }
+          ]}
+        >
+          {baseState.errorMessage || 'DXCP could not load this deploy workflow right now. Refresh to try again.'}
+        </NewStateBlock>
+      </div>
+    )
+  }
+
+  if (baseState.kind === 'unavailable') {
+    return (
+      <div className="new-deploy-page">
+        <NewExperiencePageHeader
+          title="Deploy Application"
+          objectIdentity={`Application: ${applicationName}`}
+          role={role}
+          stateSummaryItems={[{ label: 'Workflow state', value: 'Unavailable' }]}
+          primaryAction={{ label: 'Deploy', state: 'unavailable', description: 'Deploy is unavailable on this route.' }}
+          secondaryActions={secondaryActions}
+          actionNote="This Application is not available from the accessible DXCP application set on this route."
+        />
+        <NewStateBlock
+          eyebrow="Unavailable route"
+          title="Deploy workflow is not available on this route"
+          tone="danger"
+          actions={[
+            { label: 'Open Application', to: `/new/applications/${applicationName}` },
+            { label: 'Open Legacy', to: '/services', secondary: true }
+          ]}
+        >
+          {baseState.errorMessage || 'This Application is not available from the accessible DXCP application set on this route.'}
+        </NewStateBlock>
+      </div>
+    )
+  }
+
+  const stateSummaryItems = [
+    { label: 'Environment', value: selectedEnvironment?.label || 'Not selected' },
+    { label: 'Deployment Group', value: base?.deliveryGroup?.name || 'Not assigned' },
+    { label: 'Deployment Strategy', value: selectedStrategy?.name || 'Choose a Deployment Strategy' }
   ]
 
   return (
@@ -127,19 +638,30 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
         title="Deploy Application"
         objectIdentity={`Application: ${applicationName}`}
         role={role}
-        stateSummaryItems={[
-          { label: 'Environment', value: activeScenario.environment },
-          { label: 'Deployment group', value: DEPLOY_FIXTURE.deploymentGroup },
-          { label: 'Strategy', value: DEPLOY_FIXTURE.strategy }
-        ]}
+        stateSummaryItems={stateSummaryItems}
         primaryAction={{
-          label: 'Deploy',
-          state: activeScenario.primaryActionState,
-          description: activeScenario.headerNote
+          label: submitState.kind === 'submitting' ? 'Deploying...' : 'Deploy',
+          state: posture.primaryActionState,
+          onClick: posture.primaryActionState === 'available' ? handleDeploy : undefined,
+          description: posture.headerNote
         }}
         secondaryActions={secondaryActions}
-        actionNote={activeScenario.headerNote}
+        actionNote={posture.headerNote}
       />
+
+      {returnTo?.kind === 'application' ? (
+        <SectionCard className="new-detail-context-card">
+          <div className="new-detail-context-row">
+            <div>
+              <strong>Opened from Application</strong>
+              <p className="helper">{returnTo.scopeSummary || 'Return to the application record without losing application-level context.'}</p>
+            </div>
+            <Link className="link" to={returnTo.to || `/new/applications/${applicationName}`}>
+              {returnTo.label || 'Back to Application'}
+            </Link>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <div className="new-deploy-layout">
         <SectionCard className="new-deploy-intent-card">
@@ -148,89 +670,136 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
               <h3>Intent entry</h3>
               <p className="helper">Define the deployment intent in DXCP product language before any deploy is attempted.</p>
             </div>
-            <Link className="link secondary" to={`/new/applications/${applicationName}`}>
-              Back to Application
+            <Link className="link secondary" to={returnTo.to || `/new/applications/${applicationName}`}>
+              {returnTo.label || 'Back to Application'}
             </Link>
           </div>
 
-          <div className="new-intent-entry-grid">
-            <label className="new-field">
-              <span>Application</span>
-              <input defaultValue={applicationName} readOnly />
-            </label>
-            <label className="new-field">
-              <span>Environment</span>
-              <select defaultValue={activeScenario.environment} disabled={activeScenario.key === 'read-only'}>
-                <option value="sandbox">sandbox</option>
-                <option value="production">production</option>
-              </select>
-            </label>
-            <label className="new-field">
-              <span>Deployment strategy</span>
-              <select defaultValue={DEPLOY_FIXTURE.strategy} disabled={activeScenario.key === 'read-only'}>
-                {DEPLOY_FIXTURE.strategies.map((strategy) => (
-                  <option key={strategy} value={strategy}>
-                    {strategy}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="new-field">
-              <span>Version</span>
-              <input defaultValue={DEPLOY_FIXTURE.version} readOnly={activeScenario.key === 'read-only'} />
-            </label>
-            <label className="new-field new-field-full">
-              <span>Change summary</span>
-              <textarea
-                defaultValue={DEPLOY_FIXTURE.changeSummary}
-                readOnly={activeScenario.key === 'read-only'}
-                rows={4}
-              />
-            </label>
-          </div>
-
-          <div className="new-deploy-action-review">
-            <NewExplanation
-              title={activeScenario.localTitle}
-              tone={activeScenario.localTone}
-              actions={
-                activeScenario.key === 'blocked'
-                  ? [
-                      { label: 'Open Active Deployment', to: '/new/deployments/9842' },
-                      { label: 'Open Legacy Deploy', to: '/deploy', secondary: true }
-                    ]
-                  : activeScenario.key === 'permission-limited'
-                    ? [
-                        { label: 'Open Application', to: `/new/applications/${applicationName}` },
-                        { label: 'Back to Legacy', to: '/services', secondary: true }
-                      ]
-                    : activeScenario.key === 'read-only'
-                      ? [
-                          { label: 'Open Application', to: `/new/applications/${applicationName}` },
-                          { label: 'Open Legacy Deploy', to: '/deploy', secondary: true }
-                        ]
-                      : []
-              }
-            >
-              {activeScenario.localExplanation}
-            </NewExplanation>
-          </div>
-
-          <div className="new-section-header">
-            <div>
-              <h3>Readiness review</h3>
-              <p className="helper">Required readiness conditions stay visible before deploy so DXCP never relies on a generic failure after submit.</p>
-            </div>
-          </div>
-
-          <div className="new-readiness-list" aria-label="Deploy readiness conditions">
-            {activeScenario.readiness.map((item) => (
-              <div key={item.label} className={readinessClass(item.status)}>
-                <strong>{item.label}</strong>
-                <span>{readinessLabel(item.status)}</span>
+          {baseState.kind === 'loading' ? (
+            <NewStateBlock eyebrow="Loading" title="Loading deploy intent">
+              DXCP is loading deployable targets, Deployment Strategy options, and current policy context for this Application.
+            </NewStateBlock>
+          ) : (
+            <>
+              <div className="new-intent-entry-grid">
+                <label className="new-field" htmlFor="new-deploy-application">
+                  <span>Application</span>
+                  <input id="new-deploy-application" value={applicationName} readOnly />
+                </label>
+                <label className="new-field" htmlFor="new-deploy-environment">
+                  <span>Environment</span>
+                  <select
+                    id="new-deploy-environment"
+                    value={environmentName}
+                    onChange={(event) => setEnvironmentName(event.target.value)}
+                    disabled={posture.primaryActionState === 'read-only'}
+                  >
+                    <option value="">Choose an environment</option>
+                    {(base?.environments || []).map((environment) => (
+                      <option key={environment.name} value={environment.name}>
+                        {environment.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="new-field" htmlFor="new-deploy-strategy">
+                  <span>Deployment Strategy</span>
+                  <select
+                    id="new-deploy-strategy"
+                    value={strategyId}
+                    onChange={(event) => setStrategyId(event.target.value)}
+                    disabled={posture.primaryActionState === 'read-only'}
+                  >
+                    <option value="">Choose a Deployment Strategy</option>
+                    {(base?.allowedStrategies || []).map((strategy) => (
+                      <option key={strategy.id} value={strategy.id}>
+                        {strategy.name}{strategy.status === 'deprecated' ? ' (Deprecated)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="new-field" htmlFor="new-deploy-version">
+                  <span>Version</span>
+                  <select
+                    id="new-deploy-version"
+                    value={version}
+                    onChange={(event) => setVersion(event.target.value)}
+                    disabled={posture.primaryActionState === 'read-only'}
+                  >
+                    <option value="">{base?.versions?.length > 1 ? 'Choose a version' : 'No registered version'}</option>
+                    {(base?.versions || []).map((item) => (
+                      <option key={item.version} value={item.version}>
+                        {item.version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="new-field new-field-full" htmlFor="new-deploy-change-summary">
+                  <span>Change summary</span>
+                  <textarea
+                    id="new-deploy-change-summary"
+                    value={changeSummary}
+                    onChange={(event) => setChangeSummary(event.target.value)}
+                    onInput={(event) => setChangeSummary(event.currentTarget.value)}
+                    readOnly={posture.primaryActionState === 'read-only'}
+                    rows={4}
+                    placeholder="Summarize the change this deploy will make."
+                  />
+                </label>
               </div>
-            ))}
-          </div>
+
+              {selectedStrategy ? (
+                <div className="new-explanation-stack">
+                  <NewExplanation title="Selected Deployment Strategy" tone="neutral">
+                    {selectedStrategy.summary}
+                  </NewExplanation>
+                </div>
+              ) : null}
+
+              <div className="new-deploy-action-review">
+                <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
+                  {posture.local.body}
+                </NewExplanation>
+              </div>
+
+              {submitState.kind === 'success' ? (
+                <NewExplanation
+                  title="Deployment created"
+                  tone="neutral"
+                  actions={[
+                    { label: 'Open Legacy Deployment', to: `/deployments/${submitState.deploymentId}` },
+                    { label: 'Open Application', to: `/new/applications/${applicationName}`, secondary: true }
+                  ]}
+                >
+                  {submitState.deploymentId
+                    ? `DXCP created Deployment ${submitState.deploymentId}. Use the deployment record to follow progress while /new deployment detail remains in rollout.`
+                    : 'DXCP created the Deployment record. Use the deployment record to follow progress while /new deployment detail remains in rollout.'}
+                </NewExplanation>
+              ) : null}
+
+              {submitState.kind === 'error' ? (
+                <NewExplanation title="Deploy could not be created" tone="danger">
+                  {submitState.errorMessage || 'DXCP could not create the Deployment record.'}
+                </NewExplanation>
+              ) : null}
+
+              <div className="new-section-header">
+                <div>
+                  <h3>Readiness review</h3>
+                  <p className="helper">Required readiness conditions stay visible before deploy so DXCP never relies on a generic failure after submit.</p>
+                </div>
+              </div>
+
+              <div className="new-readiness-list" aria-label="Deploy readiness conditions">
+                {readinessItems.map((item) => (
+                  <div key={item.label} className={readinessClass(item.status)}>
+                    <strong>{item.label}</strong>
+                    <span>{readinessLabel(item.status)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </SectionCard>
 
         <div className="new-deploy-support-stack">
@@ -239,17 +808,41 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
             <p className="helper">Supporting policy context stays secondary to the intent entry and readiness review.</p>
 
             <dl className="new-application-support-grid">
-              <dt>Deployment group</dt>
-              <dd>{DEPLOY_FIXTURE.deploymentGroup}</dd>
-              <dt>Allowed strategies</dt>
-              <dd>{DEPLOY_FIXTURE.strategies.join(', ')}</dd>
+              <dt>Deployment Group</dt>
+              <dd>{base?.deliveryGroup?.name || 'Not assigned'}</dd>
+              <dt>Allowed Deployment Strategies</dt>
+              <dd>
+                {(base?.allowedStrategies || []).length > 0
+                  ? base.allowedStrategies.map((strategy) => strategy.name).join(', ')
+                  : 'No allowed Deployment Strategy is currently available.'}
+              </dd>
+              <dt>Deployable versions</dt>
+              <dd>
+                {base?.versions?.length > 0
+                  ? `${base.versions.length} registered version${base.versions.length === 1 ? '' : 's'} available`
+                  : 'No registered version is currently available.'}
+              </dd>
             </dl>
 
-            <ul className="new-supporting-list">
-              {DEPLOY_FIXTURE.guardrails.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+            {(base?.guardrails || []).length > 0 ? (
+              <ul className="new-supporting-list">
+                {base.guardrails.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <NewExplanation title="Guardrail context is limited" tone="warning">
+                DXCP could not fully resolve guardrail context for this Application on this route.
+              </NewExplanation>
+            )}
+
+            {environmentState.context?.policySummary?.policy ? (
+              <div className="new-explanation-stack">
+                <NewExplanation title="Current policy snapshot" tone="neutral">
+                  {`DXCP currently sees ${environmentState.context.policySummary.policy.current_concurrent_deployments} active deployment${environmentState.context.policySummary.policy.current_concurrent_deployments === 1 ? '' : 's'} out of ${environmentState.context.policySummary.policy.max_concurrent_deployments}, with ${environmentState.context.policySummary.policy.deployments_remaining} deploy${environmentState.context.policySummary.policy.deployments_remaining === 1 ? '' : 's'} remaining in the daily quota.`}
+                </NewExplanation>
+              </div>
+            ) : null}
           </SectionCard>
 
           <SectionCard>
@@ -257,12 +850,17 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
             <p className="helper">DXCP expresses deploy intent and the resulting deployment record without exposing execution-engine mechanics.</p>
 
             <div className="new-explanation-stack">
-              <NewExplanation title="What deploy creates" tone="neutral">
-                Deploy creates a deployment record for this application, environment, version, and strategy. The resulting deployment detail becomes the authoritative place to follow progress.
+              <NewExplanation title="What Deploy creates" tone="neutral">
+                Deploy creates a Deployment record for this Application, Environment, Version, and Deployment Strategy. The resulting Deployment record remains the authoritative place to follow progress.
               </NewExplanation>
               <NewExplanation title="Current handoff posture" tone="neutral">
                 Supporting policy context remains available here, but it stays subordinate to the action-first deploy task and readiness review.
               </NewExplanation>
+              {degradedReasons.length > 0 ? (
+                <NewExplanation title="Supporting reads are degraded" tone="warning">
+                  {degradedReasons.join(' ')}
+                </NewExplanation>
+              ) : null}
             </div>
           </SectionCard>
         </div>

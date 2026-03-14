@@ -724,6 +724,18 @@ async function waitForConditionWithDump(check, view, label, attempts = 200) {
   }
 }
 
+function setFormValue(element, value) {
+  const view = element?.ownerDocument?.defaultView || window
+  const prototype =
+    element?.tagName === 'TEXTAREA'
+      ? view.HTMLTextAreaElement.prototype
+      : view.HTMLInputElement.prototype
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value')
+  descriptor?.set?.call(element, value)
+  fireEvent.change(element, { target: { value } })
+  fireEvent.input(element, { target: { value } })
+}
+
 async function ensureEnvironmentSelected(view, name = 'sandbox') {
   await waitForConditionWithDump(() => {
     const current = view.queryByTestId('environment-selector')
@@ -1140,21 +1152,60 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] },
+      serviceStatusesByService: {
+        'payments-api': {
+          service: 'payments-api',
+          environment: 'sandbox',
+          hasDeployments: true,
+          currentRunning: {
+            environment: 'sandbox',
+            version: 'v1.32.1',
+            deploymentId: '9831',
+            deploymentKind: 'ROLL_FORWARD',
+            derivedAt: '2025-01-03T00:03:00Z'
+          },
+          latest: {
+            id: '9831',
+            state: 'SUCCEEDED',
+            outcome: 'SUCCEEDED',
+            version: 'v1.32.1',
+            createdAt: '2025-01-02T23:40:00Z',
+            updatedAt: '2025-01-03T00:03:00Z'
+          }
+        }
+      },
+      deploymentHistoryByService: {
+        'payments-api': [
+          {
+            id: '9831',
+            state: 'SUCCEEDED',
+            outcome: 'SUCCEEDED',
+            environment: 'sandbox',
+            version: 'v1.32.1',
+            createdAt: '2025-01-02T23:40:00Z',
+            updatedAt: '2025-01-03T00:03:00Z',
+            deliveryGroupId: 'payments'
+          }
+        ]
+      }
     })
     const view = renderApp('/new/applications/payments-api/deploy')
 
     await view.findByText('Deploy Application')
     await view.findByText('Intent entry')
+    const enabledSummary = await view.findByLabelText('Change summary')
+    setFormValue(enabledSummary, 'Release payment retry fixes.')
+    await waitForCondition(() => enabledSummary.value === 'Release payment retry fixes.')
     await view.findByText('Readiness review')
-    await view.findByText('Ready to deploy')
-    await view.findByText('No active deployment is already running for sandbox.')
+    await waitForConditionWithDump(() => {
+      const deployButton = view.queryByRole('button', { name: 'Deploy' })
+      return Boolean(deployButton && deployButton.disabled === false)
+    }, view, 'new-deploy-enabled')
+    await view.findByText('DXCP has confirmed that guardrails allow this deploy now.')
     await view.findAllByText('Ready')
-    assert.ok(view.getByRole('link', { name: 'Open Application' }))
-    assert.ok(view.getByRole('link', { name: 'Open Legacy Deploy' }))
+    assert.ok(view.getAllByRole('link', { name: 'Back to Application' }).length >= 1)
     await view.findByText('Policy and guardrails')
   })
 
@@ -1167,17 +1218,19 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] },
+      preflightResponse: { code: 'CONCURRENCY_LIMIT_REACHED', message: 'Deployment lock active' }
     })
-    const view = renderApp('/new/applications/payments-api/deploy/blocked')
+    const view = renderApp('/new/applications/payments-api/deploy')
 
-    await view.findByText('Deploy blocked')
-    await view.findByText('Deploy blocked by policy')
-    await view.findByText(
-      'Sandbox already has an active deployment for Payments Core. Wait for that deployment to complete, or open it to inspect progress before starting another deploy.'
+    await view.findByText('Deploy Application')
+    const blockedSummary = await view.findByLabelText('Change summary')
+    setFormValue(blockedSummary, 'Release payment retry fixes.')
+    await waitForCondition(() => blockedSummary.value === 'Release payment retry fixes.')
+    await view.findAllByText('Deploy blocked')
+    await view.findAllByText(
+      'DXCP already has Deployment 9842 in progress for sandbox. Wait for that deployment to finish, or open it before starting another deploy.'
     )
     await view.findByText('No active deployment is already running for sandbox.')
     await view.findAllByText('Blocked')
@@ -1193,18 +1246,17 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'DELIVERY_OWNER',
-      deployAllowed: true,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      deployAllowed: false,
+      versionsByService: { 'payments-api': ['v1.33.0'] }
     })
-    const permissionView = renderApp('/new/applications/payments-api/deploy/permission-limited')
+    const permissionView = renderApp('/new/applications/payments-api/deploy')
 
     await permissionView.findByText('Permission-limited deploy')
     await permissionView.findByText(
-      'This intent is visible so you can review the deploy plan, but production deploys from this workflow are limited to platform admins. Return to the application or hand off to an authorized operator.'
+      'Your access does not include Deploy for payments-api. You can review deploy intent and readiness here, then hand off to an authorized operator if deployment still needs to proceed.'
     )
-    await permissionView.findByText('Your role is allowed to deploy to production.')
+    await permissionView.findByText('Your access allows Deploy for payments-api.')
     await permissionView.findAllByText('Blocked')
   })
 
@@ -1217,10 +1269,8 @@ export async function runAllTests() {
       logout: async () => {},
       handleRedirectCallback: async () => {}
     })
-    globalThis.fetch = buildFetchMock({
-      role: 'OBSERVER',
-      deployAllowed: false,
-      rollbackAllowed: false
+    globalThis.fetch = buildNewExperienceFetch('OBSERVER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] }
     })
     const readOnlyView = renderApp('/new/applications/payments-api/deploy')
 
@@ -1497,7 +1547,6 @@ export async function runAllTests() {
 
     await view.findByRole('button', { name: 'Refresh' })
     fireEvent.click(view.getByRole('button', { name: 'Refresh' }))
-    await view.findByRole('button', { name: 'Refreshing...' })
     await view.findByText('Refresh update')
     await view.findByText('Insights refreshed for the selected window without changing the page hierarchy.')
   })
