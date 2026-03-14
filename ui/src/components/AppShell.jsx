@@ -1,6 +1,7 @@
 import React from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import LayoutContainer from './LayoutContainer.jsx'
+import { getNewExperiencePath, saveExperienceChoice } from '../experiencePreference.js'
 
 export default function AppShell({
   refreshDeployments,
@@ -31,6 +32,7 @@ export default function AppShell({
       loadInsights()
     }
   }
+  const newExperiencePath = getNewExperiencePath(location.pathname, location.search)
   return (
     <div className="app">
       <header className="header">
@@ -77,6 +79,13 @@ export default function AppShell({
             <div className="session-user">
               {user?.email || user?.name || (isAuthenticated ? 'Authenticated' : 'Not signed in')}
             </div>
+            <Link
+              className="experience-switch-link"
+              to={newExperiencePath}
+              onClick={() => saveExperienceChoice('new')}
+            >
+              Open New Experience
+            </Link>
             {isAuthenticated ? (
               <button className="button secondary" onClick={handleLogout}>
                 Logout
@@ -124,9 +133,6 @@ export default function AppShell({
             </NavLink>
             <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/admin" end>
               Admin
-            </NavLink>
-            <NavLink className={({ isActive }) => (isActive ? 'active' : '')} to="/new/applications/payments-api">
-              New Experience
             </NavLink>
           </nav>
         </LayoutContainer>

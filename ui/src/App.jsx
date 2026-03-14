@@ -22,6 +22,7 @@ import NewExperienceDeploymentDetailPage from './new-experience/NewExperienceDep
 import NewExperienceInsightsPage from './new-experience/NewExperienceInsightsPage.jsx'
 import NewExperienceAdminPage from './new-experience/NewExperienceAdminPage.jsx'
 import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
+import { getDefaultEntryPath, loadExperienceChoice, syncExperienceChoiceForPath } from './experiencePreference.js'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -879,6 +880,7 @@ export default function App() {
   const [auditError, setAuditError] = useState('')
   const location = useLocation()
   const navigate = useNavigate()
+  const defaultEntryPath = getDefaultEntryPath(loadExperienceChoice())
   const currentPath = location.pathname || '/'
   const isNewExperienceRoute = currentPath.startsWith('/new')
   const lastViewRef = useRef('')
@@ -4306,6 +4308,10 @@ export default function App() {
     })
   }
 
+  useEffect(() => {
+    syncExperienceChoiceForPath(location.pathname)
+  }, [location.pathname])
+
   if (isNewExperienceRoute) {
     return (
       <NewExperienceShell
@@ -4319,6 +4325,7 @@ export default function App() {
         {authReady && isAuthenticated && (
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications" replace />} />
+            <Route path="/new/deploy" element={<Navigate to="/new/applications" replace />} />
             <Route path="/new/applications" element={<NewExperienceApplicationsPage role={derivedRole} api={api} />} />
             <Route path="/new/deployments" element={<NewExperienceDeploymentsPage role={derivedRole} api={api} />} />
             <Route
@@ -4390,7 +4397,7 @@ export default function App() {
     >
       {authReady && isAuthenticated && (
         <Routes>
-          <Route path="/" element={<Navigate to="/services" replace />} />
+          <Route path="/" element={<Navigate to={defaultEntryPath} replace />} />
           <Route path="/services" element={<ServicesPage mode="list" {...servicesPageProps} />} />
           <Route path="/services/:serviceName" element={<ServicesPage mode="detail" {...servicesPageProps} />} />
           <Route path="/deploy" element={<DeployPage {...deployPageProps} />} />

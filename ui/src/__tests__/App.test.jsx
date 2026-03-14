@@ -29,6 +29,8 @@ const renderApp = (initialPath = '/services') =>
     </MemoryRouter>
   )
 
+const EXPERIENCE_CHOICE_STORAGE_KEY = 'dxcp.experience_choice.v1'
+
 const newExperienceServicesList = [
   { service_name: 'payments-api', description: 'Checkout and payment authorization workflows.' },
   { service_name: 'billing-worker', description: 'Invoice generation and billing reconciliation.' },
@@ -1084,6 +1086,114 @@ export async function runAllTests() {
     fireEvent.click(view.getByRole('link', { name: 'Deploy' }))
     const reviewButton = view.getByTestId('deploy-review-button')
     assert.equal(reviewButton.disabled, true)
+  })
+
+  await runTest('Root entry defaults to legacy and honors a stored new-experience choice', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
+
+    const legacyView = renderApp('/')
+    await legacyView.findByText('DXCP Control Plane')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), null)
+
+    cleanup()
+
+    window.localStorage.setItem(EXPERIENCE_CHOICE_STORAGE_KEY, 'new')
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
+
+    const newView = renderApp('/')
+    await newView.findByText('New Experience Preview')
+    await newView.findByText('Choose an application to continue in DXCP')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
+  })
+
+  await runTest('Intentional experience switching persists across legacy and new routes', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
+    const view = renderApp('/services/payments-api')
+
+    await view.findByText('DXCP Control Plane')
+    fireEvent.click(view.getByRole('link', { name: 'Open New Experience' }))
+    await view.findByText('New Experience Preview')
+    await view.findByText('Application')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
+
+    fireEvent.click(view.getByRole('link', { name: 'Return to Legacy' }))
+    await view.findByText('DXCP Control Plane')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'legacy')
+  })
+
+  await runTest('Direct links to new and legacy routes resolve predictably without mixed-shell state', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
+    const newView = renderApp('/new/deployments/9831')
+
+    await newView.findByText('New Experience Preview')
+    await newView.findByText('Deployment 9831')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
+
+    cleanup()
+
+    window.localStorage.setItem(EXPERIENCE_CHOICE_STORAGE_KEY, 'new')
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
+    const legacyView = renderApp('/services')
+
+    await legacyView.findByText('DXCP Control Plane')
+    assert.equal(legacyView.queryByText('New Experience Preview'), null)
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'legacy')
+  })
+
+  await runTest('Direct /new/deploy entry redirects to the new applications chooser and stores new preference', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
+    const view = renderApp('/new/deploy')
+
+    await view.findByText('Choose an application to continue in DXCP')
+    assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
   })
 
   await runTest('New experience application route reads as an object page with blocked deploy and local explanation', async () => {

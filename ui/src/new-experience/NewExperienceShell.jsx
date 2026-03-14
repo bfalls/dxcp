@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
+import { getLegacyExperiencePath, saveExperienceChoice } from '../experiencePreference.js'
 
 export const NEW_EXPERIENCE_MAX_WIDTH_PX = 1200
 
@@ -27,9 +28,11 @@ export default function NewExperienceShell({
   onLogin,
   onLogout
 }) {
+  const location = useLocation()
   const [pageAlertItems, setPageAlertItems] = useState([])
   const showAdminNav = role === 'PLATFORM_ADMIN'
   const userLabel = getUserLabel(user)
+  const legacyPath = getLegacyExperiencePath(location.pathname, location.search)
 
   return (
     <NewExperienceAlertRailContext.Provider value={setPageAlertItems}>
@@ -49,8 +52,12 @@ export default function NewExperienceShell({
               </nav>
               <div className="new-shell-nav-utility">
                 <span className="new-shell-preview-pill">Preview under /new/*</span>
-                <Link className="new-shell-legacy-link" to="/services">
-                  Open Legacy
+                <Link
+                  className="new-shell-legacy-link"
+                  to={legacyPath}
+                  onClick={() => saveExperienceChoice('legacy')}
+                >
+                  Return to Legacy
                 </Link>
                 <div className="new-shell-user-actions" aria-label="Authenticated user actions">
                   <span className="new-shell-user-label">{authReady ? userLabel : 'Loading session...'}</span>
