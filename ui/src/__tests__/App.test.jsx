@@ -1260,6 +1260,62 @@ export async function runAllTests() {
     await permissionView.findAllByText('Blocked')
   })
 
+  await runTest('New experience deploy route does not invent permission denial when access read fails', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    const baseFetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] }
+    })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname.endsWith('/allowed-actions')) {
+        return Promise.reject(new Error('Failed to load allowed actions'))
+      }
+      return baseFetch(url, options)
+    }
+    const view = renderApp('/new/applications/payments-api/deploy')
+
+    await view.findByText('Deploy access could not be confirmed')
+    await view.findByText(
+      'DXCP could not refresh deploy access for this Application right now. Deploy stays unavailable until access checks return, so the route does not invent a permission answer.'
+    )
+    await view.findByText('DXCP has refreshed deploy access for this workflow.')
+    assert.equal(view.queryByText('Permission-limited deploy'), null)
+  })
+
+  await runTest('New experience deploy route defaults to an enabled environment and hides disabled targets from selection', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] },
+      environments: [
+        { id: 'sandbox', name: 'sandbox', type: 'non_prod', is_enabled: false },
+        { id: 'staging', name: 'staging', type: 'non_prod', is_enabled: true }
+      ]
+    })
+    const view = renderApp('/new/applications/payments-api/deploy')
+
+    await view.findByDisplayValue('staging')
+    await view.findByText('Unavailable deploy targets')
+    await view.findByText(/sandbox/)
+    await view.findByText('Deployable environments')
+    await view.findAllByText('staging')
+    const environmentSelect = await view.findByLabelText('Environment')
+    assert.equal(environmentSelect.textContent.includes('sandbox'), false)
+  })
+
   await runTest('New experience deploy route shows read-only deploy behavior for observers', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

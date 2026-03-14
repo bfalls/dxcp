@@ -62,7 +62,8 @@ function normalizeStrategy(recipe) {
     name: recipe?.name || recipe?.id || 'Unnamed strategy',
     summary: recipe?.effective_behavior_summary || recipe?.description || 'No behavior summary is available for this strategy.',
     status: String(recipe?.status || 'active').toLowerCase(),
-    revision: recipe?.recipe_revision ?? null
+    revision: recipe?.recipe_revision ?? null,
+    isDeployable: String(recipe?.status || 'active').toLowerCase() !== 'deprecated'
   }
 }
 
@@ -160,23 +161,30 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
   const publicSettings =
     settingsResult.status === 'fulfilled' && settingsResult.value && !settingsResult.value.code
       ? settingsResult.value
-      : {}
+      : null
   if (settingsResult.status === 'rejected' || (settingsResult.status === 'fulfilled' && settingsResult.value?.code)) {
     degradedReasons.push('Read-only system posture could not be refreshed.')
   }
 
-  const allowedActions =
+  const allowedActionsKnown =
     actionsResult.status === 'fulfilled' && actionsResult.value && !actionsResult.value.code
-      ? actionsResult.value
-      : { actions: { view: true, deploy: false, rollback: false } }
+  const allowedActions = allowedActionsKnown ? actionsResult.value : { actions: { view: true, deploy: null, rollback: null } }
   if (actionsResult.status === 'rejected' || (actionsResult.status === 'fulfilled' && actionsResult.value?.code)) {
     degradedReasons.push('Deploy access data could not be refreshed.')
   }
 
   const deliveryGroup = findDeliveryGroup(groups, applicationName)
-  const sortedEnvironments = sortEnvironments(environments)
-  const defaultEnvironment = pickDefaultEnvironment(sortedEnvironments)
+  const sortedEnvironments = sortEnvironments(environments).map((environment) => ({
+    id: environment?.id || environment?.environment_id || environment?.name || '',
+    name: environment?.name || environment?.environment_id || '',
+    label: environment?.display_name || environment?.name || environment?.environment_id || '',
+    type: environment?.type || '',
+    isEnabled: environment?.is_enabled !== false
+  }))
+  const enabledEnvironments = sortedEnvironments.filter((environment) => environment.isEnabled)
+  const defaultEnvironment = pickDefaultEnvironment(enabledEnvironments)
   const allowedStrategies = buildAllowedStrategies(deliveryGroup, recipes)
+  const deployableStrategies = allowedStrategies.filter((strategy) => strategy.isDeployable)
   const normalizedVersions = versions
     .map((item) => (typeof item === 'string' ? { version: item } : item))
     .filter((item) => item?.version)
@@ -195,20 +203,18 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
           'Deploy intent stays anchored to the application record rather than a generic engine workflow.'
       },
       deliveryGroup,
-      environments: sortedEnvironments.map((environment) => ({
-        id: environment?.id || environment?.environment_id || environment?.name || '',
-        name: environment?.name || environment?.environment_id || '',
-        label: environment?.display_name || environment?.name || environment?.environment_id || '',
-        type: environment?.type || '',
-        isEnabled: environment?.is_enabled !== false
-      })),
+      environments: enabledEnvironments,
+      unavailableEnvironments: sortedEnvironments.filter((environment) => !environment.isEnabled),
       defaultEnvironmentName: defaultEnvironment?.name || defaultEnvironment?.environment_id || '',
       allowedStrategies,
-      defaultStrategyId: allowedStrategies.length === 1 ? allowedStrategies[0].id : '',
+      deployableStrategies,
+      defaultStrategyId: deployableStrategies.length === 1 ? deployableStrategies[0].id : '',
       versions: normalizedVersions,
       defaultVersion: normalizedVersions.length === 1 ? String(normalizedVersions[0]?.version || '') : '',
       allowedActions,
+      allowedActionsKnown,
       mutationsDisabled: publicSettings?.mutations_disabled === true,
+      mutationsDisabledKnown: publicSettings !== null,
       guardrails: summarizeGuardrails(deliveryGroup)
     }
   }

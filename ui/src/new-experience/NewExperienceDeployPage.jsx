@@ -167,6 +167,20 @@ function deriveDeployPosture({
     }
   }
 
+  if (base?.allowedActionsKnown === false) {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'Deploy access could not be refreshed for this route. Review the visible deploy plan, then refresh before you deploy.',
+      local: {
+        title: 'Deploy access could not be confirmed',
+        tone: 'warning',
+        body: 'DXCP could not refresh deploy access for this Application right now. Deploy stays unavailable until access checks return, so the route does not invent a permission answer.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'DXCP has refreshed deploy access for this workflow.'
+    }
+  }
+
   if (base?.allowedActions?.actions?.deploy !== true) {
     return {
       primaryActionState: 'blocked',
@@ -195,17 +209,59 @@ function deriveDeployPosture({
     }
   }
 
-  if (!selectedEnvironment?.name) {
+  if ((base?.environments || []).length === 0) {
     return {
       primaryActionState: 'blocked',
-      headerNote: 'Deploy is blocked until DXCP can resolve an environment for this Application.',
+      headerNote: 'Deploy is blocked because no enabled environment is available for this Application on this route.',
       local: {
         title: 'Deploy blocked',
         tone: 'danger',
-        body: 'DXCP could not resolve environment context for this Application. Deploy intent remains visible, but deploy requires environment context first.',
+        body: 'DXCP did not return an enabled environment for this Application. Deploy intent remains visible here, but deploy requires an enabled target first.',
         actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
       },
-      blockedReadinessLabel: 'Environment context is resolved for this workflow.'
+      blockedReadinessLabel: 'An enabled environment is available for this workflow.'
+    }
+  }
+
+  if (!selectedEnvironment?.name) {
+    return {
+      primaryActionState: 'disabled',
+      headerNote: 'Choose an enabled environment before DXCP can validate this deploy intent.',
+      local: {
+        title: 'Complete deploy intent',
+        tone: 'warning',
+        body: 'Choose an enabled environment, select a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
+        actions: []
+      },
+      blockedReadinessLabel: 'An enabled environment is selected.'
+    }
+  }
+
+  if (selectedEnvironment?.isEnabled === false) {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: `Deploy is blocked because ${selectedEnvironmentLabel} is not enabled on this route.`,
+      local: {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: `${selectedEnvironmentLabel} is not currently enabled for deploy on this route. Choose an enabled environment before you deploy.`,
+        actions: []
+      },
+      blockedReadinessLabel: `${selectedEnvironmentLabel} is enabled for deploy on this route.`
+    }
+  }
+
+  if ((base?.deployableStrategies || []).length === 0) {
+    return {
+      primaryActionState: 'blocked',
+      headerNote: 'Deploy is blocked because no current Deployment Strategy is available for this Deployment Group.',
+      local: {
+        title: 'Deploy blocked',
+        tone: 'danger',
+        body: 'DXCP did not return a current Deployment Strategy that can be used for a new deploy on this route. Review Deployment Group policy before you deploy again.',
+        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
+      },
+      blockedReadinessLabel: 'A current Deployment Strategy is available for this Deployment Group.'
     }
   }
 
@@ -312,12 +368,22 @@ function buildReadinessItems({ base, selectedEnvironment, selectedStrategy, vers
       status: base?.service?.name ? 'met' : 'blocked'
     },
     {
-      label: 'Environment is selected.',
-      status: selectedEnvironment?.name ? 'met' : 'blocked'
+      label: 'An enabled environment is selected.',
+      status:
+        !selectedEnvironment?.name
+          ? 'pending'
+          : selectedEnvironment.isEnabled === false || posture.blockedReadinessLabel === `${selectedEnvironment.label || selectedEnvironment.name} is enabled for deploy on this route.`
+            ? 'blocked'
+            : 'met'
     },
     {
-      label: 'Deployment Strategy is allowed for this Deployment Group.',
-      status: !selectedStrategy?.id ? 'pending' : selectedStrategy.status === 'deprecated' ? 'blocked' : 'met'
+      label: 'Deployment Strategy is current and allowed for this Deployment Group.',
+      status:
+        !selectedStrategy?.id
+          ? (base?.deployableStrategies || []).length === 0 ? 'blocked' : 'pending'
+          : selectedStrategy.status === 'deprecated'
+            ? 'blocked'
+            : 'met'
     },
     {
       label: 'Version is registered and deployable.',
@@ -756,6 +822,14 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                 </div>
               ) : null}
 
+              {(base?.unavailableEnvironments || []).length > 0 ? (
+                <div className="new-explanation-stack">
+                  <NewExplanation title="Unavailable deploy targets" tone="warning">
+                    {`${base.unavailableEnvironments.map((environment) => environment.label).join(', ')} ${base.unavailableEnvironments.length === 1 ? 'is' : 'are'} currently not enabled for deploy on this route, so DXCP keeps them out of the deploy target list.`}
+                  </NewExplanation>
+                </div>
+              ) : null}
+
               <div className="new-deploy-action-review">
                 <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
                   {posture.local.body}
@@ -791,8 +865,8 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
               </div>
 
               <div className="new-readiness-list" aria-label="Deploy readiness conditions">
-                {readinessItems.map((item) => (
-                  <div key={item.label} className={readinessClass(item.status)}>
+                {readinessItems.map((item, index) => (
+                  <div key={`${item.label}-${index}`} className={readinessClass(item.status)}>
                     <strong>{item.label}</strong>
                     <span>{readinessLabel(item.status)}</span>
                   </div>
@@ -810,6 +884,12 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
             <dl className="new-application-support-grid">
               <dt>Deployment Group</dt>
               <dd>{base?.deliveryGroup?.name || 'Not assigned'}</dd>
+              <dt>Deployable environments</dt>
+              <dd>
+                {(base?.environments || []).length > 0
+                  ? base.environments.map((environment) => environment.label).join(', ')
+                  : 'No enabled environment is currently available.'}
+              </dd>
               <dt>Allowed Deployment Strategies</dt>
               <dd>
                 {(base?.allowedStrategies || []).length > 0
