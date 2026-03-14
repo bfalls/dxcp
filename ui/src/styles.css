@@ -68,6 +68,13 @@ body {
   color: var(--ink);
 }
 
+.new-shell-sticky-region {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  backdrop-filter: blur(12px);
+}
+
 .new-shell-frame {
   width: 100%;
   max-width: var(--new-shell-max-width);
@@ -78,7 +85,7 @@ body {
 .new-shell-top-nav {
   width: 100%;
   border-bottom: 1px solid var(--border);
-  background: rgba(12, 23, 23, 0.92);
+  background: rgba(12, 23, 23, 0.96);
 }
 
 .new-shell-top-nav-inner {
@@ -105,6 +112,7 @@ body {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 1 1 320px;
 }
 
 .new-shell-nav-links a {
@@ -127,6 +135,30 @@ body {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.new-shell-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.new-shell-user-label {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-shell-auth-button {
+  padding: 8px 12px;
+  font-size: 12px;
 }
 
 .new-shell-preview-pill {
@@ -152,26 +184,29 @@ body {
 
 .new-shell-alert-rail {
   width: 100%;
-  padding: 10px 0 0;
+  padding: 8px 0 0;
+  background: rgba(12, 23, 23, 0.94);
+  border-bottom: 1px solid rgba(36, 51, 51, 0.85);
 }
 
 .new-shell-alert-stack {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  padding-bottom: 8px;
 }
 
 .new-shell-alert-card {
   margin: 0;
   border: 1px solid rgba(183, 179, 166, 0.18);
-  border-radius: 12px;
-  padding: 10px 12px;
+  border-radius: 10px;
+  padding: 8px 10px;
   background: rgba(13, 25, 25, 0.72);
   color: var(--muted);
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: baseline;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .new-shell-alert-card strong {
@@ -1277,6 +1312,16 @@ body {
   .new-shell-nav-utility {
     width: 100%;
     justify-content: space-between;
+    margin-left: 0;
+  }
+
+  .new-shell-user-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .new-shell-user-label {
+    max-width: none;
   }
 
   .new-timeline-event {

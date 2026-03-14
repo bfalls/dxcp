@@ -316,37 +316,18 @@ function PlatformAdminAdminPage({ role, scenario }) {
     return 'Review stays visible before save so the policy impact remains explicit, not implied.'
   })()
   const alertRailItems = useMemo(
-    () => [
-      {
-        id: `admin-${mode}-${scenario}`,
-        tone:
-          saveBlockedByScenario || validation.errors.length > 0
-            ? 'danger'
-            : saveRequiresWarningAcknowledgement && !warningAcknowledged
-              ? 'warning'
-              : 'neutral',
-        title:
-          saveBlockedByScenario || validation.errors.length > 0
-            ? 'Save blocked'
-            : saveRequiresWarningAcknowledgement && !warningAcknowledged
-              ? 'Warnings to review'
-              : mode === 'view'
-                ? 'Read-first posture'
-                : mode === 'edit'
-                  ? 'Review required before save'
-                  : 'Review before save',
-        body: actionNote
-      }
-    ],
-    [
-      actionNote,
-      mode,
-      saveBlockedByScenario,
-      saveRequiresWarningAcknowledgement,
-      scenario,
-      validation.errors.length,
-      warningAcknowledged
-    ]
+    () =>
+      saveBlockedByScenario
+        ? [
+            {
+              id: `admin-${mode}-${scenario}`,
+              tone: 'danger',
+              title: 'Save blocked',
+              body: actionNote
+            }
+          ]
+        : [],
+    [actionNote, mode, saveBlockedByScenario, scenario]
   )
 
   useNewExperienceAlertRail(alertRailItems)

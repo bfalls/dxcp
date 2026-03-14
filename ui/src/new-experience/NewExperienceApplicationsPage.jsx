@@ -1,9 +1,8 @@
-import React, { useMemo } from 'react'
+import React from 'react'
 import { Link, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
-import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const APPLICATION_FIXTURE = {
   owner: 'Payments Platform',
@@ -61,21 +60,6 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
   const isReadOnly = role === 'OBSERVER'
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
-  const alertRailItems = useMemo(
-    () => [
-      {
-        id: 'application-primary-action',
-        tone: isReadOnly ? 'neutral' : 'danger',
-        title: isReadOnly ? 'Read-only access' : 'Deploy blocked',
-        body: isReadOnly
-          ? 'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
-          : 'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
-      }
-    ],
-    [isReadOnly]
-  )
-
-  useNewExperienceAlertRail(alertRailItems)
 
   const secondaryActions = [
     { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployments without leaving the new experience.' },
@@ -101,6 +85,11 @@ export default function NewExperienceApplicationsPage({ role = 'UNKNOWN' }) {
         ]}
         primaryAction={primaryAction}
         secondaryActions={secondaryActions}
+        actionNote={
+          isReadOnly
+            ? 'You can inspect current state and deployment history here, but only delivery owners can deploy from this workflow.'
+            : 'Another deployment is already active for sandbox. Open that deployment or use the current deploy workflow when the active work completes.'
+        }
       />
 
       <div className="new-application-layout">

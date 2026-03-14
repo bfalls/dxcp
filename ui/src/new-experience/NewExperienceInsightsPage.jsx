@@ -379,15 +379,6 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
   const alertRailItems = useMemo(() => {
     const items = []
 
-    if (refreshMessage) {
-      items.push({
-        id: 'insights-refresh-update',
-        tone: scenario === 'failure' ? 'danger' : scenario === 'degraded-read' ? 'warning' : 'neutral',
-        title: 'Refresh update',
-        body: refreshMessage
-      })
-    }
-
     if (activeScenario.degradedNotice) {
       items.push({
         id: 'insights-degraded-read',
@@ -407,7 +398,7 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
     }
 
     return items
-  }, [activeScenario, refreshMessage, scenario])
+  }, [activeScenario])
 
   useNewExperienceAlertRail(alertRailItems)
 
@@ -497,6 +488,16 @@ export default function NewExperienceInsightsPage({ role = 'UNKNOWN' }) {
         <div className="new-insights-scope-summary" aria-live="polite">
           {timeWindow} · {currentScopeSummary}
         </div>
+
+        {refreshMessage ? (
+          <NewStateBlock
+            eyebrow="Refresh"
+            title="Refresh update"
+            tone={scenario === 'failure' ? 'danger' : scenario === 'degraded-read' ? 'warning' : 'neutral'}
+          >
+            {refreshMessage}
+          </NewStateBlock>
+        ) : null}
       </SectionCard>
 
       {activeScenario.failureState ? (

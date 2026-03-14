@@ -1,26 +1,44 @@
 import React from 'react'
+import { useLocation } from 'react-router-dom'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
-export default function NewExperienceUnavailableRoutePage() {
+export default function NewExperienceUnavailableRoutePage({ role = 'UNKNOWN' }) {
+  const location = useLocation()
+
+  useNewExperienceAlertRail([
+    {
+      id: 'new-route-unavailable',
+      tone: 'danger',
+      title: 'Route unavailable',
+      body: `${location.pathname} is not available in the new experience yet.`
+    }
+  ])
+
   return (
     <>
       <NewExperiencePageHeader
-        title="Admin"
-        objectIdentity="Admin workspace"
+        title="Unavailable route"
+        objectIdentity={location.pathname}
+        role={role}
         stateSummaryItems={[{ label: 'Route state', value: 'Unavailable' }]}
-        primaryAction={{ label: 'Admin', state: 'unavailable' }}
+        primaryAction={{ label: 'Route', state: 'unavailable' }}
+        secondaryActions={[
+          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Legacy', to: '/services' }
+        ]}
       />
       <NewStateBlock
         eyebrow="Unavailable route"
-        title="Admin is not available on this route"
+        title="This route is not available in the new experience"
         tone="danger"
         actions={[
-          { label: 'Open Applications', to: '/new/applications/payments-api', secondary: true },
-          { label: 'Open Legacy Admin', to: '/admin' }
+          { label: 'Open Applications', to: '/new/applications/payments-api' },
+          { label: 'Open Legacy', to: '/services', secondary: true }
         ]}
       >
-        Continue in the current Admin workspace for governance tasks.
+        Open an available `/new/*` route, or continue in the legacy UI while rollout remains opt-in.
       </NewStateBlock>
     </>
   )

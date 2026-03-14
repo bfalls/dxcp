@@ -21,6 +21,7 @@ import NewExperienceDeploymentsPage from './new-experience/NewExperienceDeployme
 import NewExperienceDeploymentDetailPage from './new-experience/NewExperienceDeploymentDetailPage.jsx'
 import NewExperienceInsightsPage from './new-experience/NewExperienceInsightsPage.jsx'
 import NewExperienceAdminPage from './new-experience/NewExperienceAdminPage.jsx'
+import NewExperienceUnavailableRoutePage from './new-experience/NewExperienceUnavailableRoutePage.jsx'
 
 const ENV = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {}
 const DEFAULT_API_BASE = (ENV.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
@@ -4307,7 +4308,14 @@ export default function App() {
 
   if (isNewExperienceRoute) {
     return (
-      <NewExperienceShell role={derivedRole}>
+      <NewExperienceShell
+        role={derivedRole}
+        user={user}
+        isAuthenticated={isAuthenticated}
+        authReady={authReady}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      >
         {authReady && isAuthenticated && (
           <Routes>
             <Route path="/new" element={<Navigate to="/new/applications/payments-api" replace />} />
@@ -4345,7 +4353,7 @@ export default function App() {
             />
             <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} />} />
             <Route path="/new/admin/:scenario" element={<NewExperienceAdminPage role={derivedRole} />} />
-            <Route path="*" element={<Navigate to="/new/applications/payments-api" replace />} />
+            <Route path="*" element={<NewExperienceUnavailableRoutePage role={derivedRole} />} />
           </Routes>
         )}
       </NewExperienceShell>

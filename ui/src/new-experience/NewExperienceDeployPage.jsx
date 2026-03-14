@@ -1,9 +1,8 @@
-import React, { useMemo } from 'react'
+import React from 'react'
 import { Link, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
-import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 
 const DEPLOY_FIXTURE = {
   deploymentGroup: 'Payments Core',
@@ -108,22 +107,6 @@ function readinessClass(status) {
 export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
   const { applicationName = 'payments-api', scenario } = useParams()
   const activeScenario = getScenario(role, scenario)
-  const alertRailItems = useMemo(() => {
-    if (activeScenario.key === 'enabled') {
-      return []
-    }
-
-    return [
-      {
-        id: 'deploy-primary-action',
-        tone: activeScenario.primaryActionState === 'blocked' ? 'danger' : 'neutral',
-        title: activeScenario.primaryActionState === 'blocked' ? 'Deploy blocked' : 'Read-only access',
-        body: activeScenario.headerNote
-      }
-    ]
-  }, [activeScenario])
-
-  useNewExperienceAlertRail(alertRailItems)
 
   const secondaryActions = [
     {
@@ -155,6 +138,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN' }) {
           description: activeScenario.headerNote
         }}
         secondaryActions={secondaryActions}
+        actionNote={activeScenario.headerNote}
       />
 
       <div className="new-deploy-layout">
