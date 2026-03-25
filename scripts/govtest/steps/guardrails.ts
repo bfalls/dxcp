@@ -29,6 +29,15 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isEngineUnavailableFailure(status: number, payload: any): boolean {
+  if (status < 500) return false;
+  if (payload?.details?.engine_unavailable === true) return true;
+  if (payload?.code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.error_code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.details?.diagnostics?.engine === "spinnaker") return true;
+  return false;
+}
+
 function record(
   context: RunContext,
   id: string,
@@ -174,6 +183,15 @@ export async function checkQuotaSafe(context: RunContext, ownerToken: string): P
       record(context, "quota.safe.validate_quota_shape", "SKIPPED", "Validate blocked by exhausted deploy quota");
       return;
     }
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(validate.status, payload)) {
+      record(
+        context,
+        "quota.safe.validate_quota_shape",
+        "SKIPPED",
+        `Validate skipped in diagnostic mode because engine was unavailable (${validate.status})`,
+      );
+      return;
+    }
     record(
       context,
       "quota.safe.validate_quota_shape",
@@ -224,6 +242,17 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
       record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota is already exhausted", "DIAGNOSTIC");
       return;
     }
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(first.status, firstPayload)) {
+      record(
+        context,
+        "quota.active.validate_enforces_quota",
+        "SKIPPED",
+        `Initial validate skipped in diagnostic mode because engine was unavailable (${first.status})`,
+        "DIAGNOSTIC",
+      );
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because engine was unavailable", "DIAGNOSTIC");
+      return;
+    }
     record(
       context,
       "quota.active.validate_enforces_quota",
@@ -259,6 +288,17 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
         "DIAGNOSTIC",
       );
       record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because quota exhausted before probe", "DIAGNOSTIC");
+      return;
+    }
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(second.status, secondPayload)) {
+      record(
+        context,
+        "quota.active.validate_enforces_quota",
+        "SKIPPED",
+        `Second validate skipped in diagnostic mode because engine was unavailable (${second.status})`,
+        "DIAGNOSTIC",
+      );
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because engine was unavailable", "DIAGNOSTIC");
       return;
     }
     record(
@@ -301,6 +341,10 @@ export async function checkQuotaActive(context: RunContext, ownerToken: string):
     }
     if (response.status === 409 && payload?.code === "CONCURRENCY_LIMIT_REACHED") {
       record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 probe interrupted by concurrency saturation", "DIAGNOSTIC");
+      return;
+    }
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(response.status, payload)) {
+      record(context, "quota.active.n_plus_one", "SKIPPED", "N+1 skipped because engine was unavailable", "DIAGNOSTIC");
       return;
     }
     if (response.status !== 200) {
@@ -364,6 +408,15 @@ export async function checkConcurrencySafe(context: RunContext, ownerToken: stri
       record(context, "concurrency.safe.validate_shape", "SKIPPED", "Validate blocked by exhausted deploy quota");
       return;
     }
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(validate.status, payload)) {
+      record(
+        context,
+        "concurrency.safe.validate_shape",
+        "SKIPPED",
+        `Validate skipped in diagnostic mode because engine was unavailable (${validate.status})`,
+      );
+      return;
+    }
     record(
       context,
       "concurrency.safe.validate_shape",
@@ -410,6 +463,17 @@ export async function checkConcurrencyActive(context: RunContext, ownerToken: st
   }
   if (first.status === 429 && firstPayload?.code === "QUOTA_EXCEEDED") {
     record(context, "concurrency.active.second_deploy_blocked", "SKIPPED", "Quota already exhausted; concurrency probe skipped", "DIAGNOSTIC");
+    record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up", "DIAGNOSTIC");
+    return;
+  }
+  if (!isStrictConformance(context) && isEngineUnavailableFailure(first.status, firstPayload)) {
+    record(
+      context,
+      "concurrency.active.second_deploy_blocked",
+      "SKIPPED",
+      `Concurrency probe skipped in diagnostic mode because engine was unavailable (${first.status})`,
+      "DIAGNOSTIC",
+    );
     record(context, "concurrency.active.cleanup", "SKIPPED", "No guardrail probe deployment to clean up", "DIAGNOSTIC");
     return;
   }

@@ -6,6 +6,8 @@ import {
   assertStatus,
   buildDeploymentIntent,
   decodeJson,
+  isStrictConformance,
+  logInfo,
   markStepEnd,
   markStepStart,
   optionalEnv,
@@ -23,6 +25,45 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type RequestFactory = () => Promise<Response>;
+
+async function requestWithEngineRetry(
+  label: string,
+  requestFactory: RequestFactory,
+  attempts: number,
+  backoffMs: number,
+): Promise<{ response: Response; payload: any; attemptsUsed: number }> {
+  let lastResponse: Response | null = null;
+  let lastPayload: any = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await requestFactory();
+    const payload = await decodeJson(response);
+    lastResponse = response;
+    lastPayload = payload;
+    if (!isEngineUnavailableFailure(response.status, payload)) {
+      return { response, payload, attemptsUsed: attempt };
+    }
+    if (attempt < attempts) {
+      logInfo(`${label}: engine unavailable (${response.status}); retrying attempt ${attempt + 1}/${attempts}.`);
+      await sleep(backoffMs * attempt);
+    }
+  }
+  return {
+    response: lastResponse as Response,
+    payload: lastPayload,
+    attemptsUsed: attempts,
+  };
+}
+
+function isEngineUnavailableFailure(status: number, payload: any): boolean {
+  if (status < 500) return false;
+  if (payload?.details?.engine_unavailable === true) return true;
+  if (payload?.code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.error_code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.details?.diagnostics?.engine === "spinnaker") return true;
+  return false;
+}
+
 export async function stepF_deployHappyPath(
   context: RunContext,
   ownerToken: string,
@@ -35,20 +76,56 @@ export async function stepF_deployHappyPath(
 
   const timeoutSeconds = toInt(optionalEnv("GOV_DEPLOY_TIMEOUT_SECONDS"), 300);
   const pollSeconds = toInt(optionalEnv("GOV_DEPLOY_POLL_SECONDS"), 5);
+  const engineRetryAttempts = toInt(optionalEnv("GOV_ENGINE_RETRY_ATTEMPTS"), 4);
+  const engineRetryBackoffMs = toInt(optionalEnv("GOV_ENGINE_RETRY_BACKOFF_MS"), 1500);
   const validateIntent = buildDeploymentIntent(context, context.runVersion);
   const deployIntent = buildDeploymentIntent(context, context.runVersion);
 
-  const validate = await apiRequest("POST", "/v1/deployments/validate", ownerToken, {
-    body: validateIntent,
-  });
-  const validateBody = await assertStatus(validate, 200, "F: POST /v1/deployments/validate (registered)");
+  const { response: validate, payload: validateBody } = await requestWithEngineRetry(
+    "F validate",
+    () =>
+      apiRequest("POST", "/v1/deployments/validate", ownerToken, {
+        body: validateIntent,
+      }),
+    engineRetryAttempts,
+    engineRetryBackoffMs,
+  );
+  if (validate.status !== 200) {
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(validate.status, validateBody)) {
+      logInfo(
+        `F: diagnostic mode: skipping deploy happy path because validate returned engine unavailable (${validate.status}).`,
+      );
+      markStepEnd(context, step);
+      return;
+    }
+    throw new Error(
+      `F: POST /v1/deployments/validate (registered) failed: expected HTTP 200, got ${validate.status}; body=${JSON.stringify(validateBody)}`,
+    );
+  }
   assert(validateBody?.versionRegistered === true, "F: validate response did not confirm versionRegistered=true");
 
-  const deploy = await apiRequest("POST", "/v1/deployments", ownerToken, {
-    idempotencyKey: context.idempotencyKeys.deployRegistered,
-    body: deployIntent,
-  });
-  const deployBody = await assertStatus(deploy, 201, "F: POST /v1/deployments (registered)");
+  const { response: deploy, payload: deployBody } = await requestWithEngineRetry(
+    "F deploy",
+    () =>
+      apiRequest("POST", "/v1/deployments", ownerToken, {
+        idempotencyKey: context.idempotencyKeys.deployRegistered,
+        body: deployIntent,
+      }),
+    engineRetryAttempts,
+    engineRetryBackoffMs,
+  );
+  if (deploy.status !== 201) {
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(deploy.status, deployBody)) {
+      logInfo(
+        `F: diagnostic mode: skipping deploy happy path because deploy returned engine unavailable (${deploy.status}).`,
+      );
+      markStepEnd(context, step);
+      return;
+    }
+    throw new Error(
+      `F: POST /v1/deployments (registered) failed: expected HTTP 201, got ${deploy.status}; body=${JSON.stringify(deployBody)}`,
+    );
+  }
 
   const deploymentId = deployBody?.id;
   assert(typeof deploymentId === "string" && deploymentId.length > 0, "F: deployment response missing id");

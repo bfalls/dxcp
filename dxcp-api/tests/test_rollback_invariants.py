@@ -245,3 +245,30 @@ async def test_rollback_rejects_rollback_target(tmp_path: Path, monkeypatch):
     body = response.json()
     assert body["code"] == "ROLLBACK_OF_ROLLBACK"
     _assert_user_safe_error(body)
+
+
+async def test_rollback_same_idempotency_key_same_request_replays(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, fake):
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-1",
+            version="1.0.0",
+            state="SUCCEEDED",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        _insert_deployment(
+            main.storage,
+            deployment_id="dep-2",
+            version="1.0.1",
+            state="SUCCEEDED",
+            created_at="2024-01-02T00:00:00Z",
+        )
+        headers = {"Idempotency-Key": "rollback-replay-1", **auth_header(["dxcp-platform-admins"])}
+
+        first = await client.post("/v1/deployments/dep-2/rollback", headers=headers, json={})
+        second = await client.post("/v1/deployments/dep-2/rollback", headers=headers, json={})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json() == second.json()
+    assert len(fake.triggered) == 1

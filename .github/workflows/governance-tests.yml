@@ -72,6 +72,38 @@ jobs:
           set -euo pipefail
           npm run govtest -- --strict | tee govtest-output.log
 
+      - name: Run UI governance suite
+        id: ui_gov
+        if: always()
+        continue-on-error: true
+        env:
+          GOV_DXCP_UI_BASE: ${{ vars.GOV_DXCP_UI_BASE }}
+          GOV_DXCP_API_BASE: ${{ vars.GOV_DXCP_API_BASE }}
+          GOV_AUTH0_DOMAIN: ${{ vars.GOV_AUTH0_DOMAIN }}
+          GOV_AUTH0_AUDIENCE: ${{ vars.GOV_AUTH0_AUDIENCE }}
+          GOV_DXCP_UI_CLIENT_ID: ${{ vars.GOV_DXCP_UI_CLIENT_ID }}
+          GOV_ADMIN_USERNAME: ${{ vars.GOV_ADMIN_USERNAME }}
+          GOV_ADMIN_PASSWORD: ${{ secrets.GOV_ADMIN_PASSWORD }}
+          GOV_OWNER_USERNAME: ${{ vars.GOV_OWNER_USERNAME }}
+          GOV_OWNER_PASSWORD: ${{ secrets.GOV_OWNER_PASSWORD }}
+          GOV_OBSERVER_USERNAME: ${{ vars.GOV_OBSERVER_USERNAME }}
+          GOV_OBSERVER_PASSWORD: ${{ secrets.GOV_OBSERVER_PASSWORD }}
+          GOV_NON_MEMBER_OWNER_USERNAME: ${{ vars.GOV_NON_MEMBER_OWNER_USERNAME }}
+          GOV_NON_MEMBER_OWNER_PASSWORD: ${{ secrets.GOV_NON_MEMBER_OWNER_PASSWORD }}
+          GOV_CI_CLIENT_ID: ${{ vars.GOV_CI_CLIENT_ID }}
+          GOV_CI_CLIENT_SECRET: ${{ secrets.GOV_CI_CLIENT_SECRET }}
+          GOV_SERVICE: ${{ vars.GOV_SERVICE }}
+          GOV_DELIVERY_GROUP_ID: ${{ vars.GOV_DELIVERY_GROUP_ID }}
+          GOV_ENVIRONMENT: ${{ vars.GOV_ENVIRONMENT }}
+          CI: "true"
+        shell: bash
+        run: npm run --prefix ui e2e-gov:playwright
+
+      - name: Write UI governance conformance snapshot
+        if: always()
+        shell: bash
+        run: echo "{\"suite\":\"ui-governance\",\"status\":\"${{ steps.ui_gov.outcome || 'skipped' }}\"}" > .ui-governance.snapshot.json
+
       - name: Extract run version
         id: extract
         shell: bash
@@ -101,7 +133,9 @@ jobs:
             .govtest.contract.snapshot.json
             .dxcpapi.governance.snapshot.json
             .governance.conformance.snapshot.json
+            .ui-governance.snapshot.json
             .govtest.last-run.json
+            ui/test-results
 
       - name: Summary
         if: always()
@@ -110,6 +144,7 @@ jobs:
           set -euo pipefail
           merge_status="${{ steps.merge.outputs.status }}"
           run_version="${{ steps.extract.outputs.run_version }}"
+          ui_status="${{ steps.ui_gov.outcome || 'skipped' }}"
           if [[ "${merge_status}" == "0" ]]; then
             conformance="PASS"
           else
@@ -123,8 +158,16 @@ jobs:
             echo "| --- | --- |"
             echo "| Unified governance conformance | ${conformance} |"
             echo "| Merge step status code | ${merge_status:-unset} |"
+            echo "| UI governance suite | ${ui_status} |"
             echo "| GOV_RUN_VERSION | ${run_version:-unset} |"
             echo "| Workflow run | [View run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "### Conformance Layers"
+            echo ""
+            echo "| Layer | Status |"
+            echo "| --- | --- |"
+            echo "| API/runtime merged governance | ${conformance} |"
+            echo "| UI governance (/new/* live Playwright) | ${ui_status} |"
             echo ""
             echo "### Artifact Files"
             echo ""
@@ -134,6 +177,7 @@ jobs:
               ".govtest.contract.snapshot.json" \
               ".dxcpapi.governance.snapshot.json" \
               ".governance.conformance.snapshot.json" \
+              ".ui-governance.snapshot.json" \
               ".govtest.last-run.json"; do
               if [[ -f "${artifact}" ]]; then
                 present="yes"
@@ -150,5 +194,9 @@ jobs:
         run: |
           if [[ "${{ steps.merge.outputs.status }}" != "0" ]]; then
             echo "Merged governance conformance status is FAIL."
+            exit 1
+          fi
+          if [[ "${{ steps.ui_gov.outcome }}" != "success" ]]; then
+            echo "UI governance suite status is ${{ steps.ui_gov.outcome }}."
             exit 1
           fi

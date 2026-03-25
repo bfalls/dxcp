@@ -31,6 +31,15 @@ function toInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function isEngineUnavailableFailure(status: number, payload: any): boolean {
+  if (status < 500) return false;
+  if (payload?.details?.engine_unavailable === true) return true;
+  if (payload?.code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.error_code === "ENGINE_CALL_FAILED") return true;
+  if (payload?.details?.diagnostics?.engine === "spinnaker") return true;
+  return false;
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -91,7 +100,19 @@ export async function validateRollback(context: RunContext, ownerToken: string, 
   const validate = await apiRequest("POST", "/v1/deployments/validate", ownerToken, {
     body: buildDeploymentIntent(context, target.version),
   });
-  const validateBody = await assertStatus(validate, 200, "G: POST /v1/deployments/validate (rollback target)");
+  const validateBody = await decodeJson(validate);
+  if (validate.status !== 200) {
+    if (!isStrictConformance(context) && isEngineUnavailableFailure(validate.status, validateBody)) {
+      context.rollback.skipped = true;
+      context.rollback.skipReason =
+        `Rollback skipped in diagnostic mode because validate returned engine unavailable (${validate.status}).`;
+      logInfo(`G: ${context.rollback.skipReason}`);
+      return;
+    }
+    throw new Error(
+      `G: POST /v1/deployments/validate (rollback target) failed: expected HTTP 200, got ${validate.status}; body=${JSON.stringify(validateBody)}`,
+    );
+  }
   assert(validateBody?.versionRegistered === true, "G: rollback target validate did not confirm versionRegistered=true");
   context.rollback.validationMode = "deployment-validate";
 }
@@ -219,6 +240,10 @@ export async function stepG_rollbackAfterDeploy(context: RunContext, ownerToken:
   context.rollback.targetDeploymentId = target.deploymentId;
 
   await validateRollback(context, ownerToken, target);
+  if (context.rollback.skipped) {
+    markStepEnd(context, step);
+    return;
+  }
   const submitted = await submitRollback(context, ownerToken, target);
   context.rollback.deploymentId = submitted.deploymentId;
   await pollRollback(context, ownerToken, submitted);

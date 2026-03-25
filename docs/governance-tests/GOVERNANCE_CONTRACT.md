@@ -1,5 +1,5 @@
-GovernanceContractVersion: 1.0
-GovernanceFreezeDate: 2026-02-21
+GovernanceContractVersion: 1.1
+GovernanceFreezeDate: 2026-03-24
 ChangeRule: Any new or changed REQUIRED invariant requires a version bump.
 
 # DXCP Governance Contract
@@ -137,7 +137,14 @@ Same key plus same body:
 replay accepted
 
 Same key plus different body:
-409 BUILD_REGISTRATION_CONFLICT
+409 conflict required
+
+Conflict-code scope:
+
+- `BUILD_REGISTRATION_CONFLICT` is REQUIRED for build registration endpoints.
+- Other mutating endpoints MUST return `409` for same-key plus different-request conflicts.
+- Other mutating endpoints MAY use an endpoint-specific conflict code only if that code is explicitly defined in this contract for that endpoint.
+- If no endpoint-specific conflict code is explicitly defined in this contract for a mutating endpoint, the REQUIRED default code is `IDEMPOTENCY_CONFLICT`.
 
 ---------------------------------------------------------------------
 

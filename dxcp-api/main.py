@@ -130,11 +130,19 @@ artifact_source = None
 _ENGINE_INVOKE_COUNTER = 0
 IDEMPOTENCY_REPLAYED_HEADER = "Idempotency-Replayed"
 IDEMPOTENCY_OBSERVABLE_PATHS = {
+    "/v1/deployments",
     "/v1/builds/register",
     "/v1/builds",
     "/v1/builds/upload-capability",
     "/v1/promotions",
 }
+DEPLOYMENT_FINGERPRINT_FIELDS = (
+    "service",
+    "environment",
+    "version",
+    "changeSummary",
+    "recipeId",
+)
 BUILD_REGISTER_FINGERPRINT_FIELDS = (
     "service",
     "version",
@@ -529,7 +537,12 @@ def _quota_scope(group_id: str, environment_name: Optional[str]) -> str:
     return group_id
 
 
-def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -> dict:
+def _policy_snapshot_for_environment(
+    group: dict,
+    environment: Optional[dict],
+    *,
+    deploy_quota: Optional[dict] = None,
+) -> dict:
     env_name = environment.get("name") if environment else None
     max_concurrent = _environment_guardrail_value(group, environment, "max_concurrent_deployments", 1)
     daily_deploy_quota = _environment_guardrail_value(group, environment, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
@@ -539,7 +552,11 @@ def _policy_snapshot_for_environment(group: dict, environment: Optional[dict]) -
         else {"daily_quota_build_register": SETTINGS.daily_quota_build_register}
     )
     active = storage.count_active_deployments_for_group(group["id"], env_name)
-    quota = rate_limiter.get_daily_remaining(_quota_scope(group["id"], env_name), "deploy", daily_deploy_quota)
+    quota = deploy_quota or rate_limiter.get_daily_remaining(
+        _quota_scope(group["id"], env_name),
+        "deploy",
+        daily_deploy_quota,
+    )
     return {
         "max_concurrent_deployments": max_concurrent,
         "current_concurrent_deployments": active,
@@ -1836,6 +1853,26 @@ def _promotion_request_fingerprint(intent: PromotionIntent) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
+def _deployment_request_fingerprint(intent: DeploymentIntent) -> str:
+    payload = intent.dict()
+    normalized_payload = {
+        field: _normalize_fingerprint_value(payload.get(field))
+        for field in DEPLOYMENT_FINGERPRINT_FIELDS
+    }
+    canonical_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def _deployment_actor_identity(actor: Actor, claims: dict) -> dict:
+    return {
+        "actorId": actor.actor_id,
+        "role": actor.role.value,
+        "email": claims.get("email") or claims.get("https://dxcp.example/claims/email") or actor.email,
+        "sub": claims.get("sub"),
+        "azp": claims.get("azp"),
+    }
+
+
 def enforce_idempotency(
     request: Request,
     idempotency_key: str,
@@ -2358,8 +2395,21 @@ def create_deployment(
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
     if recipe_capability_error:
         return recipe_capability_error
+    request_fingerprint = _deployment_request_fingerprint(intent)
+    cached = enforce_idempotency(
+        request,
+        idempotency_key,
+        request_fingerprint=request_fingerprint,
+    )
+    if cached:
+        return cached
     max_concurrent = _environment_guardrail_value(group, env_entry, "max_concurrent_deployments", 1)
     daily_deploy_quota = _environment_guardrail_value(group, env_entry, "daily_deploy_quota", SETTINGS.daily_quota_deploy)
+    pre_submit_quota = rate_limiter.get_daily_remaining(
+        _quota_scope(group["id"], env_entry.get("name")),
+        "deploy",
+        daily_deploy_quota,
+    )
     try:
         rate_limiter.check_mutate(
             actor.actor_id,
@@ -2377,9 +2427,11 @@ def create_deployment(
     except PolicyError as exc:
         _record_deploy_denied(actor, intent, exc.code, group.get("id"))
         raise
-    cached = enforce_idempotency(request, idempotency_key)
-    if cached:
-        return cached
+    policy_snapshot = _policy_snapshot_for_environment(
+        group,
+        env_entry,
+        deploy_quota=pre_submit_quota,
+    )
 
     payload = intent.dict()
     payload.pop("recipeId", None)
@@ -2429,9 +2481,12 @@ def create_deployment(
         "spinnakerApplication": payload.get("spinnakerApplication"),
         "spinnakerPipeline": payload.get("spinnakerPipeline"),
         "deliveryGroupId": group["id"],
+        "actorIdentity": _deployment_actor_identity(actor, claims),
+        "policySnapshot": policy_snapshot,
         "failures": [],
     }
     storage.insert_deployment(record, [])
+    public_record = _deployment_public_view(actor, record)
     logger.info(
         "deployment.created deployment_id=%s spinnaker_execution_id=%s service=%s version=%s idempotency_key=%s",
         record["id"],
@@ -2440,7 +2495,13 @@ def create_deployment(
         record["version"],
         idempotency_key,
     )
-    store_idempotency(request, idempotency_key, record, 201)
+    store_idempotency(
+        request,
+        idempotency_key,
+        public_record,
+        201,
+        request_fingerprint=request_fingerprint,
+    )
     _record_audit_event(
         actor,
         "DEPLOY_SUBMIT",
@@ -2463,7 +2524,7 @@ def create_deployment(
         outcome="SUCCESS",
         summary=f"Deploy submitted for {intent.service}",
     )
-    return _deployment_public_view(actor, record)
+    return public_record
 
 
 @app.post("/v1/policy/summary")
@@ -2739,6 +2800,8 @@ def create_promotion(
         "spinnakerApplication": payload.get("spinnakerApplication"),
         "spinnakerPipeline": payload.get("spinnakerPipeline"),
         "deliveryGroupId": group["id"],
+        "actorIdentity": _deployment_actor_identity(actor, claims),
+        "policySnapshot": policy_snapshot,
         "failures": [],
     }
     storage.insert_deployment(record, [])
@@ -3811,6 +3874,9 @@ def rollback_deployment(
     recipe_capability_error = _capability_check_recipe_service(service_entry, recipe_id, actor)
     if recipe_capability_error:
         return recipe_capability_error
+    cached = enforce_idempotency(request, idempotency_key)
+    if cached:
+        return cached
     max_concurrent = _environment_guardrail_value(group, env_entry, "max_concurrent_deployments", 1)
     daily_rollback_quota = _environment_guardrail_value(group, env_entry, "daily_rollback_quota", SETTINGS.daily_quota_rollback)
     rate_limiter.check_mutate(
@@ -3819,9 +3885,7 @@ def rollback_deployment(
         quota_scope=_quota_scope(group["id"], env_entry.get("name")),
         quota_limit=daily_rollback_quota,
     )
-    cached = enforce_idempotency(request, idempotency_key)
-    if cached:
-        return cached
+    policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     _reap_stale_group_locks(
         group["id"],
         env_entry.get("name"),
@@ -3897,10 +3961,13 @@ def rollback_deployment(
         "spinnakerExecutionId": execution_id,
         "spinnakerExecutionUrl": execution_url,
         "deliveryGroupId": group["id"],
+        "actorIdentity": _deployment_actor_identity(actor, claims),
+        "policySnapshot": policy_snapshot,
         "failures": [],
     }
     storage.insert_deployment(record, [])
-    store_idempotency(request, idempotency_key, record, 201)
+    public_record = _deployment_public_view(actor, record)
+    store_idempotency(request, idempotency_key, public_record, 201)
     _record_audit_event(
         actor,
         "ROLLBACK_SUBMIT",
@@ -3912,7 +3979,7 @@ def rollback_deployment(
         service_name=deployment["service"],
         environment=deployment["environment"],
     )
-    return _deployment_public_view(actor, record)
+    return public_record
 
 
 @app.post("/v1/builds/upload-capability", status_code=201)

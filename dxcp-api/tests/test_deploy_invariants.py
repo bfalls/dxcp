@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header, build_token, configure_auth_env, mock_jwks
 from fake_engine import FakeEngineAdapter
 
 
@@ -146,6 +146,18 @@ def _deploy_payload(
     }
 
 
+def _auth_header_with_identity(
+    roles: list[str],
+    *,
+    subject: str = "owner-1",
+    email: str = "owner@example.com",
+    azp: str = "dxcp-ui-client",
+) -> dict:
+    return {
+        "Authorization": f"Bearer {build_token(roles, subject=subject, email=email, extra_claims={'azp': azp})}"
+    }
+
+
 def _assert_user_safe_error(body: dict) -> None:
     message = (body.get("message") or "").lower()
     operator_hint = (body.get("operator_hint") or "").lower()
@@ -154,10 +166,10 @@ def _assert_user_safe_error(body: dict) -> None:
 
 
 async def test_deploy_happy_path_creates_roll_forward_record(tmp_path: Path, monkeypatch):
-    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         response = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-1", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "deploy-1", **_auth_header_with_identity(["dxcp-platform-admins"])},
             json=_deploy_payload(),
         )
         assert response.status_code == 201
@@ -172,6 +184,25 @@ async def test_deploy_happy_path_creates_roll_forward_record(tmp_path: Path, mon
         assert body["changeSummary"] == "deploy payments"
         assert body["engineExecutionId"].startswith("exec-")
         assert body["engineExecutionUrl"].startswith("http://engine.local/")
+
+        stored = main.storage.get_deployment(body["id"])
+        assert stored["deliveryGroupId"] == "group-1"
+        assert stored["actorIdentity"] == {
+            "actorId": "owner-1",
+            "role": "PLATFORM_ADMIN",
+            "email": "owner@example.com",
+            "sub": "owner-1",
+            "azp": "dxcp-ui-client",
+        }
+        assert stored["policySnapshot"]["max_concurrent_deployments"] == 1
+        assert stored["policySnapshot"]["current_concurrent_deployments"] == 0
+        assert stored["policySnapshot"]["daily_deploy_quota"] == 1
+        # The stored snapshot must freeze the submit-time decision basis, not the
+        # post-submit quota state created by this successful mutation.
+        assert stored["policySnapshot"]["deployments_used"] == 0
+        assert stored["policySnapshot"]["deployments_remaining"] == 1
+        live_quota = main.rate_limiter.get_daily_remaining("group-1:sandbox", "deploy", 1)
+        assert live_quota == {"used": 1, "remaining": 0, "limit": 1}
 
 
 async def test_deployment_record_update_methods_are_unsupported(tmp_path: Path, monkeypatch):
@@ -215,7 +246,7 @@ async def test_internal_update_preserves_protected_deployment_fields(tmp_path: P
     async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         created = await client.post(
             "/v1/deployments",
-            headers={"Idempotency-Key": "deploy-immutable-2", **auth_header(["dxcp-platform-admins"])},
+            headers={"Idempotency-Key": "deploy-immutable-2", **_auth_header_with_identity(["dxcp-platform-admins"])},
             json=_deploy_payload(),
         )
         assert created.status_code == 201
@@ -225,7 +256,18 @@ async def test_internal_update_preserves_protected_deployment_fields(tmp_path: P
         main.storage.update_deployment(deployment_id, "SUCCEEDED", [], outcome="SUCCEEDED")
 
         after = main.storage.get_deployment(deployment_id)
-        for field in ["service", "environment", "recipeId", "version", "deploymentKind", "rollbackOf", "intentCorrelationId"]:
+        for field in [
+            "service",
+            "environment",
+            "recipeId",
+            "version",
+            "deploymentKind",
+            "rollbackOf",
+            "deliveryGroupId",
+            "actorIdentity",
+            "policySnapshot",
+            "intentCorrelationId",
+        ]:
             assert after[field] == before[field]
 
 
@@ -264,6 +306,34 @@ async def test_deploy_requires_idempotency_key(tmp_path: Path, monkeypatch):
     assert missing.json()["code"] == "IDMP_KEY_REQUIRED"
     assert empty.status_code == 400
     assert empty.json()["code"] == "IDMP_KEY_REQUIRED"
+
+
+async def test_deploy_same_idempotency_key_same_body_replays(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        headers = {"Idempotency-Key": "deploy-replay-1", **auth_header(["dxcp-platform-admins"])}
+        payload = _deploy_payload(change_summary="deploy payments replay")
+
+        first = await client.post("/v1/deployments", headers=headers, json=payload)
+        second = await client.post("/v1/deployments", headers=headers, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json() == second.json()
+    assert first.headers["Idempotency-Replayed"] == "false"
+    assert second.headers["Idempotency-Replayed"] == "true"
+    assert len(main.spinnaker.triggered) == 1
+
+
+async def test_deploy_same_idempotency_key_different_body_conflicts(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        headers = {"Idempotency-Key": "deploy-conflict-1", **auth_header(["dxcp-platform-admins"])}
+
+        first = await client.post("/v1/deployments", headers=headers, json=_deploy_payload(change_summary="first summary"))
+        second = await client.post("/v1/deployments", headers=headers, json=_deploy_payload(change_summary="different summary"))
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["code"] == "IDEMPOTENCY_CONFLICT"
 
 
 async def test_deploy_rejects_version_not_found(tmp_path: Path, monkeypatch):

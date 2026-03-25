@@ -1,8 +1,6 @@
-import { test, expect } from "@playwright/test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { captureAccessTokenFromSpaCache, loadGovtestEnv } from "./helpers/auth";
-import { getAuthStatePath } from "./helpers/authState";
+import { test, expect, type Page } from "@playwright/test";
+import { loadGovtestEnv } from "./helpers/auth";
+import { ensureAuthState, ensureGovBootstrapFromAuthStates, getAuthStatePath, tokenFromAuthState } from "./helpers/authState";
 
 loadGovtestEnv();
 
@@ -28,36 +26,74 @@ function missingGovEnv(): string[] {
   return missing;
 }
 
-async function hasBuildProvenance(
-  apiBase: string,
-  ownerToken: string,
-  service: string,
-  version: string,
-): Promise<boolean> {
-  const response = await fetch(
-    `${apiBase}/v1/builds?service=${encodeURIComponent(service)}&version=${encodeURIComponent(version)}`,
-    { method: "GET", headers: { Authorization: `Bearer ${ownerToken}` } },
-  );
-  if (!response.ok) return false;
-  const body = await response.json().catch(() => null);
-  if (!body || body.code) return false;
-  return typeof body.version === "string" && body.version.trim().length > 0;
+function serviceName(): string {
+  return (process.env.GOV_SERVICE || "demo-service").trim();
 }
 
-function resolveRunVersionFromLastRunArtifact(): string {
-  const candidates = [
-    join(process.cwd(), ".govtest.last-run.json"),
-    join(process.cwd(), "..", ".govtest.last-run.json"),
-  ];
-  const artifactPath = candidates.find((p) => existsSync(p));
-  if (!artifactPath) return "";
-  try {
-    const body = JSON.parse(readFileSync(artifactPath, "utf8"));
-    const value = typeof body?.runVersion === "string" ? body.runVersion.trim() : "";
-    return value;
-  } catch {
-    return "";
+function escapedRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function apiBase(): string {
+  return (process.env.GOV_DXCP_API_BASE || "").trim().replace(/\/$/, "");
+}
+
+async function apiJson(path: string, token: string): Promise<any> {
+  const response = await fetch(`${apiBase()}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`GET ${path} failed (${response.status}): ${JSON.stringify(payload)}`);
   }
+  return payload;
+}
+
+async function selectableOptionValues(page: Page, selector: string): Promise<string[]> {
+  const control = page.locator(selector);
+  const options = await control.locator("option").evaluateAll((nodes) =>
+    nodes
+      .map((node) => ({
+        value: (node as HTMLOptionElement).value,
+        disabled: (node as HTMLOptionElement).disabled,
+      }))
+      .filter((node) => node.value && node.disabled !== true),
+  );
+  return options.map((option) => option.value);
+}
+
+async function ensureSelectedValue(page: Page, selector: string): Promise<string | null> {
+  const control = page.locator(selector);
+  let value = await control.inputValue();
+  if (value) return value;
+  const options = await selectableOptionValues(page, selector);
+  if (options.length === 0) return null;
+  await control.selectOption(options[0]);
+  value = await control.inputValue();
+  return value || null;
+}
+
+async function waitForOwnerDeployOutcome(page: Page): Promise<"enabled" | "blocked" | "permission-limited" | "readiness-error"> {
+  const deployButton = page.getByRole("button", { name: "Deploy", exact: true });
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    if (await deployButton.isEnabled().catch(() => false)) return "enabled";
+    if (await page.getByText("Deploy blocked", { exact: true }).first().isVisible().catch(() => false)) return "blocked";
+    if (await page.getByText("Permission-limited deploy", { exact: true }).first().isVisible().catch(() => false)) {
+      return "permission-limited";
+    }
+    if (await page.getByText("Readiness could not be refreshed", { exact: true }).first().isVisible().catch(() => false)) {
+      return "readiness-error";
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error("Timed out waiting for a meaningful owner deploy outcome.");
+}
+
+async function openAuthenticatedPage(browser: Parameters<typeof test.beforeAll>[0]["browser"], role: "owner" | "observer", uiBase: string) {
+  const context = await browser.newContext({ storageState: getAuthStatePath(role), baseURL: uiBase });
+  const page = await context.newPage();
+  return { context, page };
 }
 
 const missingEnv = missingGovEnv();
@@ -68,8 +104,8 @@ if (missingEnv.length > 0) {
 test.describe("govtest thin UI proof", () => {
   test.setTimeout(180000);
 
-  let ownerStatePath = "";
   const uiBase = process.env.GOV_DXCP_UI_BASE?.trim() || "http://localhost:5173";
+  const configuredService = serviceName();
 
   test.skip(
     missingEnv.length > 0,
@@ -79,224 +115,188 @@ test.describe("govtest thin UI proof", () => {
   test.beforeAll(async ({ browser }, testInfo) => {
     testInfo.setTimeout(180000);
     void browser;
-    ownerStatePath = getAuthStatePath("owner");
+    await Promise.all([ensureGovBootstrapFromAuthStates(), ensureAuthState("observer")]);
   });
 
-  test("owner auth + deploy wiring + provenance fields", async ({ browser }) => {
-    const ownerContext = await browser.newContext({ storageState: ownerStatePath, baseURL: uiBase });
-    const page = await ownerContext.newPage();
+  test("owner coverage uses the current /new/* governed routes", async ({ browser }) => {
+    const ownerToken = await tokenFromAuthState("owner");
+    const visibleDeployments = await apiJson(`/v1/deployments?service=${encodeURIComponent(configuredService)}`, ownerToken);
+    const { context, page } = await openAuthenticatedPage(browser, "owner", uiBase);
     try {
-      await page.goto("/");
-
+      await page.goto("/new/applications");
       await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
-      await expect(page.getByTestId("nav-deploy")).toBeVisible();
-      const ownerToken = await captureAccessTokenFromSpaCache(page);
-      const apiBase = (process.env.GOV_DXCP_API_BASE || "").trim().replace(/\/$/, "");
-      if (!apiBase) {
-        throw new Error("GOV_DXCP_API_BASE is required for govtest UI proof.");
-      }
+      await expect(page).toHaveURL(new RegExp("/new/applications$"));
+      await expect(page.getByRole("heading", { name: "Applications", exact: true }).first()).toBeVisible();
+      await expect(page.getByText("Choose an application to continue in DXCP")).toBeVisible();
 
-      await page.getByTestId("nav-deploy").click();
-      await expect(page).toHaveURL(/\/deploy/);
+      await page.goto(`/new/applications/${encodeURIComponent(configuredService)}`);
+      await expect(page).toHaveURL(new RegExp(`/new/applications/${escapedRegExp(encodeURIComponent(configuredService))}$`));
+      await expect(page.getByRole("heading", { name: "Application", exact: true })).toBeVisible();
+      await expect(page.getByText(configuredService, { exact: true })).toBeVisible();
 
-      // Deterministic guard: provenance workflow requires at least one configured environment.
-      const environmentSelector = page.getByTestId("environment-selector");
-      await expect(environmentSelector).toBeVisible({ timeout: 20000 });
-      await expect(environmentSelector.locator("option")).toHaveCount(1, { timeout: 20000 });
-      await expect(environmentSelector).toHaveValue("sandbox");
+      await page.goto(`/new/applications/${encodeURIComponent(configuredService)}/deploy`);
+      await expect(page).toHaveURL(
+        new RegExp(`/new/applications/${escapedRegExp(encodeURIComponent(configuredService))}/deploy$`),
+      );
+      await expect(page.getByRole("heading", { name: "Deploy Application", exact: true })).toBeVisible();
+      const deployApplicationInput = page.locator("#new-deploy-application");
+      await expect(deployApplicationInput).toBeVisible({ timeout: 20000 });
+      await expect(page.getByText("Deploy workflow could not be loaded")).toHaveCount(0);
+      await expect(page.getByText("Deploy workflow is not available on this route")).toHaveCount(0);
+      await expect(deployApplicationInput).toHaveValue(configuredService);
+      const environmentSelect = page.locator("#new-deploy-environment");
+      const strategySelect = page.locator("#new-deploy-strategy");
+      const versionSelect = page.locator("#new-deploy-version");
+      const changeSummary = page.locator("#new-deploy-change-summary");
+      const deployButton = page.getByRole("button", { name: "Deploy", exact: true });
+      await expect(environmentSelect).toBeEnabled();
+      await expect(strategySelect).toBeEnabled();
+      await expect(versionSelect).toBeEnabled();
+      await expect(changeSummary).toBeEditable();
+      await expect(deployButton).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Readiness review", exact: true })).toBeVisible();
 
-      const serviceSelect = page.getByTestId("deploy-service-select");
-      await expect(serviceSelect).toBeVisible();
-      const configuredService = (process.env.GOV_SERVICE || "").trim() || "demo-service";
-      const refreshDataButton = page.getByRole("button", { name: /refresh data/i }).first();
-      const refreshBanner = page.getByText(/Refresh required\./i).first();
-      let serviceReady = false;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        const serviceOptions = await serviceSelect
-          .locator("option")
-          .evaluateAll((options) =>
-            options
-              .map((option) => (option as HTMLOptionElement).value)
-              .filter((value) => Boolean(value) && value !== "__none__"),
-          );
-        if (serviceOptions.includes(configuredService)) {
-          await serviceSelect.selectOption(configuredService);
-          await expect(serviceSelect).toHaveValue(configuredService);
-          serviceReady = true;
-          break;
-        }
-        if (serviceOptions.length > 0) {
-          await serviceSelect.selectOption(serviceOptions[0]);
-          await expect(serviceSelect).toHaveValue(serviceOptions[0]);
-          serviceReady = true;
-          break;
-        }
-        if ((await refreshBanner.isVisible().catch(() => false)) && (await refreshDataButton.isVisible().catch(() => false))) {
-          await refreshDataButton.click();
-          await page.waitForTimeout(1200);
-          continue;
-        }
-        await page.waitForTimeout(1200);
-      }
-      if (!serviceReady) {
-        const currentValue = await serviceSelect.inputValue().catch(() => "<unavailable>");
-        throw new Error(
-          `No deployable service available after refresh attempts. configuredService=${configuredService} currentValue=${currentValue}`,
-        );
-      }
-
-      // Cross-browser determinism: ensure a strategy is explicitly selected.
-      const strategyPrompt = page.getByText("Select a strategy to continue.");
-      if ((await strategyPrompt.count()) > 0 && (await strategyPrompt.first().isVisible().catch(() => false))) {
-        const preferredStrategy = page.getByRole("radio", { name: /Default Deploy v2/i }).first();
-        if (await preferredStrategy.isVisible().catch(() => false)) {
-          await preferredStrategy.click();
-        } else {
-          await page.getByRole("radio").first().click();
-        }
-        await expect(strategyPrompt).toHaveCount(0, { timeout: 10000 });
-      }
-
-      // Deploy page refreshes versions asynchronously; wait until the native options settle.
-      await expect(page.getByText("Loading versions...")).toHaveCount(0, { timeout: 20000 });
-      await expect(page.getByText("Refreshing versions...")).toHaveCount(0, { timeout: 20000 });
-
-      const versionSelect = page.getByTestId("deploy-version-select");
-      const versionValues = await versionSelect
-        .locator("option")
-        .evaluateAll((options) =>
-          options
-            .map((option) => (option as HTMLOptionElement).value)
-            .filter((value) => Boolean(value) && value !== "__select__" && value !== "__custom__"),
-        );
-      const artifactRunVersion = resolveRunVersionFromLastRunArtifact();
-      const strictConformance =
-        ((process.env.GOV_CONFORMANCE_PROFILE || "").trim().toLowerCase() || "diagnostic") === "strict";
-      const sortedVersionValues = [...versionValues].sort((a, b) => {
-        const aMatch = a.match(/^0\.1\.(\d+)$/);
-        const bMatch = b.match(/^0\.1\.(\d+)$/);
-        const aPatch = aMatch ? Number(aMatch[1]) : -1;
-        const bPatch = bMatch ? Number(bMatch[1]) : -1;
-        return bPatch - aPatch;
-      });
-
-      let selectedVersion = "";
-      if (artifactRunVersion) {
-        if (!versionValues.includes(artifactRunVersion) && strictConformance) {
-          throw new Error(
-            `Strict conformance requires runVersion=${artifactRunVersion} from .govtest.last-run.json, but it is not available in Deploy version list.`,
-          );
-        }
-        if (versionValues.includes(artifactRunVersion)) {
-          const configuredHasProvenance = await hasBuildProvenance(
-            apiBase,
-            ownerToken,
-            configuredService,
-            artifactRunVersion,
-          );
-          if (configuredHasProvenance) {
-            selectedVersion = artifactRunVersion;
-          } else if (strictConformance) {
-            throw new Error(
-              `Strict conformance requires runVersion=${artifactRunVersion} from .govtest.last-run.json, but it has no build provenance record.`,
-            );
-          }
-        }
-      }
-      if (!selectedVersion) {
-        for (const candidate of sortedVersionValues) {
-          if (await hasBuildProvenance(apiBase, ownerToken, configuredService, candidate)) {
-            selectedVersion = candidate;
-            break;
-          }
-        }
+      await ensureSelectedValue(page, "#new-deploy-environment");
+      const selectableStrategies = await selectableOptionValues(page, "#new-deploy-strategy");
+      if (selectableStrategies.length === 0) {
+        await expect(page.getByText("Deploy blocked", { exact: true }).first()).toBeVisible();
+        await expect(deployButton).toBeDisabled();
+        await expect(
+          page.getByText("DXCP did not return a current Deployment Strategy that can be used for a new deploy on this route. Review Deployment Group policy before you deploy again."),
+        ).toBeVisible();
+      } else {
+        await ensureSelectedValue(page, "#new-deploy-strategy");
+        const selectedVersion = await ensureSelectedValue(page, "#new-deploy-version");
         if (!selectedVersion) {
-          throw new Error(
-            `No deployable version with build provenance found for service=${configuredService}.`,
-          );
+          await expect(deployButton).toBeDisabled();
+          await expect(page.getByText("No registered version is currently available.")).toBeVisible();
+        } else {
+          await changeSummary.fill("Governance owner UI proof deploy intent.");
+
+          const ownerOutcome = await waitForOwnerDeployOutcome(page);
+          if (ownerOutcome === "enabled") {
+            await expect(page.getByText("Ready to deploy", { exact: true })).toBeVisible();
+            await expect(page.getByText("DXCP has confirmed that guardrails allow this deploy now.")).toBeVisible();
+            await expect(deployButton).toBeEnabled();
+          } else if (ownerOutcome === "blocked") {
+            await expect(page.getByText("Deploy blocked", { exact: true }).first()).toBeVisible();
+            await expect(deployButton).toBeDisabled();
+            await expect(page.getByText(/DXCP already has|daily deploy quota|selected Deployment Strategy|Unable to validate deployment/i).first()).toBeVisible();
+          } else if (ownerOutcome === "readiness-error") {
+            await expect(page.getByText("Readiness could not be refreshed", { exact: true })).toBeVisible();
+            await expect(deployButton).toBeDisabled();
+            await expect(page.getByText("DXCP could not validate this deploy intent right now.")).toBeVisible();
+          } else {
+            await expect(page.getByText("Permission-limited deploy", { exact: true })).toBeVisible();
+            await expect(deployButton).toBeDisabled();
+            await expect(page.getByText(/does not include Deploy|does not allow deploys/i).first()).toBeVisible();
+          }
         }
       }
 
-      let selected = false;
-      const selectByValue = async (value: string): Promise<boolean> => {
-        try {
-          await versionSelect.selectOption(value);
-          await expect(versionSelect).toHaveValue(value, { timeout: 5000 });
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      selected = await selectByValue(selectedVersion);
-      if (!selected) {
-        throw new Error(`Could not select deploy version. target=${selectedVersion}`);
-      }
-      const useStrictRunIdChecks = strictConformance && artifactRunVersion.length > 0 && selectedVersion === artifactRunVersion;
-      console.log(`[govtest.spec] selected version=${selectedVersion} strict=${useStrictRunIdChecks ? "true" : "false"}`);
-      const effectiveVersionValue = (await versionSelect.inputValue().catch(() => "")).trim();
-      if (effectiveVersionValue !== selectedVersion) {
-        throw new Error(
-          `Version selector did not settle to selected value. expected=${selectedVersion} actual=${effectiveVersionValue || "<empty>"}`,
-        );
+      await page.goto(`/new/deployments?service=${encodeURIComponent(configuredService)}`);
+      await expect(page).toHaveURL(new RegExp(`/new/deployments\\?service=${escapedRegExp(encodeURIComponent(configuredService))}`));
+      await expect(page.getByRole("heading", { name: "Deployments", exact: true })).toBeVisible();
+      await expect(page.getByText("Loading deployment history")).toHaveCount(0, { timeout: 20000 });
+      const openDeploymentLink = page.getByRole("link", { name: "Open", exact: true }).first();
+      if (Array.isArray(visibleDeployments) && visibleDeployments.length > 0) {
+        await expect(openDeploymentLink).toBeVisible();
+        const deploymentHref = await openDeploymentLink.getAttribute("href");
+        expect(deploymentHref).toMatch(/^\/new\/deployments\/[^/]+$/);
+        await openDeploymentLink.click();
+        await expect(page).toHaveURL(/\/new\/deployments\/[^/]+$/);
+        await expect(page.getByRole("heading", { name: "Deployment", exact: true })).toBeVisible();
+        await expect(page.locator(".new-page-object-identity")).toContainText("Deployment ");
+        await expect(page.getByRole("heading", { name: "Deployment timeline", exact: true })).toBeVisible();
+      } else {
+        const emptyTitle = page.getByText("No deployments recorded yet", { exact: true });
+        const noResultsTitle = page.getByText("No deployments match this scope", { exact: true });
+        const renderedEmptyState = (await emptyTitle.isVisible().catch(() => false)) || (await noResultsTitle.isVisible().catch(() => false));
+        expect(renderedEmptyState).toBeTruthy();
       }
 
-      const provenanceHeading = page.getByText("Build Provenance", { exact: true });
-      const provenanceHeadingVisible = await provenanceHeading.isVisible().catch(() => false);
-      if (!provenanceHeadingVisible) {
-        const policyResp = await fetch(`${apiBase}/v1/ui/policy/ui-exposure`, {
-          method: "GET",
-          headers: { Authorization: `Bearer ${ownerToken}` },
-        });
-        const policyBody = await policyResp.json().catch(() => null);
-        if (!policyResp.ok) {
-          throw new Error(`Could not verify UI exposure policy (${policyResp.status}): ${JSON.stringify(policyBody)}`);
-        }
-        const policyDisplay =
-          policyBody?.policy?.artifactRef?.display === true || policyBody?.artifactRef?.display === true;
-        if (policyDisplay) {
-          throw new Error("Build Provenance section is hidden while ui-exposure policy enables artifactRef.display=true.");
-        }
-        console.log("[govtest.spec] Build Provenance is hidden by UI exposure policy; skipping provenance field assertions.");
-        return;
-      }
-
-      await expect(provenanceHeading).toBeVisible({ timeout: 20000 });
-      await expect(page.getByText("Loading provenance...")).toHaveCount(0, { timeout: 20000 });
-      const unavailable = page.getByText("Build provenance unavailable for this version.");
-      const provenanceBlock = page.locator(".provenance-block");
-      await expect
-        .poll(async () => {
-          const unavailableVisible =
-            (await unavailable.count()) > 0 && (await unavailable.first().isVisible().catch(() => false));
-          const publisherVisible = await provenanceBlock
-            .getByText("Publisher", { exact: true })
-            .first()
-            .isVisible()
-            .catch(() => false);
-          return unavailableVisible || publisherVisible;
-        }, { timeout: 20000 })
-        .toBeTruthy();
-
-      if ((await unavailable.count()) > 0 && (await unavailable.first().isVisible())) {
-        throw new Error(`Build provenance unavailable for selected version ${selectedVersion}`);
-      }
-
-      await expect(provenanceBlock).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("Publisher", { exact: true })).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("Git SHA", { exact: true })).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("Registered", { exact: true })).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("Artifact", { exact: true })).toBeVisible({ timeout: 20000 });
-      await expect(provenanceBlock.getByText("CI Provider", { exact: true })).toBeVisible({ timeout: 20000 });
-      const runIdLabel = provenanceBlock.getByText("Run ID", { exact: true }).first();
-      await expect(runIdLabel).toBeVisible({ timeout: 20000 });
-      if (useStrictRunIdChecks) {
-        const runIdValue = runIdLabel.locator("xpath=following::dd[1]").first();
-        await expect(runIdValue).toBeVisible({ timeout: 20000 });
-        await expect(runIdValue).not.toHaveText(/^\s*-\s*$/);
-        await expect(runIdValue).not.toHaveText(/^\s*$/);
-      }
+      await page.goto("/new/insights");
+      await expect(page).toHaveURL(/\/new\/insights$/);
+      await expect(page.getByRole("heading", { name: "Insights", exact: true })).toBeVisible();
+      await expect(page.getByLabel("Time window")).toBeVisible();
+      await expect(page.getByLabel("Application")).toBeVisible();
+      await expect(page.getByLabel("Deployment Group")).toBeVisible();
     } finally {
-      await ownerContext.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
+    }
+  });
+
+  test("observer direct access to the current /new deploy route stays non-mutating and truthful", async ({ browser }) => {
+    const { context, page } = await openAuthenticatedPage(browser, "observer", uiBase);
+    try {
+      const attemptedMutationRequests: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "POST" && /\/v1\/deployments(?:\/validate)?$/.test(request.url())) {
+          attemptedMutationRequests.push(request.url());
+        }
+      });
+      await page.goto(`/new/applications/${encodeURIComponent(configuredService)}/deploy`);
+      await expect(page).toHaveURL(
+        new RegExp(`/new/applications/${escapedRegExp(encodeURIComponent(configuredService))}/deploy$`),
+      );
+      await expect(page.getByRole("heading", { name: "Deploy Application", exact: true })).toBeVisible();
+      await expect(page.getByText("Read-only access")).toBeVisible();
+      await expect(page.getByText("Observers can review deploy intent and readiness, but deploy remains read-only on this workflow.")).toBeVisible();
+      await expect(page.locator(".new-page-read-only-value")).toHaveText("Read-only");
+      await expect(page.locator("#new-deploy-change-summary")).toBeVisible({ timeout: 20000 });
+      await expect(page.locator("#new-deploy-environment")).toBeDisabled();
+      await expect(page.locator("#new-deploy-strategy")).toBeDisabled();
+      await expect(page.locator("#new-deploy-version")).toBeDisabled();
+      const changeSummary = page.locator("#new-deploy-change-summary");
+      await expect(changeSummary).toHaveJSProperty("readOnly", true);
+      const originalValue = await changeSummary.inputValue();
+      await changeSummary.click();
+      await page.keyboard.type("observer cannot mutate");
+      await expect(changeSummary).toHaveValue(originalValue);
+      await page.waitForTimeout(500);
+      expect(attemptedMutationRequests).toHaveLength(0);
+      await expect(page.getByRole("button", { name: "Deploy" })).toHaveCount(0);
+    } finally {
+      await context.close().catch(() => undefined);
+    }
+  });
+
+  test("non-admin direct access to /new/admin resolves to blocked access", async ({ browser }) => {
+    const { context, page } = await openAuthenticatedPage(browser, "owner", uiBase);
+    try {
+      await page.goto("/new/admin");
+      await expect(page).toHaveURL(/\/new\/admin$/);
+      await expect(page.getByRole("heading", { name: "Admin", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Admin access required", exact: true })).toBeVisible();
+      await expect(page.getByText(/This area is limited to platform administration\./).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: "Open Applications" }).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: "Open Deployments" }).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: "Open Insights" }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+    } finally {
+      await context.close().catch(() => undefined);
+    }
+  });
+
+  test("legacy routes remain only as explicit coexistence targets from the current /new experience", async ({ browser }) => {
+    const { context, page } = await openAuthenticatedPage(browser, "owner", uiBase);
+    try {
+      await page.goto(`/new/applications/${encodeURIComponent(configuredService)}`);
+      await expect(page.getByRole("link", { name: "Return to Legacy" })).toHaveAttribute(
+        "href",
+        `/services/${encodeURIComponent(configuredService)}`,
+      );
+
+      await page.goto(`/new/applications/${encodeURIComponent(configuredService)}/deploy`);
+      await expect(page.getByRole("link", { name: "Return to Legacy" })).toHaveAttribute(
+        "href",
+        `/deploy?service=${encodeURIComponent(configuredService)}`,
+      );
+
+      await page.goto("/new/deployments");
+      await expect(page.getByRole("link", { name: "Return to Legacy" })).toHaveAttribute("href", "/deployments");
+    } finally {
+      await context.close().catch(() => undefined);
     }
   });
 });

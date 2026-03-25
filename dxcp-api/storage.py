@@ -59,6 +59,9 @@ PROTECTED_DEPLOYMENT_FIELDS = (
     "version",
     "deploymentKind",
     "rollbackOf",
+    "deliveryGroupId",
+    "actorIdentity",
+    "policySnapshot",
     "intentCorrelationId",
 )
 
@@ -76,6 +79,21 @@ def _assert_protected_fields_unchanged(before: Optional[dict], after: Optional[d
     for field in PROTECTED_DEPLOYMENT_FIELDS:
         if before.get(field) != after.get(field):
             raise ImmutableDeploymentError(f"Cannot change protected deployment field: {field}")
+
+
+def _json_dumps_compact(value: Optional[dict]) -> Optional[str]:
+    if value is None:
+        return None
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _json_loads_safe(value: Optional[str]) -> Optional[dict]:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except Exception:
+        return None
 
 
 class Storage:
@@ -117,7 +135,9 @@ class Storage:
                 spinnaker_pipeline TEXT,
                 rollback_of TEXT,
                 source_environment TEXT,
-                delivery_group_id TEXT
+                delivery_group_id TEXT,
+                actor_identity_json TEXT,
+                policy_snapshot_json TEXT
             )
             """
         )
@@ -134,6 +154,8 @@ class Storage:
         self._ensure_column(cur, "deployments", "recipe_revision", "INTEGER")
         self._ensure_column(cur, "deployments", "effective_behavior_summary", "TEXT")
         self._ensure_column(cur, "deployments", "engine_type", "TEXT")
+        self._ensure_column(cur, "deployments", "actor_identity_json", "TEXT")
+        self._ensure_column(cur, "deployments", "policy_snapshot_json", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS failures (
@@ -1267,6 +1289,8 @@ class Storage:
         intent_correlation_id = record.get("intentCorrelationId")
         superseded_by = record.get("supersededBy")
         engine_type = record.get("engine_type") or DEFAULT_ENGINE_TYPE
+        actor_identity_json = _json_dumps_compact(record.get("actorIdentity"))
+        policy_snapshot_json = _json_dumps_compact(record.get("policySnapshot"))
         conn = self._connect()
         cur = conn.cursor()
         cur.execute(
@@ -1275,8 +1299,8 @@ class Storage:
                 id, service, environment, version, recipe_id, recipe_revision, effective_behavior_summary, state, deployment_kind, outcome,
                 intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
                 engine_type, spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
-                rollback_of, source_environment, delivery_group_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rollback_of, source_environment, delivery_group_id, actor_identity_json, policy_snapshot_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -1302,6 +1326,8 @@ class Storage:
                 record.get("rollbackOf"),
                 record.get("sourceEnvironment"),
                 record.get("deliveryGroupId"),
+                actor_identity_json,
+                policy_snapshot_json,
             ),
         )
         self._replace_failures(cur, record["id"], failures)
@@ -1470,6 +1496,8 @@ class Storage:
             "rollbackOf": row["rollback_of"],
             "sourceEnvironment": row["source_environment"],
             "deliveryGroupId": row["delivery_group_id"],
+            "actorIdentity": _json_loads_safe(row["actor_identity_json"]),
+            "policySnapshot": _json_loads_safe(row["policy_snapshot_json"]),
             "failures": failures,
         }
 
@@ -2541,6 +2569,8 @@ class DynamoStorage:
             "rollbackOf": record.get("rollbackOf"),
             "sourceEnvironment": record.get("sourceEnvironment"),
             "delivery_group_id": record.get("deliveryGroupId"),
+            "actorIdentity": record.get("actorIdentity"),
+            "policySnapshot": record.get("policySnapshot"),
             "failures": failures,
         }
         try:
@@ -2642,6 +2672,9 @@ class DynamoStorage:
             "spinnakerPipeline": item.get("spinnakerPipeline"),
             "rollbackOf": item.get("rollbackOf"),
             "sourceEnvironment": item.get("sourceEnvironment"),
+            "deliveryGroupId": item.get("delivery_group_id"),
+            "actorIdentity": item.get("actorIdentity"),
+            "policySnapshot": item.get("policySnapshot"),
             "failures": item.get("failures", []),
         }
 
@@ -2685,6 +2718,9 @@ class DynamoStorage:
                     "spinnakerPipeline": item.get("spinnakerPipeline"),
                     "rollbackOf": item.get("rollbackOf"),
                     "sourceEnvironment": item.get("sourceEnvironment"),
+                    "deliveryGroupId": item.get("delivery_group_id"),
+                    "actorIdentity": item.get("actorIdentity"),
+                    "policySnapshot": item.get("policySnapshot"),
                     "failures": item.get("failures", []),
                 }
             )

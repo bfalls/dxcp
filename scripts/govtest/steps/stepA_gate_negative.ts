@@ -34,6 +34,32 @@ async function putCiPublishersWithRetry(adminToken: string, publishers: any[], i
   throw new Error(`A: PUT /v1/admin/system/ci-publishers failed after retries; body=${JSON.stringify(lastPayload)}`);
 }
 
+async function assertCiDenyTakesEffect(
+  context: RunContext,
+  ciToken: string,
+  attempts = 5,
+): Promise<void> {
+  let lastStatus = 0;
+  let lastPayload: any = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const ciDenied = await apiRequest("POST", "/v1/builds/register", ciToken, {
+      idempotencyKey: `${context.idempotencyKeys.gateNegative}-ci-not-allowlisted-${attempt}`,
+      body: buildRegisterExistingPayload(context),
+    });
+    lastStatus = ciDenied.status;
+    lastPayload = await decodeJson(ciDenied);
+    if (ciDenied.status === 403 && lastPayload?.code === "CI_ONLY") {
+      return;
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+  throw new Error(
+    `A: POST /v1/builds/register (ci token not allowlisted) failed after propagation retries: expected HTTP 403/CI_ONLY, got ${lastStatus}; body=${JSON.stringify(lastPayload)}`,
+  );
+}
+
 export async function stepA_proveCiGateNegative(
   context: RunContext,
   ownerToken: string,
@@ -64,11 +90,7 @@ export async function stepA_proveCiGateNegative(
 
   await putCiPublishersWithRetry(adminToken, denyAllPublishers, `govtest-${context.runId}-ci-gate-deny`);
   try {
-    const ciDenied = await apiRequest("POST", "/v1/builds/register", ciToken, {
-      idempotencyKey: `${context.idempotencyKeys.gateNegative}-ci-not-allowlisted`,
-      body: buildRegisterExistingPayload(context),
-    });
-    await assertStatus(ciDenied, 403, "A: POST /v1/builds/register (ci token not allowlisted)", "CI_ONLY");
+    await assertCiDenyTakesEffect(context, ciToken);
   } finally {
     await putCiPublishersWithRetry(adminToken, originalPublishers, `govtest-${context.runId}-ci-gate-restore`);
   }
