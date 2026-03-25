@@ -69,7 +69,6 @@ from delivery_state import base_outcome_from_state, normalize_deployment_kind, r
 from storage import ImmutableDeploymentError, build_storage, utc_now
 from admin_system_routes import (
     register_admin_system_routes,
-    read_ci_publishers_with_fallback,
     read_mutations_disabled_with_fallback,
     read_ui_exposure_policy,
 )
@@ -335,7 +334,10 @@ def _read_ci_publishers_from_ssm() -> Optional[list[CiPublisher]]:
     try:
         if BotoConfig is not None:
             cfg = BotoConfig(connect_timeout=1, read_timeout=1, retries={"max_attempts": 1, "mode": "standard"})
-            client = boto3.client("ssm", config=cfg)
+            try:
+                client = boto3.client("ssm", config=cfg)
+            except TypeError:
+                client = boto3.client("ssm")
         else:
             client = boto3.client("ssm")
         response = client.get_parameter(Name=f"{prefix}/ci_publishers", WithDecryption=True)
@@ -353,7 +355,10 @@ def _read_ci_publishers_from_ssm() -> Optional[list[CiPublisher]]:
 
 
 def _configured_ci_publishers() -> list[CiPublisher]:
-    return read_ci_publishers_with_fallback(SETTINGS.ci_publishers)
+    publishers = _read_ci_publishers_from_ssm()
+    if publishers is not None:
+        return publishers
+    return _coerce_ci_publishers(SETTINGS.ci_publishers)
 
 
 def require_ci_publisher(claims: dict, action: str) -> tuple[Optional[str], Optional[JSONResponse]]:
@@ -3991,10 +3996,10 @@ def create_upload_capability(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
+    guardrails.require_mutations_enabled()
     _, ci_error = require_ci_role_and_publisher(actor, claims, "request build upload capability")
     if ci_error:
         return ci_error
-    guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "upload_capability")
     cached = enforce_idempotency(request, idempotency_key)
@@ -4051,10 +4056,10 @@ def register_build(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
+    guardrails.require_mutations_enabled()
     publisher_name, ci_error = require_ci_role_and_publisher(actor, claims, "register builds")
     if ci_error:
         return ci_error
-    guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "build_register")
     cached = enforce_idempotency(request, idempotency_key)
@@ -4135,10 +4140,10 @@ def register_existing_build(
     authorization: Optional[str] = Header(None),
 ):
     actor, claims = get_actor_and_claims(authorization)
+    guardrails.require_mutations_enabled()
     publisher_name, ci_error = require_ci_role_and_publisher(actor, claims, "register builds")
     if ci_error:
         return ci_error
-    guardrails.require_mutations_enabled()
     guardrails.require_idempotency_key(idempotency_key)
     rate_limiter.check_mutate(actor.actor_id, "build_register")
     request_fingerprint = _build_register_request_fingerprint(req)
