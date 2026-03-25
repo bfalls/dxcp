@@ -69,6 +69,7 @@ from delivery_state import base_outcome_from_state, normalize_deployment_kind, r
 from storage import ImmutableDeploymentError, build_storage, utc_now
 from admin_system_routes import (
     register_admin_system_routes,
+    read_ci_publishers_with_fallback,
     read_mutations_disabled_with_fallback,
     read_ui_exposure_policy,
 )
@@ -352,7 +353,7 @@ def _read_ci_publishers_from_ssm() -> Optional[list[CiPublisher]]:
 
 
 def _configured_ci_publishers() -> list[CiPublisher]:
-    return _coerce_ci_publishers(SETTINGS.ci_publishers)
+    return read_ci_publishers_with_fallback(SETTINGS.ci_publishers)
 
 
 def require_ci_publisher(claims: dict, action: str) -> tuple[Optional[str], Optional[JSONResponse]]:

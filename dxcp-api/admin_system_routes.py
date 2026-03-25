@@ -317,6 +317,33 @@ def _read_ci_publishers_with_fallback() -> dict:
         return {"publishers": runtime, "source": "runtime"}
 
 
+def read_ci_publishers_with_fallback(runtime_publishers: Optional[list[object]] = None) -> list[CiPublisher]:
+    payload = _read_ci_publishers_with_fallback()
+    publishers = payload.get("publishers") if isinstance(payload, dict) else []
+    cleaned: list[CiPublisher] = []
+    source = payload.get("source") if isinstance(payload, dict) else None
+    if source == "runtime" and isinstance(runtime_publishers, list):
+        source_values = runtime_publishers
+    else:
+        source_values = publishers if isinstance(publishers, list) else runtime_publishers
+    if not isinstance(source_values, list):
+        return cleaned
+    for item in source_values:
+        if isinstance(item, CiPublisher):
+            cleaned.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        candidate = dict(item)
+        if "provider" not in candidate:
+            candidate["provider"] = CiPublisherProvider.CUSTOM.value
+        try:
+            cleaned.append(CiPublisher(**candidate))
+        except Exception:
+            continue
+    return cleaned
+
+
 def _write_ci_publishers_to_ssm(publishers: list[CiPublisher]) -> None:
     prefix = _ssm_prefix()
     payload = json.dumps([_publisher_to_dict(publisher) for publisher in publishers])

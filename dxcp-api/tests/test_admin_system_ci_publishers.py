@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from auth_utils import auth_header, configure_auth_env, mock_jwks
+from auth_utils import auth_header, auth_header_for_subject, configure_auth_env, mock_jwks
 
 from test_helpers import seed_defaults
 
@@ -95,6 +95,7 @@ async def _client(tmp_path: Path, monkeypatch, store: dict[str, str]):
     import rate_limit
 
     fake = _FakeBoto3(store)
+    monkeypatch.setattr(main, "boto3", fake)
     monkeypatch.setattr(admin_system_routes, "boto3", fake)
     monkeypatch.setattr(rate_limit, "boto3", fake)
     main.storage = main.build_storage()
@@ -225,6 +226,39 @@ async def test_put_system_ci_publishers_changes_build_auth_immediately(tmp_path:
     assert before.json()["code"] == "CI_ONLY"
     assert update.status_code == 200
     assert after.status_code == 201
+
+
+async def test_build_auth_uses_ssm_ci_publishers_even_if_runtime_cache_is_stale(tmp_path: Path, monkeypatch):
+    store = {"/dxcp/config/ci_publishers": json.dumps([_publisher("ci-bot-1", "ci-bot-1")])}
+    payload = {
+        "service": "demo-service",
+        "version": "1.0.1",
+        "expectedSizeBytes": 1024,
+        "expectedSha256": "a" * 64,
+        "contentType": "application/zip",
+    }
+    async with _client(tmp_path, monkeypatch, store) as (client, main):
+        update = await client.put(
+            "/v1/admin/system/ci-publishers",
+            headers={"Idempotency-Key": "ci-publishers-ssm-source", **auth_header(["dxcp-platform-admins"])},
+            json={"publishers": [_publisher("user-1", "user-1")]},
+        )
+        main.SETTINGS.ci_publishers = [_publisher("ci-bot-1", "ci-bot-1")]
+        denied = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ssm-denied", **auth_header_for_subject(["dxcp-ci-publishers"], "ci-bot-1")},
+            json=payload,
+        )
+        allowed = await client.post(
+            "/v1/builds/upload-capability",
+            headers={"Idempotency-Key": "cap-ssm-allowed", **auth_header_for_subject(["dxcp-ci-publishers"], "user-1")},
+            json=payload,
+        )
+
+    assert update.status_code == 200
+    assert denied.status_code == 403
+    assert denied.json()["code"] == "CI_ONLY"
+    assert allowed.status_code == 201
 
 
 async def test_put_system_ci_publishers_writes_audit_event(tmp_path: Path, monkeypatch):
