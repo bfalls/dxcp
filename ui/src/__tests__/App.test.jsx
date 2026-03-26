@@ -1118,7 +1118,7 @@ export async function runAllTests() {
 
     const newView = renderApp('/')
     await newView.findByText('New Experience Preview')
-    await newView.findByText('Choose an application to continue in DXCP')
+    await newView.findByRole('heading', { name: 'Applications', level: 1 })
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
   })
 
@@ -1192,7 +1192,7 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
     const view = renderApp('/new/deploy')
 
-    await view.findByText('Choose an application to continue in DXCP')
+    await view.findByRole('heading', { name: 'Applications', level: 1 })
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
   })
 
@@ -1240,9 +1240,7 @@ export async function runAllTests() {
     globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications')
 
-    await view.findByText('Applications')
-    await view.findByText('Choose an application to continue in DXCP')
-    await view.findByText('Application selection')
+    await view.findByRole('heading', { name: 'Applications', level: 1 })
     await view.findByText('payments-api')
     await view.findByText('billing-worker')
     await view.findByText('web-frontend')
@@ -1263,9 +1261,7 @@ export async function runAllTests() {
 
     const emptyView = renderApp('/new/applications')
     await emptyView.findByText('No accessible applications are available')
-    await emptyView.findByText(
-      'No application access records are available for the current user. The chooser remains the correct entry route even when the available collection is empty.'
-    )
+    await emptyView.findByText('No applications are available for the current user on this route.')
     cleanup()
 
     globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', { failDeliveryGroups: true, failServiceStatusFor: ['web-frontend'] })
@@ -1290,9 +1286,7 @@ export async function runAllTests() {
     const view = renderApp('/new/applications?q=does-not-match')
 
     await view.findByText('No applications match this search')
-    await view.findByText(
-      'Try a different application name, owner, deployment group, or environment. This is different from an empty chooser because accessible application records exist outside the current search.'
-    )
+    await view.findByText('Try a different application name, owner, deployment group, or environment.')
     assert.ok(view.getByRole('button', { name: 'Clear search' }))
   })
 

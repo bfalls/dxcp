@@ -251,6 +251,15 @@ body {
   text-transform: uppercase;
 }
 
+.new-page-header-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
 .new-page-header-identity {
   min-width: 0;
   display: grid;
@@ -534,6 +543,165 @@ body {
 .new-applications-chooser-list {
   display: grid;
   gap: 12px;
+}
+
+.operational-list {
+  min-width: 0;
+}
+
+.operational-list-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(183, 179, 166, 0.28) transparent;
+}
+
+.operational-list-table {
+  min-width: 980px;
+  border: 1px solid rgba(183, 179, 166, 0.14);
+  border-radius: 14px;
+  background: rgba(13, 22, 22, 0.5);
+  overflow: hidden;
+}
+
+.operational-list-item + .operational-list-item {
+  border-top: 1px solid rgba(183, 179, 166, 0.1);
+}
+
+.operational-list-row {
+  display: grid;
+  grid-template-columns: var(--operational-list-columns);
+  gap: 14px;
+  align-items: center;
+  padding: 11px 14px;
+}
+
+.operational-list-row-header {
+  background: rgba(13, 25, 25, 0.82);
+  border-bottom: 1px solid rgba(183, 179, 166, 0.12);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.operational-list-cell {
+  min-width: 0;
+}
+
+.operational-list-cell-header {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.operational-list-cell-status {
+  justify-self: start;
+}
+
+.operational-list-cell-action {
+  justify-self: end;
+  text-align: right;
+}
+
+.operational-list-secondary {
+  padding: 0 14px 12px;
+}
+
+.operational-list-secondary-cell {
+  min-width: 0;
+}
+
+.operational-list-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.new-application-name-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.new-application-name {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-application-summary,
+.new-operational-text {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operational-icon-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  border-radius: 999px;
+  color: var(--ink);
+  text-decoration: none;
+  background: rgba(13, 25, 25, 0.82);
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.operational-icon-action svg {
+  width: 15px;
+  height: 15px;
+}
+
+.operational-icon-action:hover,
+.operational-icon-action:focus-visible {
+  color: var(--accent-2);
+  border-color: rgba(91, 209, 201, 0.4);
+  background: rgba(91, 209, 201, 0.08);
+}
+
+.operational-icon-action:focus-visible {
+  outline: 2px solid rgba(91, 209, 201, 0.5);
+  outline-offset: 2px;
+}
+
+.operational-icon-action::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(183, 179, 166, 0.18);
+  background: #0d1919;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(3px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 20;
+}
+
+.operational-icon-action:hover::after,
+.operational-icon-action:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .new-application-chooser-card {
@@ -1312,9 +1480,7 @@ body {
 }
 
 @media (max-width: 1000px) {
-  .new-applications-chooser-toolbar,
-  .new-application-chooser-card,
-  .new-application-chooser-meta {
+  .new-applications-chooser-toolbar {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1357,11 +1523,6 @@ body {
 }
 
 @media (max-width: 720px) {
-  .new-application-chooser-heading {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .new-intent-entry-grid {
     grid-template-columns: minmax(0, 1fr);
   }

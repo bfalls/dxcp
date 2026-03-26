@@ -6,6 +6,7 @@ API_BUILD_DIR="$ROOT_DIR/cdk/build/api"
 DXCP_CONFIG_PREFIX="${DXCP_CONFIG_PREFIX:-/dxcp/config}"
 VALIDATE_AUTH=1
 VALIDATE_ONLY=0
+UI_ONLY=0
 source "$ROOT_DIR/scripts/ssm_helpers.sh"
 
 if ! command -v python >/dev/null 2>&1; then
@@ -31,13 +32,17 @@ for arg in "$@"; do
     --validate-only)
       VALIDATE_ONLY=1
       ;;
+    --ui-only)
+      UI_ONLY=1
+      ;;
     -h|--help)
       cat <<'EOF'
-Usage: deploy_aws.sh [--no-validate] [--validate-only]
+Usage: deploy_aws.sh [--no-validate] [--validate-only] [--ui-only]
 
 Options:
   --no-validate     Skip Auth0 format and network checks.
   --validate-only   Validate required SSM parameters and Auth0 endpoints, then exit.
+  --ui-only         Deploy only the UI stack and UI assets. Skips API packaging, registry seeding, and migrations.
   -h, --help        Show this help message.
 EOF
       exit 0
@@ -258,80 +263,84 @@ if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
   exit 0
 fi
 
-echo "Reading API settings from SSM..."
-DXCP_CORS_ORIGINS="$(get_ssm_param "${DXCP_CONFIG_PREFIX}/api/cors_origins")"
-: "${DXCP_CORS_ORIGINS:?Missing SSM ${DXCP_CONFIG_PREFIX}/api/cors_origins}"
-export DXCP_CORS_ORIGINS
+if [[ "$UI_ONLY" -eq 0 ]]; then
+  echo "Reading API settings from SSM..."
+  DXCP_CORS_ORIGINS="$(get_ssm_param "${DXCP_CONFIG_PREFIX}/api/cors_origins")"
+  : "${DXCP_CORS_ORIGINS:?Missing SSM ${DXCP_CONFIG_PREFIX}/api/cors_origins}"
+  export DXCP_CORS_ORIGINS
 
-echo "Building API package..."
-rm -rf "$API_BUILD_DIR"
-mkdir -p "$API_BUILD_DIR"
+  echo "Building API package..."
+  rm -rf "$API_BUILD_DIR"
+  mkdir -p "$API_BUILD_DIR"
 
-REQ_FILE="$ROOT_DIR/dxcp-api/requirements.txt"
-API_BUILD_DIR_PIP="$API_BUILD_DIR"
-PIP_PLATFORM_ARGS=()
-if [[ "$IS_WINDOWS_SHELL" -eq 1 ]]; then
-  if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
-  REQ_FILE="$ROOT_DIR_WIN\\dxcp-api\\requirements.txt"
-  API_BUILD_DIR_PIP="$API_BUILD_DIR_WIN"
+  REQ_FILE="$ROOT_DIR/dxcp-api/requirements.txt"
+  API_BUILD_DIR_PIP="$API_BUILD_DIR"
+  PIP_PLATFORM_ARGS=()
+  if [[ "$IS_WINDOWS_SHELL" -eq 1 ]]; then
+    if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
+    REQ_FILE="$ROOT_DIR_WIN\\dxcp-api\\requirements.txt"
+    API_BUILD_DIR_PIP="$API_BUILD_DIR_WIN"
+    fi
+    PIP_PLATFORM_ARGS=(
+      "--platform"
+      "manylinux2014_x86_64"
+      "--implementation"
+      "cp"
+      "--python-version"
+      "311"
+      "--only-binary"
+      ":all:"
+    )
   fi
-  PIP_PLATFORM_ARGS=(
-    "--platform"
-    "manylinux2014_x86_64"
-    "--implementation"
-    "cp"
-    "--python-version"
-    "311"
-    "--only-binary"
-    ":all:"
-  )
-fi
-python -m pip install -r "$REQ_FILE" -t "$API_BUILD_DIR_PIP" "${PIP_PLATFORM_ARGS[@]}"
-if command -v rsync >/dev/null 2>&1; then
-  # shellcheck disable=SC2086
-  rsync -a "$ROOT_DIR/dxcp-api/"*.py "$API_BUILD_DIR/"
-else
-  shopt -s nullglob
-  for file in "$ROOT_DIR"/dxcp-api/*.py; do
-    cp "$file" "$API_BUILD_DIR/"
-  done
-  shopt -u nullglob
-fi
-copy_dir_contents "$ROOT_DIR/dxcp-api/data" "$API_BUILD_DIR/data"
-copy_dir_contents "$ROOT_DIR/spinnaker-adapter" "$API_BUILD_DIR/spinnaker-adapter"
+  python -m pip install -r "$REQ_FILE" -t "$API_BUILD_DIR_PIP" "${PIP_PLATFORM_ARGS[@]}"
+  if command -v rsync >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    rsync -a "$ROOT_DIR/dxcp-api/"*.py "$API_BUILD_DIR/"
+  else
+    shopt -s nullglob
+    for file in "$ROOT_DIR"/dxcp-api/*.py; do
+      cp "$file" "$API_BUILD_DIR/"
+    done
+    shopt -u nullglob
+  fi
+  copy_dir_contents "$ROOT_DIR/dxcp-api/data" "$API_BUILD_DIR/data"
+  copy_dir_contents "$ROOT_DIR/spinnaker-adapter" "$API_BUILD_DIR/spinnaker-adapter"
 
-echo "Preparing optional Spinnaker mTLS cert bundle..."
-DXCP_SPINNAKER_MTLS_CERT_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_cert_path")")"
-DXCP_SPINNAKER_MTLS_KEY_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_key_path")")"
-DXCP_SPINNAKER_MTLS_CA_PATH_CFG="$(trim "$(get_optional_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_ca_path")")"
-DXCP_SPINNAKER_CERTS_SOURCE_DIR="${DXCP_SPINNAKER_CERTS_SOURCE_DIR:-$ROOT_DIR/ops/certs}"
-if [[ -z "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -z "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" ]]; then
-  echo "spinnaker/mtls_cert_path and spinnaker/mtls_key_path are required and must be non-empty." >&2
-  exit 1
-fi
-if [[ -n "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" ]]; then
-  if [[ ! -d "$DXCP_SPINNAKER_CERTS_SOURCE_DIR" ]]; then
-    echo "mTLS cert source directory not found: $DXCP_SPINNAKER_CERTS_SOURCE_DIR" >&2
-    echo "Set DXCP_SPINNAKER_CERTS_SOURCE_DIR or place certs under $ROOT_DIR/ops/certs" >&2
+  echo "Preparing optional Spinnaker mTLS cert bundle..."
+  DXCP_SPINNAKER_MTLS_CERT_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_cert_path")")"
+  DXCP_SPINNAKER_MTLS_KEY_PATH_CFG="$(trim "$(get_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_key_path")")"
+  DXCP_SPINNAKER_MTLS_CA_PATH_CFG="$(trim "$(get_optional_ssm_param "${DXCP_CONFIG_PREFIX}/spinnaker/mtls_ca_path")")"
+  DXCP_SPINNAKER_CERTS_SOURCE_DIR="${DXCP_SPINNAKER_CERTS_SOURCE_DIR:-$ROOT_DIR/ops/certs}"
+  if [[ -z "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -z "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" ]]; then
+    echo "spinnaker/mtls_cert_path and spinnaker/mtls_key_path are required and must be non-empty." >&2
     exit 1
   fi
-  for required_file in dxcp-client.crt dxcp-client.key; do
-    if [[ ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" ]]; then
-      echo "Missing mTLS file: $DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" >&2
+  if [[ -n "$DXCP_SPINNAKER_MTLS_CERT_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_KEY_PATH_CFG" || -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" ]]; then
+    if [[ ! -d "$DXCP_SPINNAKER_CERTS_SOURCE_DIR" ]]; then
+      echo "mTLS cert source directory not found: $DXCP_SPINNAKER_CERTS_SOURCE_DIR" >&2
+      echo "Set DXCP_SPINNAKER_CERTS_SOURCE_DIR or place certs under $ROOT_DIR/ops/certs" >&2
       exit 1
     fi
-  done
-  if [[ -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" && ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
-    echo "spinnaker/mtls_ca_path is set but missing ca.crt at $DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" >&2
-    exit 1
+    for required_file in dxcp-client.crt dxcp-client.key; do
+      if [[ ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" ]]; then
+        echo "Missing mTLS file: $DXCP_SPINNAKER_CERTS_SOURCE_DIR/$required_file" >&2
+        exit 1
+      fi
+    done
+    if [[ -n "$DXCP_SPINNAKER_MTLS_CA_PATH_CFG" && ! -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
+      echo "spinnaker/mtls_ca_path is set but missing ca.crt at $DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" >&2
+      exit 1
+    fi
+    mkdir -p "$API_BUILD_DIR/certs"
+    cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.crt" "$API_BUILD_DIR/certs/dxcp-client.crt"
+    cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.key" "$API_BUILD_DIR/certs/dxcp-client.key"
+    if [[ -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
+      cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" "$API_BUILD_DIR/certs/ca.crt"
+    fi
+    echo "Bundled mTLS certs from: $DXCP_SPINNAKER_CERTS_SOURCE_DIR"
   fi
-  mkdir -p "$API_BUILD_DIR/certs"
-  cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.crt" "$API_BUILD_DIR/certs/dxcp-client.crt"
-  cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/dxcp-client.key" "$API_BUILD_DIR/certs/dxcp-client.key"
-  if [[ -f "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" ]]; then
-    cp "$DXCP_SPINNAKER_CERTS_SOURCE_DIR/ca.crt" "$API_BUILD_DIR/certs/ca.crt"
-  fi
-  echo "Bundled mTLS certs from: $DXCP_SPINNAKER_CERTS_SOURCE_DIR"
+else
+  echo "UI-only mode enabled: skipping API package build and mTLS cert bundling."
 fi
 
 echo "Deploying CDK stacks..."
@@ -340,6 +349,9 @@ npm install
 CDK_OUTPUTS_FILE="${CDK_OUTPUTS_FILE:-cdk-outputs.json}"
 CDK_DEBUG_LOG="${CDK_DEBUG_LOG:-$ROOT_DIR/cdk/cdk-deploy-debug.log}"
 DXCP_CDK_SINGLE_STACK="${DXCP_CDK_SINGLE_STACK:-}"
+if [[ "$UI_ONLY" -eq 1 && -z "$DXCP_CDK_SINGLE_STACK" ]]; then
+  DXCP_CDK_SINGLE_STACK="DxcpUiStack"
+fi
 CDK_NOTICES_CACHE="${HOME}/.cdk/cache/notices.json"
 if [[ -f "$CDK_NOTICES_CACHE" ]]; then
   rm -f "$CDK_NOTICES_CACHE"
@@ -395,7 +407,6 @@ API_BASE="$(trim "$(stack_output "DxcpApiStack" "ApiBaseUrl")")"
 UI_BUCKET="$(trim "$(stack_output "DxcpUiStack" "UiBucketName")")"
 UI_DIST_ID="$(trim "$(stack_output "DxcpUiStack" "UiDistributionId")")"
 UI_URL="$(trim "$(stack_output "DxcpUiStack" "UiUrl")")"
-DDB_TABLE="$(trim "$(stack_output "DxcpDataStack" "DxcpTableName")")"
 
 if [[ -z "$API_BASE" || "$API_BASE" == "None" ]]; then
   echo "Could not resolve DxcpApiStack.ApiBaseUrl after deploy." >&2
@@ -409,9 +420,12 @@ if [[ -z "$UI_DIST_ID" || "$UI_DIST_ID" == "None" ]]; then
   echo "Could not resolve DxcpUiStack.UiDistributionId after deploy." >&2
   exit 1
 fi
-if [[ -z "$DDB_TABLE" || "$DDB_TABLE" == "None" ]]; then
-  echo "Could not resolve DxcpDataStack.DxcpTableName after deploy." >&2
-  exit 1
+if [[ "$UI_ONLY" -eq 0 ]]; then
+  DDB_TABLE="$(trim "$(stack_output "DxcpDataStack" "DxcpTableName")")"
+  if [[ -z "$DDB_TABLE" || "$DDB_TABLE" == "None" ]]; then
+    echo "Could not resolve DxcpDataStack.DxcpTableName after deploy." >&2
+    exit 1
+  fi
 fi
 
 echo "Building UI..."
@@ -483,16 +497,20 @@ PY
 aws s3 sync "$UI_DIST_DIR" "s3://$UI_BUCKET" --delete
 aws cloudfront create-invalidation --distribution-id "$UI_DIST_ID" --paths "/*"
 
-SEED_SCRIPT="$ROOT_DIR/scripts/seed_registry.py"
-MIGRATION_SCRIPT="$ROOT_DIR/scripts/run_migrations.py"
-PYTHONPATH_DIR="$API_BUILD_DIR"
-if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
-  SEED_SCRIPT="$ROOT_DIR_WIN\\scripts\\seed_registry.py"
-  MIGRATION_SCRIPT="$ROOT_DIR_WIN\\scripts\\run_migrations.py"
-  PYTHONPATH_DIR="$API_BUILD_DIR_WIN"
+if [[ "$UI_ONLY" -eq 0 ]]; then
+  SEED_SCRIPT="$ROOT_DIR/scripts/seed_registry.py"
+  MIGRATION_SCRIPT="$ROOT_DIR/scripts/run_migrations.py"
+  PYTHONPATH_DIR="$API_BUILD_DIR"
+  if [[ -n "$ROOT_DIR_WIN" && -n "$API_BUILD_DIR_WIN" ]]; then
+    SEED_SCRIPT="$ROOT_DIR_WIN\\scripts\\seed_registry.py"
+    MIGRATION_SCRIPT="$ROOT_DIR_WIN\\scripts\\run_migrations.py"
+    PYTHONPATH_DIR="$API_BUILD_DIR_WIN"
+  fi
+  PYTHONPATH="$PYTHONPATH_DIR" python "$SEED_SCRIPT" --table "$DDB_TABLE"
+  python "$MIGRATION_SCRIPT" --table "$DDB_TABLE"
+else
+  DDB_TABLE="skipped (--ui-only)"
 fi
-PYTHONPATH="$PYTHONPATH_DIR" python "$SEED_SCRIPT" --table "$DDB_TABLE"
-python "$MIGRATION_SCRIPT" --table "$DDB_TABLE"
 
 cat <<EOF
 

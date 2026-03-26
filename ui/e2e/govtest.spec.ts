@@ -127,7 +127,7 @@ test.describe("govtest thin UI proof", () => {
       await expect(page.getByRole("button", { name: "Logout" })).toBeVisible();
       await expect(page).toHaveURL(new RegExp("/new/applications$"));
       await expect(page.getByRole("heading", { name: "Applications", exact: true }).first()).toBeVisible();
-      await expect(page.getByText("Choose an application to continue in DXCP")).toBeVisible();
+      await expect(page.getByRole("table", { name: "Application collection" })).toBeVisible();
 
       await page.goto(`/new/applications/${encodeURIComponent(configuredService)}`);
       await expect(page).toHaveURL(new RegExp(`/new/applications/${escapedRegExp(encodeURIComponent(configuredService))}$`));
@@ -243,6 +243,9 @@ test.describe("govtest thin UI proof", () => {
       await expect(page.getByText("Read-only access")).toBeVisible();
       await expect(page.getByText("Observers can review deploy intent and readiness, but deploy remains read-only on this workflow.")).toBeVisible();
       await expect(page.locator(".new-page-read-only-value")).toHaveText("Read-only");
+      await expect(page.getByText("Loading deploy intent")).toHaveCount(0, { timeout: 20000 });
+      await expect(page.getByText("Deploy workflow could not be loaded")).toHaveCount(0);
+      await expect(page.getByText("Deploy workflow is not available on this route")).toHaveCount(0);
       await expect(page.locator("#new-deploy-change-summary")).toBeVisible({ timeout: 20000 });
       await expect(page.locator("#new-deploy-environment")).toBeDisabled();
       await expect(page.locator("#new-deploy-strategy")).toBeDisabled();

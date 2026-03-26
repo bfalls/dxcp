@@ -34,7 +34,7 @@ function buildRecentState(statusPayload, environmentLabel, statusAvailable) {
       label: 'Status unavailable',
       tone: 'neutral',
       detail:
-        'Application access is available, but current state could not be refreshed. Open the application record for the authoritative object route.'
+        'Application access is available, but current state could not be refreshed. Open the application for the authoritative object route.'
     }
   }
 
@@ -44,7 +44,7 @@ function buildRecentState(statusPayload, environmentLabel, statusAvailable) {
       label: 'No deployments yet',
       tone: 'neutral',
       detail:
-        'No deployment record has been returned for this application yet. Open the application record when you need a fuller deployment view.'
+        'No deployment record has been returned for this application yet. Open the application when you need a fuller deployment view.'
     }
   }
 
@@ -56,7 +56,7 @@ function buildRecentState(statusPayload, environmentLabel, statusAvailable) {
     return {
       label: 'Active deployment',
       tone: 'warn',
-      detail: `A deployment is still progressing in ${currentEnvironment}. Open the application record to inspect the current deployment.`
+      detail: `A deployment is still progressing in ${currentEnvironment}. Open the application to inspect the current deployment.`
     }
   }
 
@@ -65,7 +65,7 @@ function buildRecentState(statusPayload, environmentLabel, statusAvailable) {
       label: 'Needs review',
       tone: 'neutral',
       detail:
-        'Recent deployment activity needs review before the next change. Open the application record for the authoritative deployment history.'
+        'Recent deployment activity needs review before the next change. Open the application for the authoritative deployment history.'
     }
   }
 
@@ -73,7 +73,7 @@ function buildRecentState(statusPayload, environmentLabel, statusAvailable) {
     label: 'Stable',
     tone: 'info',
     detail:
-      'No active deployment is in progress. Open the application record to review current state and deployment history.'
+      'No active deployment is in progress. Open the application to review current state and deployment history.'
   }
 }
 
@@ -85,7 +85,7 @@ function normalizeApplication(service, group, statusPayload, environmentLabel, s
     summary:
       service?.description ||
       service?.summary ||
-      'Open the application record to review current state and deployment history.',
+      '',
     owner: service?.owner || group?.owner || 'Not provided',
     deploymentGroup: group?.name || 'Not assigned',
     environment: environmentLabel || 'Not available',

@@ -1,17 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import OperationalDataList from '../components/OperationalDataList.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 import { loadApplicationDetailData, loadApplicationsChooserData } from './newExperienceApplicationsData.js'
-
-function roleAccessLabel(role) {
-  if (role === 'PLATFORM_ADMIN') return 'Platform-admin access'
-  if (role === 'OBSERVER') return 'Read-only application access'
-  if (role === 'DELIVERY_OWNER') return 'Delivery-owner access'
-  return 'Role-based access'
-}
 
 function roleSearchPlaceholder(role) {
   if (role === 'OBSERVER') return 'Search accessible applications'
@@ -35,50 +29,80 @@ function buildApplicationReturnTo(applicationName) {
     title: 'Opened from Application',
     to: `/new/applications/${applicationName}`,
     label: 'Back to Application',
-    scopeSummary: 'Return to the application record without losing application-level context.'
+    scopeSummary: 'Return to the application without losing application-level context.'
   }
 }
 
-function ApplicationChooserCard({ application, returnTo, isReadOnly }) {
+const APPLICATION_COLUMNS = [
+  { key: 'application', label: 'Application', width: 'minmax(240px, 2.4fr)', cellClassName: 'operational-list-cell-application' },
+  { key: 'owner', label: 'Owner', width: 'minmax(150px, 1.15fr)' },
+  { key: 'deploymentGroup', label: 'Delivery Group', width: 'minmax(170px, 1.2fr)' },
+  { key: 'environment', label: 'Current Environment', width: 'minmax(140px, 0.95fr)' },
+  { key: 'status', label: 'Status', width: 'minmax(120px, 0.8fr)', cellClassName: 'operational-list-cell-status' },
+  { key: 'action', label: 'Action', width: '56px', cellClassName: 'operational-list-cell-action', headerClassName: 'operational-list-cell-action' }
+]
+
+function renderApplicationAction(application, returnTo, isReadOnly) {
   const detailRoute = `/new/applications/${application.name}`
   const actionCopy = isReadOnly ? 'Open Application in read-only mode' : 'Open Application'
 
   return (
-    <article className="new-application-chooser-card">
-      <div className="new-application-chooser-main">
-        <div className="new-application-chooser-heading">
-          <div>
-            <h3>{application.name}</h3>
-            <p>{application.summary}</p>
-          </div>
-          <span className={`badge ${application.recentStateTone}`}>{application.recentState}</span>
-        </div>
-
-        <dl className="new-application-chooser-meta" aria-label={`${application.name} summary`}>
-          <div>
-            <dt>Owner</dt>
-            <dd>{application.owner}</dd>
-          </div>
-          <div>
-            <dt>Deployment group</dt>
-            <dd>{application.deploymentGroup}</dd>
-          </div>
-          <div>
-            <dt>Current environment</dt>
-            <dd>{application.environment}</dd>
-          </div>
-        </dl>
-
-        <p className="new-application-chooser-note">{application.recentStateDetail}</p>
-      </div>
-
-      <div className="new-application-chooser-action">
-        <Link className="button" to={detailRoute} state={{ returnTo }}>
-          {actionCopy}
-        </Link>
-      </div>
-    </article>
+    <Link
+      className="operational-icon-action"
+      to={detailRoute}
+      state={{ returnTo }}
+      aria-label={actionCopy}
+      title={actionCopy}
+      data-tooltip={actionCopy}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        <path d="M6 3.5a.75.75 0 0 0 0 1.5h4.19L3.72 11.47a.75.75 0 1 0 1.06 1.06L11.25 6.06v4.19a.75.75 0 0 0 1.5 0V4.25A1.25 1.25 0 0 0 11.5 3H6.75A.75.75 0 0 0 6 3.5Z" fill="currentColor" />
+      </svg>
+    </Link>
   )
+}
+
+function renderApplicationCell(application, column, returnTo, isReadOnly) {
+  if (column.key === 'application') {
+    return (
+      <div className="new-application-name-cell">
+        <strong className="new-application-name">{application.name}</strong>
+        {application.summary ? (
+          <span className="new-application-summary" title={application.summary}>
+            {application.summary}
+          </span>
+        ) : null}
+      </div>
+    )
+  }
+  if (column.key === 'owner') {
+    return (
+      <span className="new-operational-text" title={application.owner}>
+        {application.owner}
+      </span>
+    )
+  }
+  if (column.key === 'deploymentGroup') {
+    return (
+      <span className="new-operational-text" title={application.deploymentGroup}>
+        {application.deploymentGroup}
+      </span>
+    )
+  }
+  if (column.key === 'environment') {
+    return (
+      <span className="new-operational-text" title={application.environment}>
+        {application.environment}
+      </span>
+    )
+  }
+  if (column.key === 'status') {
+    return <span className={`badge ${application.recentStateTone}`}>{application.recentState}</span>
+  }
+  if (column.key === 'action') {
+    return renderApplicationAction(application, returnTo, isReadOnly)
+  }
+  return null
 }
 
 function ApplicationsChooser({ role, api }) {
@@ -194,55 +218,29 @@ function ApplicationsChooser({ role, api }) {
     setSearchParams(nextSearchParams)
   }
 
-  const jumpToChooser = () => {
-    const chooserSection = document.getElementById('new-applications-chooser-surface')
-    if (chooserSection) {
-      chooserSection.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    }
-  }
+  const chooserStatusSummary = isLoading
+    ? 'Loading applications...'
+    : isFailure
+      ? 'Application access unavailable.'
+      : isDegraded
+        ? `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'} available. Supporting reads degraded.`
+        : `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'}`
 
   return (
     <div className="new-applications-chooser-page">
       <NewExperiencePageHeader
         title="Applications"
-        objectIdentity="Choose an application to continue in DXCP"
         role={role}
-        stateSummaryItems={[
-          {
-            label: 'Accessible applications',
-            value:
-              isLoading
-                ? 'Loading'
-                : isFailure
-                  ? 'Unavailable'
-                  : isDegraded
-                    ? 'Degraded read'
-                    : filteredApplications.length > 0
-                      ? 'Browse available applications'
-                      : 'Empty'
-          },
-          { label: 'Visible now', value: `${filteredApplications.length}` },
-          { label: 'Access posture', value: roleAccessLabel(role) }
-        ]}
-        primaryAction={{ label: 'Choose below', state: 'available', onClick: jumpToChooser }}
         secondaryActions={[
           { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshChooserData({ bypassCache: true }), disabled: isRefreshing || isLoading },
           { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployment activity.' }
         ]}
-        actionNote={
-          isReadOnly
-            ? 'Observers can choose and open accessible application records here, but deploy actions remain read-only on later routes.'
-            : 'Choose an application first so deployment and history actions stay anchored to the application record rather than a generic workflow entry.'
-        }
       />
 
       <SectionCard className="new-applications-chooser-card" id="new-applications-chooser-surface">
         <div className="new-section-header new-collection-header">
           <div>
-            <h3>Application selection</h3>
-            <p className="helper">
-              Application identity stays primary. Supporting metadata is intentionally restrained so the route reads as a workflow entry, not a dashboard.
-            </p>
+            <h3>Applications</h3>
           </div>
         </div>
 
@@ -259,13 +257,7 @@ function ApplicationsChooser({ role, api }) {
             />
           </label>
           <div className="new-deployments-results-summary" aria-live="polite">
-            {isLoading
-              ? 'Loading accessible applications so the chooser can stay anchored to real application access.'
-              : isFailure
-                ? 'Application access could not be read. Refresh to try again, or continue in the legacy experience if needed.'
-                : isDegraded
-                  ? 'Visible applications remain available to open, but freshness and supporting evidence may lag until application access reads recover.'
-                  : 'Choose an application to continue in its object record. The collection stays restrained so the next step remains obvious.'}
+            {chooserStatusSummary}
           </div>
         </div>
 
@@ -300,7 +292,7 @@ function ApplicationsChooser({ role, api }) {
               { label: 'Open Legacy', to: '/services', secondary: true }
             ]}
           >
-            No application access records are available for the current user. The chooser remains the correct entry route even when the available collection is empty.
+            No applications are available for the current user on this route.
           </NewStateBlock>
         ) : hasNoResults ? (
           <NewStateBlock
@@ -312,19 +304,19 @@ function ApplicationsChooser({ role, api }) {
               { label: 'Open Deployments', to: '/new/deployments', secondary: true }
             ]}
           >
-            Try a different application name, owner, deployment group, or environment. This is different from an empty chooser because accessible application records exist outside the current search.
+            Try a different application name, owner, deployment group, or environment.
           </NewStateBlock>
         ) : (
-          <div className="new-applications-chooser-list">
-            {filteredApplications.map((application) => (
-              <ApplicationChooserCard
-                key={application.name}
-                application={application}
-                returnTo={chooserReturnTo}
-                isReadOnly={isReadOnly}
-              />
-            ))}
-          </div>
+          <OperationalDataList
+            ariaLabel="Application collection"
+            columns={APPLICATION_COLUMNS}
+            rows={filteredApplications}
+            getRowKey={(application) => application.name}
+            renderCell={(application, column) => renderApplicationCell(application, column, chooserReturnTo, isReadOnly)}
+            renderSecondaryRow={(application) => (
+              <p className="operational-list-note">{application.recentStateDetail}</p>
+            )}
+          />
         )}
       </SectionCard>
     </div>
