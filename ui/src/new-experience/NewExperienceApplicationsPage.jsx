@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import OperationalDataList from '../components/OperationalDataList.jsx'
+import LoadingText from '../components/LoadingText.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
@@ -31,6 +32,19 @@ function buildApplicationReturnTo(applicationName) {
     label: 'Back to Application',
     scopeSummary: 'Return to the application without losing application-level context.'
   }
+}
+
+function ApplicationDetailCardLoading({ lines = 3 }) {
+  return (
+    <div className="new-card-loading" aria-live="polite" aria-busy="true">
+      <LoadingText>Loading...</LoadingText>
+      <div className="new-card-loading-lines" aria-hidden="true">
+        {Array.from({ length: lines }).map((_, index) => (
+          <span key={index} className={`new-card-loading-line new-card-loading-line-${index + 1}`} />
+        ))}
+      </div>
+    </div>
+  )
 }
 
 const APPLICATION_COLUMNS = [
@@ -404,12 +418,12 @@ function ApplicationDetail({ role, api }) {
 
   const primaryAction = {
     label: 'Deploy',
-    state: viewModel?.actionPosture?.state || (isReadOnly ? 'read-only' : 'unavailable'),
+    state: isLoading ? 'disabled' : (viewModel?.actionPosture?.state || (isReadOnly ? 'read-only' : 'unavailable')),
     onClick:
       viewModel?.actionPosture?.state === 'available'
         ? () => navigate(newDeployRoute)
         : undefined,
-    description: viewModel?.actionPosture?.note || 'Deploy handoff is unavailable on this route.'
+    description: isLoading ? '' : (viewModel?.actionPosture?.note || 'Deploy handoff is unavailable on this route.')
   }
 
   const deploymentReturnTo = buildApplicationReturnTo(applicationName)
@@ -420,10 +434,17 @@ function ApplicationDetail({ role, api }) {
         title="Application"
         objectIdentity={applicationName}
         role={role}
-        stateSummaryItems={viewModel?.stateSummaryItems || [{ label: 'Application state', value: isLoading ? 'Loading' : 'Unavailable' }]}
+        showRoleNote={false}
+        stateSummaryItems={
+          viewModel?.stateSummaryItems || [
+            { label: 'Environment', value: 'Loading' },
+            { label: 'Current version', value: 'Loading' },
+            { label: 'Recent state', value: 'Loading' }
+          ]
+        }
         primaryAction={primaryAction}
         secondaryActions={secondaryActions}
-        actionNote={viewModel?.actionPosture?.note || 'Application detail is loading.'}
+        actionNote={isLoading ? '' : (viewModel?.actionPosture?.note || '')}
       />
 
       {isFailure ? (
@@ -457,169 +478,195 @@ function ApplicationDetail({ role, api }) {
       {!isFailure && !isUnavailable ? (
         <div className="new-application-layout">
           <div className="new-application-primary">
-            <SectionCard className="new-application-card">
+            <SectionCard className="new-application-card new-application-overview-card">
               <div className="new-section-header">
                 <div>
-                  <h3>Application summary</h3>
-                  <p className="helper">Application identity and core DXCP summary stay first so this route reads as an object page, not a dashboard.</p>
+                  <h3>Application overview</h3>
                 </div>
               </div>
 
               {isLoading ? (
-                <NewStateBlock eyebrow="Loading" title="Loading application summary">
-                  DXCP is loading the application record so summary, running state, and recent deployment state stay tied to real application data.
-                </NewStateBlock>
+                <ApplicationDetailCardLoading lines={4} />
               ) : (
-                <dl className="new-object-summary-grid" aria-label="Application summary">
-                  <dt>Application owner</dt>
-                  <dd>{viewModel?.summary.owner}</dd>
-                  <dt>Deployment group</dt>
-                  <dd>{viewModel?.summary.deploymentGroup}</dd>
-                  <dt>Environment</dt>
-                  <dd>{viewModel?.summary.environment}</dd>
-                  <dt>Application summary</dt>
-                  <dd>{viewModel?.summary.summary}</dd>
-                </dl>
-              )}
-            </SectionCard>
+                <>
+                  <div className="new-application-overview-section">
+                  <dl className="new-object-summary-grid" aria-label="Application overview">
+                    <dt>Application owner</dt>
+                    <dd>{viewModel?.summary.owner}</dd>
+                    <dt>Deployment group</dt>
+                    <dd>{viewModel?.summary.deploymentGroup}</dd>
+                    <dt>Environment</dt>
+                    <dd>{viewModel?.summary.environment}</dd>
+                    <dt>Application summary</dt>
+                    <dd>{viewModel?.summary.summary}</dd>
+                  </dl>
+                  </div>
 
-            <SectionCard className="new-application-card">
-            <div className="new-section-header">
-              <div>
-                <h3>Current running summary</h3>
-                <p className="helper">Current running state stays primary and remains tied to the application record rather than a deployment feed.</p>
-              </div>
-              <div className="links">
-                <Link className="link secondary" to={newDeployRoute}>
-                  Open deploy workflow
-                </Link>
-                {viewModel?.currentRunning?.deploymentId ? (
-                  <Link
-                    className="link"
-                    to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
-                    state={{ returnTo: deploymentReturnTo }}
-                  >
-                    Open current deployment detail
-                  </Link>
-                ) : null}
-              </div>
-            </div>
+                  <div className="new-application-overview-divider" aria-hidden="true" />
 
-            {isLoading ? (
-              <NewStateBlock eyebrow="Loading" title="Loading current running state">
-                DXCP is loading running-state data for this application.
-              </NewStateBlock>
-            ) : viewModel?.currentRunning?.kind === 'ready' ? (
-              <>
-                <dl className="new-object-summary-grid" aria-label="Current running summary">
-                  <dt>Current version</dt>
-                  <dd>{viewModel.currentRunning.version}</dd>
-                  <dt>Environment</dt>
-                  <dd>{viewModel.currentRunning.environment}</dd>
-                  <dt>Recorded</dt>
-                  <dd>{viewModel.currentRunning.recordedLabel}</dd>
-                  <dt>Deployment</dt>
-                  <dd>
-                    {viewModel.currentRunning.deploymentId ? (
-                      <Link
-                        className="link"
-                        to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
-                        state={{ returnTo: deploymentReturnTo }}
-                      >
-                        Deployment {viewModel.currentRunning.deploymentId}
-                      </Link>
-                    ) : (
-                      'Not recorded'
-                    )}
-                  </dd>
-                </dl>
-
-                <div className="new-running-callout">
-                  <strong>
-                    DXCP currently records {viewModel.currentRunning.version} as the running version for {applicationName} in {viewModel.currentRunning.environment}.
-                  </strong>
-                  <p className="helper">{viewModel.currentRunning.note}</p>
-                </div>
-              </>
-            ) : (
-              <NewExplanation title="Running state is unavailable" tone="warning">
-                {viewModel?.currentRunning?.explanation}
-              </NewExplanation>
-            )}
-            </SectionCard>
-
-            <SectionCard className="new-application-card">
-            <div className="new-section-header">
-              <div>
-                <h3>Recent deployment state</h3>
-                <p className="helper">Recent deployment state stays restrained and only exposes the latest signals needed for the next handoff.</p>
-              </div>
-            </div>
-
-            {isDegraded ? (
-              <NewExplanation title="Supporting reads are degraded" tone="warning">
-                Recent application context remains usable, but one or more supporting reads are stale or missing. Open deployment detail for the authoritative deployment record before acting on uncertain supporting state.
-              </NewExplanation>
-            ) : null}
-
-            {isLoading ? (
-              <NewStateBlock eyebrow="Loading" title="Loading recent deployment state">
-                DXCP is loading recent deployment records for this application.
-              </NewStateBlock>
-            ) : viewModel?.recentDeploymentSummary?.kind === 'empty' ? (
-              <NewStateBlock eyebrow="Empty" title="No recent deployment state is available">
-                DXCP has not returned recent deployment records for this application in the selected environment yet.
-              </NewStateBlock>
-            ) : (
-              <div className="new-activity-list">
-                {viewModel?.recentDeploymentSummary?.items.map((item) => (
-                  <div key={item.key} className="new-activity-row">
-                    <span className={`badge ${item.tone}`}>{item.state}</span>
-                    <div className="new-activity-copy">
-                      <strong>{item.label}</strong>
-                      <span>{item.detail}</span>
+                  <div className="new-application-overview-section">
+                    <div className="new-section-header">
+                      <div>
+                        <h3>Current running summary</h3>
+                      </div>
+                      <div className="links">
+                        <Link className="link secondary" to={newDeployRoute}>
+                          Open deploy workflow
+                        </Link>
+                        {viewModel?.currentRunning?.deploymentId ? (
+                          <Link
+                            className="link"
+                            to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
+                            state={{ returnTo: deploymentReturnTo }}
+                          >
+                            Open current deployment detail
+                          </Link>
+                        ) : null}
+                      </div>
                     </div>
-                    <span>{item.timestamp}</span>
-                    {item.deploymentId ? (
-                      <Link
-                        className="link"
-                        to={`/new/deployments/${item.deploymentId}`}
-                        state={{ returnTo: deploymentReturnTo }}
-                      >
-                        Open deployment {item.deploymentId}
-                      </Link>
+
+                    {viewModel?.currentRunning?.kind === 'ready' ? (
+                      <>
+                        <dl className="new-object-summary-grid" aria-label="Current running state">
+                          <dt>Current version</dt>
+                          <dd>{viewModel.currentRunning.version}</dd>
+                          <dt>Environment</dt>
+                          <dd>{viewModel.currentRunning.environment}</dd>
+                          <dt>Recorded</dt>
+                          <dd>{viewModel.currentRunning.recordedLabel}</dd>
+                          <dt>Deployment</dt>
+                          <dd>
+                            {viewModel.currentRunning.deploymentId ? (
+                              <Link
+                                className="link"
+                                to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
+                                state={{ returnTo: deploymentReturnTo }}
+                              >
+                                Deployment {viewModel.currentRunning.deploymentId}
+                              </Link>
+                            ) : (
+                              'Not recorded'
+                            )}
+                          </dd>
+                        </dl>
+
+                        <div className="new-running-callout">
+                          <strong>Running version: {viewModel.currentRunning.version}</strong>
+                          <p className="helper">{viewModel.currentRunning.note}</p>
+                        </div>
+                      </>
                     ) : (
-                      <span className="helper">No deployment detail available</span>
+                      <NewExplanation title="Running state is unavailable" tone="warning">
+                        {viewModel?.currentRunning?.explanation}
+                      </NewExplanation>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+
+                  <div className="new-application-overview-divider" aria-hidden="true" />
+
+                  <div className="new-application-overview-section">
+                    <div className="new-section-header">
+                      <div>
+                        <h3>Recent deployment state</h3>
+                      </div>
+                    </div>
+
+                    {isDegraded ? (
+                      <NewExplanation title="Supporting reads are degraded" tone="warning">
+                        Recent deployment detail may be stale or incomplete. Open deployment detail before acting on uncertain state.
+                      </NewExplanation>
+                    ) : null}
+
+                    {viewModel?.recentDeploymentSummary?.kind === 'empty' ? (
+                      <NewStateBlock eyebrow="Empty" title="No recent deployment state is available">
+                        No recent deployment records are available for this application in the selected environment.
+                      </NewStateBlock>
+                    ) : (
+                      <div className="new-activity-list">
+                        {viewModel?.recentDeploymentSummary?.items.map((item) => (
+                          <div key={item.key} className="new-activity-row">
+                            <div className="new-activity-row-main">
+                              <span className={`badge ${item.tone}`}>{item.state}</span>
+                              <div className="new-activity-copy">
+                                <strong>{item.label}</strong>
+                                <span>{item.detail}</span>
+                              </div>
+                            </div>
+                            <div className="new-activity-row-side">
+                              <span className="new-activity-timestamp">{item.timestamp}</span>
+                              {item.deploymentId ? (
+                                <div className="new-activity-action">
+                                  <Link
+                                    className="new-activity-action-link"
+                                    to={`/new/deployments/${item.deploymentId}`}
+                                    state={{ returnTo: deploymentReturnTo }}
+                                    aria-label={`Open deployment ${item.deploymentId}`}
+                                    title={`Open deployment ${item.deploymentId}`}
+                                  >
+                                    <span>Deployment</span>
+                                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                      <path
+                                        d="M6 14L14 6"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M8 6H14V12"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  </Link>
+                                  <span className="new-activity-action-id" title={item.deploymentId}>
+                                    {item.deploymentId}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="helper">No deployment detail available</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </SectionCard>
           </div>
 
           <aside className="new-application-support">
             <SectionCard className="new-application-card new-application-support-card">
               <h3>Supporting context</h3>
-              <p className="helper">This stays compact so the object identity and current state remain primary.</p>
 
-              <dl className="new-application-support-grid">
-                <dt>Release path</dt>
-                <dd>Deploy through the current DXCP deploy workflow for this application.</dd>
-                <dt>Deployment group</dt>
-                <dd>{viewModel?.summary.deploymentGroup || 'Not assigned'}</dd>
-              </dl>
-
-              <div className="new-explanation-stack">
-                <NewExplanation title="Guardrail posture" tone={viewModel?.guardrails?.length ? 'neutral' : 'warning'}>
-                  {viewModel?.guardrails?.length
-                    ? `Guardrails remain visible on the application record so deploy limits and next steps stay understandable before you open the deploy workflow. ${viewModel.guardrails.join('. ')}.`
-                    : 'Guardrail context could not be fully resolved for this application on this route.'}
-                </NewExplanation>
-                <NewExplanation title={isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'} tone="neutral">
-                  {viewModel?.diagnosticsBoundary}
-                </NewExplanation>
-              </div>
+              {isLoading ? (
+                <ApplicationDetailCardLoading lines={3} />
+              ) : (
+                <dl className="new-application-support-grid">
+                  <dt>Release path</dt>
+                  <dd>Deploy through the current DXCP deploy workflow for this application.</dd>
+                  <dt>Delivery group</dt>
+                  <dd>{viewModel?.summary.deploymentGroup || 'Not assigned'}</dd>
+                  <dt>Guardrail posture</dt>
+                  <dd>
+                    {viewModel?.guardrails?.length
+                      ? viewModel.guardrails.join('. ')
+                      : 'Guardrail context is not fully available on this route.'}
+                  </dd>
+                  {viewModel?.diagnosticsBoundary ? (
+                    <>
+                      <dt>{isPlatformAdmin ? 'Diagnostics access' : 'Permission-limited detail'}</dt>
+                      <dd>{viewModel.diagnosticsBoundary}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              )}
             </SectionCard>
           </aside>
         </div>

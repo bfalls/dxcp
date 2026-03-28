@@ -31,7 +31,8 @@ export default function NewExperiencePageHeader({
   primaryAction,
   secondaryActions = [],
   role = 'UNKNOWN',
-  actionNote = ''
+  actionNote = '',
+  showRoleNote = true
 }) {
   const hasPrimaryAction = Boolean(primaryAction)
   const primaryActionState = primaryAction?.state || 'available'
@@ -49,9 +50,11 @@ export default function NewExperiencePageHeader({
       <div className="new-page-header-identity">
         <h1 className={hasObjectIdentity ? 'new-page-header-eyebrow' : 'new-page-header-title'}>{title}</h1>
         {hasObjectIdentity ? <div className="new-page-object-identity">{objectIdentity}</div> : null}
-        <div className="new-page-meta-row">
-          <div className="new-page-role-note">{formatRoleLabel(role)}</div>
-        </div>
+        {showRoleNote ? (
+          <div className="new-page-meta-row">
+            <div className="new-page-role-note">{formatRoleLabel(role)}</div>
+          </div>
+        ) : null}
         {hasStateSummary ? (
           <div className="new-page-state-summary" aria-label="State summary">
             {stateSummaryItems.map((item) => (

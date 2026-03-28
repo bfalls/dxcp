@@ -3717,6 +3717,7 @@ export default function App() {
         setVersion(queryVersion)
         setVersionSelection('user')
         setVersionAutoApplied(false)
+        setDeployQueryParams((prev) => (prev ? { ...prev, version: '' } : prev))
         return
       }
     }

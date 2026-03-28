@@ -182,7 +182,7 @@ function buildApplicationSummary(service, group, environmentLabel) {
     summary:
       service?.description ||
       service?.summary ||
-      'DXCP exposes this application record so current state, recent deployment state, and next actions stay anchored to the application itself.',
+      'Summary not provided.',
     owner: service?.owner || group?.owner || 'Not provided',
     deploymentGroup: group?.name || 'Not assigned',
     environment: environmentLabel || 'Not available'
@@ -194,8 +194,7 @@ function buildCurrentRunningSummary(currentRunning, latest, environmentLabel) {
     return {
       kind: 'missing',
       environment: environmentLabel || 'Not available',
-      explanation:
-        'DXCP did not return authoritative running state for this application in the selected environment. Recent deployment history remains visible below, but current running state cannot be asserted on this route yet.'
+      explanation: 'Current running state is not available for this application in the selected environment.'
     }
   }
 
@@ -211,7 +210,7 @@ function buildCurrentRunningSummary(currentRunning, latest, environmentLabel) {
     note:
       latest?.id && latest.id !== currentRunning.deploymentId && ['ACTIVE', 'IN_PROGRESS', 'PENDING', 'RUNNING', 'QUEUED'].includes(String(latest?.state || '').toUpperCase())
         ? 'A newer deployment is still in progress. Running state remains tied to the last completed DXCP record until that newer deployment finishes.'
-        : 'Running state is derived from DXCP deployment records and remains the primary answer to what is currently running.'
+        : 'Recorded from the last completed deployment.'
   }
 }
 
@@ -344,8 +343,8 @@ function buildApplicationDetailViewModel({
     guardrails: summarizeGuardrails(group),
     diagnosticsBoundary:
       role === 'PLATFORM_ADMIN'
-        ? 'Platform-admin diagnostics remain secondary to the normalized application and deployment records on this route.'
-        : 'Engine-adjacent diagnostics stay outside the primary application surface and remain limited to platform-admin disclosure.',
+        ? 'Deployment detail includes the deeper diagnostics available on this route.'
+        : 'Deeper diagnostics stay limited to platform-admin detail on this route.',
     stateSummaryItems: [
       { label: 'Environment', value: summary.environment },
       { label: 'Current version', value: currentVersion || 'Not recorded' },

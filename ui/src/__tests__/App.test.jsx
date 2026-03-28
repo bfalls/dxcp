@@ -1585,6 +1585,34 @@ export async function runAllTests() {
     await readOnlyView.findAllByText('Read-only')
   })
 
+  await runTest('New experience deploy route stays usable when accessible application list read fails', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'observer@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-observers']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    const baseFetch = buildNewExperienceFetch('OBSERVER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] }
+    })
+    globalThis.fetch = async (url, options = {}) => {
+      const parsed = new URL(url)
+      if (parsed.pathname === '/v1/services') {
+        return Promise.reject(new Error('Failed to load services'))
+      }
+      return baseFetch(url, options)
+    }
+    const degradedView = renderApp('/new/applications/payments-api/deploy')
+
+    await degradedView.findByText('Read-only access')
+    await degradedView.findByText('Supporting reads are degraded')
+    await degradedView.findByText('Application access context could not be refreshed from the accessible application set.')
+    assert.equal(degradedView.queryByText('Deploy workflow could not be loaded'), null)
+    assert.equal(degradedView.queryByText('Deploy workflow is not available on this route'), null)
+  })
+
   await runTest('New experience deployment route shows deployment object page with current outcome before timeline', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,

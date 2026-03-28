@@ -96,21 +96,15 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
       api.get(`/services/${encodeURIComponent(applicationName)}/versions`, requestOptions)
     ])
 
-  if (servicesResult.status === 'rejected' || !Array.isArray(servicesResult.value)) {
-    return {
-      kind: 'failure',
-      base: null,
-      degradedReasons: [],
-      errorMessage: 'DXCP could not load this deploy workflow right now. Refresh to try again.'
-    }
-  }
-
-  const services = servicesResult.value
-    .map((service) => ({ ...service, service_name: service?.service_name || service?.name || '' }))
-    .filter((service) => service.service_name)
+  const servicesKnown = servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value)
+  const services = servicesKnown
+    ? servicesResult.value
+        .map((service) => ({ ...service, service_name: service?.service_name || service?.name || '' }))
+        .filter((service) => service.service_name)
+    : []
   const service = services.find((entry) => entry.service_name === applicationName)
 
-  if (!service) {
+  if (servicesKnown && !service) {
     return {
       kind: 'unavailable',
       base: null,
@@ -120,6 +114,9 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
   }
 
   const degradedReasons = []
+  if (!servicesKnown) {
+    degradedReasons.push('Application access context could not be refreshed from the accessible application set.')
+  }
   const groups =
     groupsResult.status === 'fulfilled' && Array.isArray(groupsResult.value)
       ? groupsResult.value
@@ -196,7 +193,7 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
     errorMessage: '',
     base: {
       service: {
-        name: service.service_name,
+        name: service?.service_name || applicationName,
         summary:
           service?.description ||
           service?.summary ||
