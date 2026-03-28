@@ -38,28 +38,21 @@ const APPLICATION_COLUMNS = [
   { key: 'owner', label: 'Owner', width: 'minmax(150px, 1.15fr)' },
   { key: 'deploymentGroup', label: 'Delivery Group', width: 'minmax(170px, 1.2fr)' },
   { key: 'environment', label: 'Current Environment', width: 'minmax(140px, 0.95fr)' },
-  { key: 'status', label: 'Status', width: 'minmax(120px, 0.8fr)', cellClassName: 'operational-list-cell-status' },
-  { key: 'action', label: 'Action', width: '56px', cellClassName: 'operational-list-cell-action', headerClassName: 'operational-list-cell-action' }
+  { key: 'status', label: 'Status', width: 'minmax(120px, 0.8fr)', cellClassName: 'operational-list-cell-status' }
 ]
 
-function renderApplicationAction(application, returnTo, isReadOnly) {
-  const detailRoute = `/new/applications/${application.name}`
+function buildApplicationDetailRoute(application) {
+  return `/new/applications/${application.name}`
+}
+
+function buildApplicationOpenAction(application, returnTo, isReadOnly) {
   const actionCopy = isReadOnly ? 'Open Application in read-only mode' : 'Open Application'
 
-  return (
-    <Link
-      className="operational-icon-action"
-      to={detailRoute}
-      state={{ returnTo }}
-      aria-label={actionCopy}
-      title={actionCopy}
-      data-tooltip={actionCopy}
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M6 3.5a.75.75 0 0 0 0 1.5h4.19L3.72 11.47a.75.75 0 1 0 1.06 1.06L11.25 6.06v4.19a.75.75 0 0 0 1.5 0V4.25A1.25 1.25 0 0 0 11.5 3H6.75A.75.75 0 0 0 6 3.5Z" fill="currentColor" />
-      </svg>
-    </Link>
-  )
+  return {
+    to: buildApplicationDetailRoute(application),
+    state: { returnTo },
+    label: `${actionCopy} ${application.name}`
+  }
 }
 
 function renderApplicationCell(application, column, returnTo, isReadOnly) {
@@ -98,9 +91,6 @@ function renderApplicationCell(application, column, returnTo, isReadOnly) {
   }
   if (column.key === 'status') {
     return <span className={`badge ${application.recentStateTone}`}>{application.recentState}</span>
-  }
-  if (column.key === 'action') {
-    return renderApplicationAction(application, returnTo, isReadOnly)
   }
   return null
 }
@@ -218,13 +208,7 @@ function ApplicationsChooser({ role, api }) {
     setSearchParams(nextSearchParams)
   }
 
-  const chooserStatusSummary = isLoading
-    ? 'Loading applications...'
-    : isFailure
-      ? 'Application access unavailable.'
-      : isDegraded
-        ? `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'} available. Supporting reads degraded.`
-        : `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'}`
+  const chooserFooterSummary = `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'}`
 
   return (
     <div className="new-applications-chooser-page">
@@ -256,9 +240,6 @@ function ApplicationsChooser({ role, api }) {
               disabled={isLoading || isFailure}
             />
           </label>
-          <div className="new-deployments-results-summary" aria-live="polite">
-            {chooserStatusSummary}
-          </div>
         </div>
 
         {isDegraded ? (
@@ -268,9 +249,15 @@ function ApplicationsChooser({ role, api }) {
         ) : null}
 
         {isLoading ? (
-          <NewStateBlock eyebrow="Loading" title="Loading accessible applications">
-            DXCP is loading the applications you can open from this route now.
-          </NewStateBlock>
+          <OperationalDataList
+            ariaLabel="Application collection"
+            columns={APPLICATION_COLUMNS}
+            isLoading
+            loadingMessage="Loading..."
+            rows={[]}
+            getRowKey={(application) => application.name}
+            renderCell={() => null}
+          />
         ) : isFailure ? (
           <NewStateBlock
             eyebrow="Failure"
@@ -311,7 +298,9 @@ function ApplicationsChooser({ role, api }) {
             ariaLabel="Application collection"
             columns={APPLICATION_COLUMNS}
             rows={filteredApplications}
+            footerSummary={chooserFooterSummary}
             getRowKey={(application) => application.name}
+            getRowAction={(application) => buildApplicationOpenAction(application, chooserReturnTo, isReadOnly)}
             renderCell={(application, column) => renderApplicationCell(application, column, chooserReturnTo, isReadOnly)}
             renderSecondaryRow={(application) => (
               <p className="operational-list-note">{application.recentStateDetail}</p>

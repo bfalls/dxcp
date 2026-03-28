@@ -512,9 +512,8 @@ body {
 
 .new-applications-chooser-toolbar {
   display: grid;
-  grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 0.7fr);
   gap: 12px;
-  align-items: end;
 }
 
 .new-applications-search,
@@ -545,6 +544,40 @@ body {
   gap: 12px;
 }
 
+.loading-text {
+  display: inline-block;
+  color: var(--muted);
+  background-image: linear-gradient(
+    110deg,
+    rgba(183, 179, 166, 0.45) 0%,
+    rgba(244, 241, 230, 0.92) 45%,
+    rgba(183, 179, 166, 0.45) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: loading-text-wave 1.4s linear infinite;
+}
+
+@keyframes loading-text-wave {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-text {
+    animation: none;
+    background-position: 50% 0;
+  }
+}
+
 .operational-list {
   min-width: 0;
 }
@@ -569,12 +602,60 @@ body {
   border-top: 1px solid rgba(183, 179, 166, 0.1);
 }
 
+.operational-list-item {
+  position: relative;
+}
+
+.operational-list-item-interactive {
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.operational-list-item-interactive:hover {
+  background: rgba(91, 209, 201, 0.04);
+}
+
+.operational-list-item-interactive::after {
+  content: "";
+  position: absolute;
+  inset: 8px 10px;
+  pointer-events: none;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.operational-list-item-interactive:hover::after {
+  background: rgba(91, 209, 201, 0.04);
+}
+
+.operational-list-item-interactive:focus-within::after {
+  background: rgba(91, 209, 201, 0.06);
+  box-shadow: 0 0 0 2px rgba(91, 209, 201, 0.24);
+}
+
+.operational-list-row-action-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+}
+
+.operational-list-row-action-surface:focus {
+  outline: none;
+}
+
 .operational-list-row {
   display: grid;
   grid-template-columns: var(--operational-list-columns);
   gap: 14px;
   align-items: center;
   padding: 11px 14px;
+  position: relative;
+  z-index: 0;
 }
 
 .operational-list-row-header {
@@ -584,8 +665,43 @@ body {
   padding-bottom: 10px;
 }
 
+.operational-list-loading-row {
+  border-top: 1px solid rgba(183, 179, 166, 0.1);
+}
+
+.operational-list-loading-cell {
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.operational-list-footer-group {
+  border-top: 1px solid rgba(183, 179, 166, 0.1);
+}
+
+.operational-list-footer-row {
+  display: block;
+}
+
+.operational-list-footer-cell {
+  padding: 10px 14px 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+
+.operational-list-footer-summary {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .operational-list-cell {
   min-width: 0;
+  position: relative;
+  z-index: 0;
+  overflow: hidden;
 }
 
 .operational-list-cell-header {
@@ -605,8 +721,14 @@ body {
   text-align: right;
 }
 
+.operational-list-cell-interactive-control {
+  z-index: 2;
+}
+
 .operational-list-secondary {
   padding: 0 14px 12px;
+  position: relative;
+  z-index: 0;
 }
 
 .operational-list-secondary-cell {
@@ -638,6 +760,8 @@ body {
 
 .new-application-summary,
 .new-operational-text {
+  display: block;
+  min-width: 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;

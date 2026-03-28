@@ -1244,8 +1244,9 @@ export async function runAllTests() {
     await view.findByText('payments-api')
     await view.findByText('billing-worker')
     await view.findByText('web-frontend')
-    const chooserLinks = await view.findAllByRole('link', { name: 'Open Application' })
-    assert.equal(chooserLinks.length, 3)
+    assert.ok(view.getByText('3 applications'))
+    const chooserRows = await view.findAllByRole('link', { name: /Open Application .*|Open Application in read-only mode .*/ })
+    assert.equal(chooserRows.length, 3)
   })
 
   await runTest('New experience applications route preserves empty and degraded chooser states', async () => {
@@ -1302,8 +1303,8 @@ export async function runAllTests() {
     globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const view = renderApp('/new/applications')
 
-    const chooserAction = await view.findAllByRole('link', { name: 'Open Application' })
-    fireEvent.click(chooserAction[0])
+    const chooserRowAction = await view.findByRole('link', { name: 'Open Application payments-api' })
+    fireEvent.click(chooserRowAction)
     await view.findByText('Opened from Applications')
     assert.ok(view.getByRole('link', { name: 'Back to Applications' }))
   })
