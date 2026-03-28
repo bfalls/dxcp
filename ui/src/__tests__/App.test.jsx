@@ -1291,7 +1291,7 @@ export async function runAllTests() {
     assert.ok(view.getByRole('button', { name: 'Clear search' }))
   })
 
-  await runTest('New experience application detail preserves chooser return context when opened from the chooser', async () => {
+  await runTest('New experience application detail stands alone as an object page when opened from the chooser', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -1305,8 +1305,13 @@ export async function runAllTests() {
 
     const chooserRowAction = await view.findByRole('link', { name: 'Open Application payments-api' })
     fireEvent.click(chooserRowAction)
-    await view.findByText('Opened from Applications')
-    assert.ok(view.getByRole('link', { name: 'Back to Applications' }))
+    await view.findByText('Application summary')
+    assert.equal(view.queryByText('Opened from Applications'), null)
+    assert.equal(view.queryByRole('link', { name: 'Back to Applications' }), null)
+    assert.equal(view.queryByRole('link', { name: 'Open Applications' }), null)
+    assert.equal(view.queryByRole('link', { name: 'Open Deployments' }), null)
+    assert.ok(view.getByRole('button', { name: 'Refresh' }))
+    assert.ok(view.getByRole('button', { name: 'Deploy' }))
   })
 
   await runTest('New experience applications route shows a truthful failure state when application access cannot load', async () => {

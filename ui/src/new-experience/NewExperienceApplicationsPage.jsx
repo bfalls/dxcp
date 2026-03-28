@@ -318,9 +318,7 @@ function ApplicationDetail({ role, api }) {
   const navigate = useNavigate()
   const isReadOnly = role === 'OBSERVER'
   const isPlatformAdmin = role === 'PLATFORM_ADMIN'
-  const returnTo = location.state?.returnTo || null
   const newDeployRoute = `/new/applications/${applicationName}/deploy`
-  const deploymentsRoute = `/new/deployments?service=${encodeURIComponent(applicationName)}`
   const [detailState, setDetailState] = useState({
     kind: 'loading',
     viewModel: null,
@@ -401,8 +399,6 @@ function ApplicationDetail({ role, api }) {
   useNewExperienceAlertRail(alertRailItems)
 
   const secondaryActions = [
-    { label: 'Open Applications', to: '/new/applications', description: 'Return to the application chooser.' },
-    { label: 'Open Deployments', to: deploymentsRoute, description: 'Browse recent deployments for this application.' },
     { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshDetail({ bypassCache: true }), disabled: isRefreshing || isLoading }
   ]
 
@@ -429,22 +425,6 @@ function ApplicationDetail({ role, api }) {
         secondaryActions={secondaryActions}
         actionNote={viewModel?.actionPosture?.note || 'Application detail is loading.'}
       />
-
-      {returnTo?.kind === 'applications-chooser' ? (
-        <SectionCard className="new-detail-context-card">
-          <div className="new-detail-context-row">
-            <div>
-              <strong>Opened from Applications</strong>
-              <p className="helper">
-                {returnTo.scopeSummary || 'Return to the chooser without losing the application-selection context.'}
-              </p>
-            </div>
-            <Link className="link" to={returnTo.to}>
-              {returnTo.label || 'Back to Applications'}
-            </Link>
-          </div>
-        </SectionCard>
-      ) : null}
 
       {isFailure ? (
         <NewStateBlock
