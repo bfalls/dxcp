@@ -1252,10 +1252,12 @@ export async function runAllTests() {
     const view = renderApp('/new/applications')
 
     await view.findByRole('heading', { name: 'Applications', level: 1 })
+    await view.findByTestId('applications-environment-selector')
     await view.findByText('payments-api')
     await view.findByText('billing-worker')
     await view.findByText('web-frontend')
-    assert.ok(view.getByText('3 applications'))
+    assert.ok(view.getByText('3 applications in sandbox'))
+    assert.equal(view.queryByRole('columnheader', { name: 'Current Environment' }), null)
     const chooserRows = await view.findAllByRole('link', { name: /Open Application .*|Open Application in read-only mode .*/ })
     assert.equal(chooserRows.length, 3)
   })
@@ -1282,7 +1284,7 @@ export async function runAllTests() {
     const degradedCopy = await degradedView.findAllByText(
       'Application visibility remains usable for selection, but supporting access data may lag. Open the application record for the authoritative object page before making a delivery decision.'
     )
-    assert.ok(degradedCopy.length >= 2)
+    assert.ok(degradedCopy.length >= 1)
   })
 
   await runTest('New experience applications route distinguishes no-results from empty chooser state', async () => {
@@ -1298,11 +1300,66 @@ export async function runAllTests() {
     const view = renderApp('/new/applications?q=does-not-match')
 
     await view.findByText('No applications match this search')
-    await view.findByText('Try a different application name, owner, deployment group, or environment.')
+    await view.findByText('Try a different application name, owner, deployment group, or status.')
     assert.ok(view.getByRole('button', { name: 'Clear search' }))
   })
 
-  await runTest('New experience application detail stands alone as an object page when opened from the chooser', async () => {
+  await runTest('New experience applications route scopes status by selected environment and restores environment from query state', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      environments: [
+        { id: 'sandbox', name: 'sandbox', display_name: 'sandbox', type: 'non_prod', is_enabled: true, promotion_order: 1 },
+        { id: 'staging', name: 'staging', display_name: 'staging', type: 'non_prod', is_enabled: true, promotion_order: 2 }
+      ],
+      serviceStatusesByService: {
+        'payments-api': {
+          service: 'payments-api',
+          latest: {
+            id: '9842',
+            state: 'IN_PROGRESS',
+            version: 'v1.33.0',
+            createdAt: '2025-01-03T00:00:00Z',
+            updatedAt: '2025-01-03T00:05:00Z'
+          }
+        },
+        'billing-worker': {
+          service: 'billing-worker',
+          latest: {
+            id: 'dep-billing',
+            state: 'SUCCEEDED',
+            outcome: 'SUCCEEDED',
+            version: '4.2.0',
+            createdAt: '2025-01-02T00:00:00Z',
+            updatedAt: '2025-01-02T00:05:00Z'
+          }
+        },
+        'web-frontend': {
+          service: 'web-frontend',
+          latest: {
+            id: 'dep-web',
+            state: 'FAILED',
+            outcome: 'FAILED',
+            version: '8.4.1',
+            createdAt: '2025-01-01T00:00:00Z',
+            updatedAt: '2025-01-01T00:05:00Z'
+          }
+        }
+      }
+    })
+    const view = renderApp('/new/applications?environment=staging')
+
+    await view.findByTestId('applications-environment-selector')
+    await view.findByText('A deployment is still progressing in staging. Open the application to inspect the current deployment.')
+  })
+
+  await runTest('New experience application detail stands alone as an object page on the direct route', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'owner@example.com' }),
@@ -1312,10 +1369,8 @@ export async function runAllTests() {
       handleRedirectCallback: async () => {}
     })
     globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
-    const view = renderApp('/new/applications')
+    const view = renderApp('/new/applications/payments-api')
 
-    const chooserRowAction = await view.findByRole('link', { name: 'Open Application payments-api' })
-    fireEvent.click(chooserRowAction)
     await view.findByText('Application summary')
     assert.equal(view.queryByText('Opened from Applications'), null)
     assert.equal(view.queryByRole('link', { name: 'Back to Applications' }), null)

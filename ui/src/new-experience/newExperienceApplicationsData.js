@@ -12,6 +12,38 @@ function normalizeEnvironmentOrder(environment) {
     : Number.MAX_SAFE_INTEGER
 }
 
+function sortEnvironments(environments) {
+  return (Array.isArray(environments) ? environments : [])
+    .slice()
+    .sort((left, right) => {
+      const orderDiff = normalizeEnvironmentOrder(left) - normalizeEnvironmentOrder(right)
+      if (orderDiff !== 0) return orderDiff
+      return String(left?.display_name || left?.name || '').localeCompare(String(right?.display_name || right?.name || ''))
+    })
+}
+
+function buildEnvironmentOptions(environments) {
+  return sortEnvironments(environments)
+    .filter((environment) => environment?.name)
+    .filter((environment) => environment?.is_enabled !== false)
+    .map((environment) => ({
+      name: environment.name,
+      label: environment.display_name || environment.name,
+      display_name: environment.display_name || environment.name,
+      promotion_order: environment.promotion_order,
+      type: environment.type
+    }))
+}
+
+function resolveSelectedEnvironment(environmentOptions, selectedEnvironmentName) {
+  if (!Array.isArray(environmentOptions) || environmentOptions.length === 0) return null
+  const selectedByName = environmentOptions.find((environment) => environment.name === selectedEnvironmentName)
+  if (selectedByName) return selectedByName
+  const defaultEnvironment = pickDefaultEnvironment(environmentOptions)
+  if (defaultEnvironment) return defaultEnvironment
+  return environmentOptions[0] || null
+}
+
 function pickDefaultEnvironment(environments) {
   if (!Array.isArray(environments) || environments.length === 0) return null
   const ordered = environments
@@ -385,6 +417,8 @@ function buildApplicationDetailViewModel({
 
 export async function loadApplicationsChooserData(api, options = {}) {
   const requestOptions = { ...options }
+  const selectedEnvironmentName = options.environmentName || ''
+  delete requestOptions.environmentName
   let servicesPayload
   try {
     servicesPayload = await api.get('/services', requestOptions)
@@ -409,15 +443,6 @@ export async function loadApplicationsChooserData(api, options = {}) {
   const services = servicesPayload
     .map((service) => ({ ...service, service_name: service?.service_name || service?.name || '' }))
     .filter((service) => service.service_name)
-
-  if (services.length === 0) {
-    return {
-      kind: 'empty',
-      applications: [],
-      degradedReasons: [],
-      errorMessage: ''
-    }
-  }
 
   const degradedReasons = []
 
@@ -445,15 +470,28 @@ export async function loadApplicationsChooserData(api, options = {}) {
     degradedReasons.push('Environment context could not be refreshed.')
   }
 
-  const defaultEnvironment = pickDefaultEnvironment(environments)
-  const environmentLabel = defaultEnvironment?.display_name || defaultEnvironment?.name || 'Not available'
+  const environmentOptions = buildEnvironmentOptions(environments)
+  const selectedEnvironment = resolveSelectedEnvironment(environmentOptions, selectedEnvironmentName)
+  const environmentLabel = selectedEnvironment?.label || 'Not available'
+
+  if (services.length === 0) {
+    return {
+      kind: 'empty',
+      applications: [],
+      degradedReasons,
+      errorMessage: '',
+      environmentOptions,
+      selectedEnvironmentName: selectedEnvironment?.name || '',
+      selectedEnvironmentLabel: environmentLabel
+    }
+  }
 
   let statusResults = []
-  if (defaultEnvironment?.name) {
+  if (selectedEnvironment?.name) {
     statusResults = await Promise.allSettled(
       services.map((service) =>
         api.get(
-          `/services/${encodeURIComponent(service.service_name)}/delivery-status?environment=${encodeURIComponent(defaultEnvironment.name)}`,
+          `/services/${encodeURIComponent(service.service_name)}/delivery-status?environment=${encodeURIComponent(selectedEnvironment.name)}`,
           requestOptions
         )
       )
@@ -462,7 +500,7 @@ export async function loadApplicationsChooserData(api, options = {}) {
       degradedReasons.push('Recent deployment state could not be refreshed for every application.')
     }
   } else {
-    degradedReasons.push('No default environment was available for current-state reads.')
+    degradedReasons.push('No enabled environment was available for current-state reads.')
   }
 
   const applications = services
@@ -497,7 +535,9 @@ export async function loadApplicationsChooserData(api, options = {}) {
     applications,
     degradedReasons,
     errorMessage: '',
-    environmentLabel
+    environmentOptions,
+    selectedEnvironmentName: selectedEnvironment?.name || '',
+    selectedEnvironmentLabel: environmentLabel
   }
 }
 

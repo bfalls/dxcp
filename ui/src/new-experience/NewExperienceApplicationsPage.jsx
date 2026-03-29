@@ -51,7 +51,6 @@ const APPLICATION_COLUMNS = [
   { key: 'application', label: 'Application', width: 'minmax(240px, 2.4fr)', cellClassName: 'operational-list-cell-application' },
   { key: 'owner', label: 'Owner', width: 'minmax(150px, 1.15fr)' },
   { key: 'deploymentGroup', label: 'Delivery Group', width: 'minmax(170px, 1.2fr)' },
-  { key: 'environment', label: 'Current Environment', width: 'minmax(140px, 0.95fr)' },
   { key: 'status', label: 'Status', width: 'minmax(120px, 0.8fr)', cellClassName: 'operational-list-cell-status' }
 ]
 
@@ -96,13 +95,6 @@ function renderApplicationCell(application, column, returnTo, isReadOnly) {
       </span>
     )
   }
-  if (column.key === 'environment') {
-    return (
-      <span className="new-operational-text" title={application.environment}>
-        {application.environment}
-      </span>
-    )
-  }
   if (column.key === 'status') {
     return <span className={`badge ${application.recentStateTone}`}>{application.recentState}</span>
   }
@@ -113,10 +105,14 @@ function ApplicationsChooser({ role, api }) {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const searchTerm = searchParams.get('q') || ''
+  const requestedEnvironmentName = searchParams.get('environment') || ''
   const isReadOnly = role === 'OBSERVER'
   const [chooserState, setChooserState] = useState({
     kind: 'loading',
     applications: [],
+    environmentOptions: [],
+    selectedEnvironmentName: '',
+    selectedEnvironmentLabel: '',
     degradedReasons: [],
     errorMessage: ''
   })
@@ -126,20 +122,31 @@ function ApplicationsChooser({ role, api }) {
       setChooserState((current) => ({
         kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
         applications: current.applications || [],
+        environmentOptions: current.environmentOptions || [],
+        selectedEnvironmentName: current.selectedEnvironmentName || '',
+        selectedEnvironmentLabel: current.selectedEnvironmentLabel || '',
         degradedReasons: [],
         errorMessage: ''
       }))
-      const nextState = await loadApplicationsChooserData(api, options)
+      const nextState = await loadApplicationsChooserData(api, { environmentName: requestedEnvironmentName, ...options })
       setChooserState(nextState)
     },
-    [api]
+    [api, requestedEnvironmentName]
   )
 
   useEffect(() => {
     let active = true
     const load = async () => {
-      setChooserState({ kind: 'loading', applications: [], degradedReasons: [], errorMessage: '' })
-      const nextState = await loadApplicationsChooserData(api)
+      setChooserState({
+        kind: 'loading',
+        applications: [],
+        environmentOptions: [],
+        selectedEnvironmentName: '',
+        selectedEnvironmentLabel: '',
+        degradedReasons: [],
+        errorMessage: ''
+      })
+      const nextState = await loadApplicationsChooserData(api, { environmentName: requestedEnvironmentName })
       if (active) {
         setChooserState(nextState)
       }
@@ -148,9 +155,12 @@ function ApplicationsChooser({ role, api }) {
     return () => {
       active = false
     }
-  }, [api])
+  }, [api, requestedEnvironmentName])
 
   const visibleApplications = useMemo(() => chooserState.applications || [], [chooserState.applications])
+  const environmentOptions = chooserState.environmentOptions || []
+  const selectedEnvironmentName = chooserState.selectedEnvironmentName || ''
+  const selectedEnvironmentLabel = chooserState.selectedEnvironmentLabel || 'Not available'
   const normalizedSearchTerm = searchTerm.trim().toLowerCase()
   const filteredApplications = useMemo(() => {
     if (!normalizedSearchTerm) return visibleApplications
@@ -160,13 +170,21 @@ function ApplicationsChooser({ role, api }) {
         application.summary,
         application.owner,
         application.deploymentGroup,
-        application.environment
+        application.recentState,
+        application.recentStateDetail
       ]
         .join(' ')
         .toLowerCase()
       return haystack.includes(normalizedSearchTerm)
     })
   }, [normalizedSearchTerm, visibleApplications])
+
+  useEffect(() => {
+    if (!selectedEnvironmentName || selectedEnvironmentName === requestedEnvironmentName) return
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.set('environment', selectedEnvironmentName)
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [requestedEnvironmentName, searchParams, selectedEnvironmentName, setSearchParams])
 
   const isLoading = chooserState.kind === 'loading'
   const isRefreshing = chooserState.kind === 'refreshing'
@@ -175,6 +193,7 @@ function ApplicationsChooser({ role, api }) {
   const hasVisibleApplications = visibleApplications.length > 0
   const hasNoResults = hasVisibleApplications && filteredApplications.length === 0
   const chooserReturnTo = buildChooserReturnTo(location, filteredApplications.length, searchTerm)
+  const environmentSelectorDisabled = isLoading || isFailure || environmentOptions.length === 0
   const alertRailItems = useMemo(
     () => {
       if (isFailure) {
@@ -222,7 +241,18 @@ function ApplicationsChooser({ role, api }) {
     setSearchParams(nextSearchParams)
   }
 
-  const chooserFooterSummary = `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'}`
+  const handleEnvironmentChange = (event) => {
+    const nextSearchParams = new URLSearchParams(searchParams)
+    const nextValue = event.target.value
+    if (nextValue) {
+      nextSearchParams.set('environment', nextValue)
+    } else {
+      nextSearchParams.delete('environment')
+    }
+    setSearchParams(nextSearchParams)
+  }
+
+  const chooserFooterSummary = `${filteredApplications.length} application${filteredApplications.length === 1 ? '' : 's'} in ${selectedEnvironmentLabel}`
 
   return (
     <div className="new-applications-chooser-page">
@@ -238,6 +268,28 @@ function ApplicationsChooser({ role, api }) {
         <div className="new-section-header new-collection-header">
           <div>
             <h3>Applications</h3>
+          </div>
+          <div className="new-applications-section-controls">
+            <label className="new-applications-page-context-control new-applications-page-context-control-inline" htmlFor="new-applications-environment">
+              <span>Environment</span>
+              <select
+                id="new-applications-environment"
+                value={selectedEnvironmentName}
+                onChange={handleEnvironmentChange}
+                disabled={environmentSelectorDisabled}
+                aria-label="Environment"
+                data-testid="applications-environment-selector"
+              >
+                {environmentOptions.length === 0 ? (
+                  <option value="">Environment unavailable</option>
+                ) : null}
+                {environmentOptions.map((environment) => (
+                  <option key={environment.name} value={environment.name}>
+                    {environment.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
 
@@ -304,7 +356,7 @@ function ApplicationsChooser({ role, api }) {
               { label: 'Open Deployments', to: '/new/deployments', secondary: true }
             ]}
           >
-            Try a different application name, owner, deployment group, or environment.
+            Try a different application name, owner, deployment group, or status.
           </NewStateBlock>
         ) : (
           <OperationalDataList

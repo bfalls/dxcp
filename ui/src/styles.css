@@ -749,6 +749,45 @@ body {
   gap: 16px;
 }
 
+.new-applications-page-context-control {
+  display: grid;
+  gap: 6px;
+}
+
+.new-applications-page-context-control span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.new-applications-page-context-control select {
+  background: #0c1717;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  min-width: 160px;
+  padding: 8px 32px 8px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.new-applications-section-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.new-applications-page-context-control-inline {
+  grid-template-columns: auto minmax(0, auto);
+  align-items: center;
+  gap: 8px;
+}
+
+.new-applications-page-context-control-inline span {
+  white-space: nowrap;
+}
+
 .new-applications-chooser-card {
   display: grid;
   gap: 16px;
@@ -1959,6 +1998,19 @@ body {
 @media (max-width: 1000px) {
   .new-applications-chooser-toolbar {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-applications-section-controls {
+    width: 100%;
+  }
+
+  .new-applications-page-context-control-inline {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+
+  .new-applications-page-context-control-inline select {
+    width: min(100%, 240px);
   }
 
   .new-application-layout {

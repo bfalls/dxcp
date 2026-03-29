@@ -265,7 +265,7 @@ test.describe("govtest thin UI proof", () => {
       await expect(changeSummary).toHaveValue(originalValue);
       await page.waitForTimeout(500);
       expect(attemptedMutationRequests).toHaveLength(0);
-      await expect(page.getByRole("button", { name: "Deploy" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(0);
     } finally {
       await context.close().catch(() => undefined);
     }
