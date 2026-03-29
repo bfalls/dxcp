@@ -68,7 +68,7 @@ export function NewExplanation({ title, children, tone = 'neutral', actions = []
 function getContextRailSummary(items, summary) {
   if (summary) return summary
   if (!Array.isArray(items) || items.length === 0) return ''
-  if (items.length === 1) return items[0].summary || items[0].title || '1 issue'
+  if (items.length === 1) return '1 page issue'
   return `${items.length} page issues`
 }
 

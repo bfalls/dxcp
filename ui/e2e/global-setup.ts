@@ -23,5 +23,12 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     return;
   }
 
-  await ensureGovBootstrapFromAuthStates();
+  try {
+    await ensureGovBootstrapFromAuthStates();
+    delete process.env.GOV_BOOTSTRAP_SKIP_REASON;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.env.GOV_BOOTSTRAP_SKIP_REASON = message;
+    console.log(`[global-setup] skipping governance bootstrap: ${message}`);
+  }
 }

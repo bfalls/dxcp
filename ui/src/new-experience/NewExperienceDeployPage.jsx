@@ -427,11 +427,16 @@ function buildDeployPageContextIssues(posture) {
   if (!posture?.local || posture.local.tone === 'neutral') return []
   if (posture.local.title === 'Complete deploy intent' || posture.local.title === 'Checking readiness') return []
 
+  let summary = posture.local.summary || posture.local.title
+  if (posture.local.title === 'Permission-limited deploy') summary = 'Deploy permission limited'
+  if (posture.local.title === 'Deploy access could not be confirmed') summary = 'Deploy access check unavailable'
+  if (posture.local.title === 'Read-only workflow') summary = 'Read-only deploy guidance'
+
   return [
     {
       id: 'deploy-page-context-issue',
       title: posture.local.title,
-      summary: posture.local.summary || posture.local.title,
+      summary,
       tone: posture.local.tone,
       body: posture.local.body,
       actions: posture.local.actions || []
@@ -851,13 +856,11 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                 </div>
               ) : null}
 
-              {pageContextIssues.length === 0 ? (
-                <div className="new-deploy-action-review">
-                  <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
-                    {posture.local.body}
-                  </NewExplanation>
-                </div>
-              ) : null}
+              <div className="new-deploy-action-review">
+                <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
+                  {posture.local.body}
+                </NewExplanation>
+              </div>
 
               {submitState.kind === 'success' ? (
                 <NewExplanation
