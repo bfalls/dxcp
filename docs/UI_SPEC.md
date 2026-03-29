@@ -16,6 +16,23 @@ Status legend:
 - Progressive disclosure of detail, no pipeline editing.
 - Normalize failures and timelines into clear, actionable signals.
 - Readability and predictability over configuration breadth.
+- Operator confidence through restraint.
+- Explain when needed, not by default.
+
+## Cross-screen restraint and density rules
+
+These rules are normative across DXCP screens.
+
+- Use one loading signal per major surface.
+- Use one issue surface per condition class.
+- Keep page-level context controls compact and close to the page header.
+- Do not present simple filters or selectors as oversized summary cards.
+- For repeated structured data, prefer dense table or list layouts over card grids.
+- Do not repeat page-level context as row-level metadata when the whole surface is already scoped.
+- Do not render developer-narration or design-explainer copy in product UI.
+- Keep primary actions in the page header or other explicitly defined action zone.
+- Do not duplicate global navigation in page-level action areas.
+- Keep supporting context subordinate to the main task.
 
 ## Personas and roles
 
@@ -28,10 +45,10 @@ Role handling is enforced by the API. The UI should surface allowed actions and 
 ## Navigation and information architecture
 
 Current:
-- Primary navigation: Services, Deploy, Deployments, Detail, Insights.
+- Primary navigation: Applications, Deployments, Insights, Admin.
 - Admin appears for all authenticated roles (read-only for non-admins).
-- Global scope is a single environment (sandbox).
-- Admin section includes Delivery Groups and Recipes.
+- Environment is an explicit operating context for delivery-facing routes.
+- Environment scope should be selected at the page or route-family level, not repeated as row metadata when a screen is already scoped.
 - Role-based access is enforced by the API; non-admins see admin screens as read-only.
 
 Planned:
@@ -54,70 +71,82 @@ Key data:
 - Top failure categories.
 
 Primary actions:
-- Navigate to Services, Deployments, Insights.
+- Navigate to Applications, Deployments, Insights.
 
 Blocked-action UX:
 - If user is OBSERVER, show view-only state with no action buttons.
 
-### Services list
+### Applications list
 
 Status: Current
 
 User goal:
-- Discover services available for deployment and observe their status.
+- Discover applications available for deployment and observe their status in the selected environment.
+
+Page context:
+- Environment selector under the page header.
+- Search.
 
 Key data:
-- Service name.
-- Latest deployment state and version.
+- Application name.
+- Latest deployment state and version for the selected environment.
 - DeliveryGroup name.
-- Updated time (latest deployment).
+- Updated time when available.
 
 Primary actions:
-- Open service detail.
+- Open application detail.
+- Refresh list.
+
+Presentation rules:
+- Use a dense table or list for repeated structured data.
+- Make the application row the default action surface.
+- Keep one optional secondary state line only when it adds immediate operational value.
+- Do not repeat environment as a row column when the page is already scoped to one environment.
 
 Blocked-action UX:
-- For non-allowed services, do not show deploy actions.
+- For non-allowed applications, do not show deploy actions.
 
-### Service detail
+Loading and empty-state UX:
+- Use one table-body loading treatment.
+- Do not duplicate loading text in separate summary fields.
+- Keep passive result counts in quiet table metadata rather than in a second toolbar row.
 
-Status: Current (deploy tab placeholder)
+### Application detail
 
-Tabs:
-- Overview
-- Deploy
-- History
-- Failures
-- Insights
+Status: Current
 
-Overview tab
-- Goal: quick status and latest activity.
-- Key data: latest deployment state, version, updatedAt, rollbackOf if any.
-- Actions: open deployment detail, open execution detail (PLATFORM_ADMIN only).
-- Integrations: show Backstage entity ref and link when configured.
+User goal:
+- Understand the selected application in the current environment context and decide what to do next.
 
-Deploy tab
-- Goal: submit deployment intent.
-- Key data: service, recipe, environment, version, change summary.
-- Actions: deploy (DELIVERY_OWNER, PLATFORM_ADMIN only).
-- Blocked-action UX: show reason from API if role or policy blocks action.
-Current behavior: Deploy tab links to Deploy view (no duplicate deploy form).
+Page context:
+- Application detail is environment-scoped for current-running state, recent deployment state, deploy readiness, and rollback lineage.
+- The environment context must be visible and changeable for delivery-facing workflows.
 
-History tab
-- Goal: scan recent deployment records for the service.
-- Key data: deployment id, state, version, recipe, rollback indicator, createdAt.
-- Actions: open deployment detail.
+Key data:
+- Current running version and deployment.
+- Latest deployment state and latest finished deployment in the selected environment.
+- DeliveryGroup and supporting context.
 
-Failures tab
-- Goal: see normalized failures for the service.
-- Key data: category badge, summary, suggested action, observedAt.
-- Secondary action: open execution detail (PLATFORM_ADMIN only).
-Current behavior: Failures are derived from the latest deployment for the service.
+Primary actions:
+- Deploy (DELIVERY_OWNER, PLATFORM_ADMIN only).
+- Refresh.
 
-Insights tab
-- Goal: understand failure trends and rollback rate.
-- Key data: failuresByCategory, rollbackRate, deploymentsByRecipe, deploymentsByGroup.
-- Actions: adjust time window and filters.
-Current behavior: Service-level insights are not available yet; use the Insights view.
+Presentation rules:
+- Keep the page summary-first and object-first.
+- Prefer one main overview card and one smaller supporting-context card by default.
+- Do not render route-origin narration.
+- Do not render repeated navigation buttons that duplicate the top navigation.
+- Do not render developer-explainer copy under section titles.
+
+Issues and blocked-action UX:
+- Use one compact page-context issue surface directly under the page header for object-level or page-level issues.
+- Keep action-level blocked explanation near the affected control when needed.
+- Do not render multiple banners or cards for the same issue.
+
+Loading UX:
+- Use one loading treatment per major card.
+- Do not render multiple nested loading blocks for subsections inside the same card.
+- Do not use unavailable or failure language during normal loading.
 
 ### Deploy intent
 
@@ -127,9 +156,9 @@ User goal:
 - Submit a deployment intent without managing engine details.
 
 Key data:
-- Service (allowlisted).
+- Application or service (allowlisted).
 - Recipe (required).
-- Environment (sandbox only).
+- Environment (current selected environment context).
 - Version (auto-discovered or custom).
 - Change summary (required).
 
@@ -140,24 +169,32 @@ Primary actions:
 Form behavior:
 - Recipe list is filtered by the selected service's DeliveryGroup allowlist.
 - Change summary is required before deploy is enabled.
+- Environment should be expressed as explicit page or route context, not hidden row metadata.
 
 Policy side panel:
 - DeliveryGroup name and owner.
-- Guardrails (max concurrent deployments, daily deploy/rollback quotas).
+- Guardrails (max concurrent deployments, daily deploy and rollback quotas).
 - Quota remaining for today (derived from deployment activity).
 - Selected recipe description.
 
 Blocked-action UX:
-- Show API error codes and messages in the UI shell when blocked.
-- Examples: RECIPE_ID_REQUIRED, RECIPE_NOT_ALLOWED, DEPLOYMENT_LOCKED.
-- If operator_hint is present and the user is PLATFORM_ADMIN, show it in admin diagnostics only.
+- Show normalized deploy-block reasons in the page context rail or near the affected action.
+- Keep raw API error codes and backend language out of standard operator UI.
+- If operator_hint is present and the user is PLATFORM_ADMIN, show it in bounded admin diagnostics only.
+
+Loading UX:
+- Use one loading treatment for the main form surface and one for the supporting context surface when needed.
+- Do not duplicate loading messages across nested sections.
 
 ### Deployments list
 
 Status: Current
 
 User goal:
-- View recent deployments and open details.
+- View recent deployments and open details for the selected environment context.
+
+Page context:
+- Environment context is selected at the page or route-family level.
 
 Key data:
 - State, service, version, createdAt.
@@ -166,8 +203,13 @@ Primary actions:
 - Open deployment detail.
 - Refresh list.
 
+Presentation rules:
+- Keep the collection dense and calm.
+- Do not let the table define the entire product identity.
+- Do not repeat environment as a row column when the whole list is already scoped.
+
 Blocked-action UX:
-- If API read is blocked, show error response to the user.
+- If API read is blocked, show normalized error response to the user.
 
 ### Deployment detail
 
@@ -177,7 +219,7 @@ User goal:
 - Understand a specific deployment, timeline, and failures, and decide on rollback.
 
 Key data:
-- State, service, version, createdAt, updatedAt.
+- State, service, version, environment, createdAt, updatedAt.
 - Execution id and deep link (PLATFORM_ADMIN only).
 - Timeline events (normalized, ordered by timestamp).
 - Failures (normalized with category badge and suggested action).
@@ -187,9 +229,14 @@ Primary actions:
 - Open execution detail (PLATFORM_ADMIN only).
 - Open service URL (if available).
 
+Presentation rules:
+- Timeline should read as product narrative, not raw logs.
+- Long identifiers should be secondary metadata, not the primary action label.
+- Keep page-level issues in the page context rail, not in mid-page banners.
+
 Blocked-action UX:
 - Rollback confirmation required.
-- If rollback is blocked, show API error code and message.
+- If rollback is blocked, show normalized reason in the page context rail and near the affected action as needed.
 
 ### Insights
 
@@ -208,7 +255,11 @@ Primary actions:
 - Refresh insights.
 
 Blocked-action UX:
-- If API read fails, show error response to the user.
+- If API read fails, show normalized error response to the user.
+
+Presentation rules:
+- Keep insights restrained.
+- Metrics should not become the loudest visual surface in the product.
 
 ### Settings
 
@@ -264,6 +315,10 @@ Blocked-action UX:
 - If a service is already assigned to another group, show a clear validation error.
 - If validation returns warnings, require explicit confirmation before saving.
 - If validation returns errors, block save.
+
+Presentation rules:
+- Preserve review-before-save.
+- Do not regress into generic CRUD forms.
 
 #### Recipes
 

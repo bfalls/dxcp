@@ -179,6 +179,7 @@ We do:
 - Treat environment as an explicit operating context for delivery-facing workflows.
 - Preserve environment on DeploymentIntent, DeploymentRecord, CurrentRunningState, rollback semantics, and history filtering.
 - Allow delivery groups to define allowed environments and environment-scoped guardrails.
+- Prefer page-level or route-family context selectors over repeating the same environment as row-level metadata when a screen is scoped to one environment at a time.
 
 We do not:
 - Treat environment as an incidental display field.
@@ -204,6 +205,32 @@ We do not:
 Tradeoff:
 - Clearer audit trail
 - No multi-engine flexibility
+
+---
+
+## Decision 12: UI density and restraint are first-class product requirements
+
+DXCP UI is for expert operators working in consequential delivery flows.
+The interface must be compact, stable, and calm.
+Explanation quality matters, but explanation density is not a virtue.
+
+We do:
+- Keep desktop controls compact by default.
+- Prefer one clear loading signal per major surface.
+- Prefer one issue surface per condition class.
+- Prefer page-level context controls over repeating the same context in every row.
+- Prefer dense table or list layouts for repeated structured data.
+- Keep explanatory copy only when it improves actionability or operator comprehension.
+
+We do not:
+- Add developer-narration or tutorial-style copy to product screens.
+- Turn every concept into its own card, banner, or summary block.
+- Duplicate loading, blocked, warning, or status messaging in multiple places.
+- Inflate control size or spacing beyond what is needed for clarity and accessibility.
+
+Tradeoff:
+- Less hand-holding on the surface
+- Faster scanning, stronger operator confidence, and a more professional enterprise UI
 
 ---
 

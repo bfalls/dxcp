@@ -139,3 +139,5 @@ Business outcomes:
 - Safety by default
 - Progressive disclosure of complexity
 - Product thinking applied to delivery
+- Operator confidence through restraint
+- Explain when needed, not by default
