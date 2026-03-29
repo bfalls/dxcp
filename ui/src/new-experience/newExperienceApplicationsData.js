@@ -270,41 +270,71 @@ function buildActionPosture({ role, mutationsDisabled, activeDeployment, group, 
   if (role === 'OBSERVER') {
     return {
       state: 'read-only',
-      note: 'Observers can inspect the application summary, current running state, and recent deployment state here, but deploy remains read-only on this route.'
+      note: 'Observers can inspect the application summary, current running state, and recent deployment state here, but Deploy remains read-only.',
+      issue: null
     }
   }
 
   if (mutationsDisabled) {
     return {
       state: 'read-only',
-      note: 'DXCP is currently in read-only mode. Application state remains available here, but deploy stays read-only until mutations are re-enabled.'
+      note: 'DXCP is currently in read-only mode. Application state remains available here, but Deploy stays read-only until mutations are re-enabled.',
+      issue: null
     }
   }
 
   if (!group?.id) {
     return {
       state: 'blocked',
-      note: 'Deploy is blocked because this application does not have resolved Deployment Group context on this route. Open recent deployment detail while policy context is repaired.'
+      note: 'Deploy is blocked because Deployment Group context is not available for this application. Open recent deployment detail while policy context is repaired.',
+      issue: {
+        id: 'deploy-group-context-missing',
+        title: 'Deploy blocked',
+        summary: 'Deploy blocked',
+        tone: 'danger',
+        body: 'Deployment Group context is not available for this application. Review recent deployment detail while policy context is repaired.'
+      }
     }
   }
 
   if (!environment?.name) {
     return {
       state: 'blocked',
-      note: 'Deploy is blocked because DXCP could not resolve environment context for this application. Current state remains visible, but deploy handoff requires environment context first.'
+      note: 'Deploy is blocked because DXCP could not resolve environment context for this application. Current state remains visible, but Deploy requires environment context first.',
+      issue: {
+        id: 'deploy-environment-context-missing',
+        title: 'Deploy blocked',
+        summary: 'Deploy blocked',
+        tone: 'danger',
+        body: 'Environment context is not available for this application. Current state remains visible, but Deploy requires a resolved environment first.'
+      }
     }
   }
 
   if (activeDeployment?.id) {
     return {
       state: 'blocked',
-      note: `Deploy is blocked because Deployment ${activeDeployment.id} is still in progress for ${activeDeployment.environment || environment.name}. Open that deployment to follow the current work before starting another deploy.`
+      note: `Deploy is blocked because Deployment ${activeDeployment.id} is still in progress for ${activeDeployment.environment || environment.name}. Open that deployment to follow the current work before starting another deploy.`,
+      issue: {
+        id: 'active-deployment-in-progress',
+        title: 'Deploy blocked',
+        summary: 'Deploy blocked',
+        tone: 'danger',
+        body: `Deployment ${activeDeployment.id} is still in progress for ${activeDeployment.environment || environment.name}. Open that deployment before starting another deploy.`,
+        actions: [
+          {
+            label: 'Open Deployment',
+            to: `/new/deployments/${activeDeployment.id}`
+          }
+        ]
+      }
     }
   }
 
   return {
     state: 'available',
-    note: 'Open the deploy workflow to review deploy readiness in application context. The application record stays primary while deploy intent moves into its own route.'
+    note: 'Open the deploy workflow to review deploy readiness in application context. The application record stays primary while deploy intent moves into its own route.',
+    issue: null
   }
 }
 

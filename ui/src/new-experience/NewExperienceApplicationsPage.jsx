@@ -4,8 +4,8 @@ import OperationalDataList from '../components/OperationalDataList.jsx'
 import LoadingText from '../components/LoadingText.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
-import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
+import { NewExplanation, NewPageContextRail, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { useNewExperienceAlertRail, useNewExperiencePageChrome, useNewExperienceStickyRail } from './NewExperienceShell.jsx'
 import { loadApplicationDetailData, loadApplicationsChooserData } from './newExperienceApplicationsData.js'
 
 function roleSearchPlaceholder(role) {
@@ -230,8 +230,7 @@ function ApplicationsChooser({ role, api }) {
         title="Applications"
         role={role}
         secondaryActions={[
-          { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshChooserData({ bypassCache: true }), disabled: isRefreshing || isLoading },
-          { label: 'Open Deployments', to: '/new/deployments', description: 'Browse recent deployment activity.' }
+          { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshChooserData({ bypassCache: true }), disabled: isRefreshing || isLoading }
         ]}
       />
 
@@ -412,11 +411,11 @@ function ApplicationDetail({ role, api }) {
 
   useNewExperienceAlertRail(alertRailItems)
 
-  const secondaryActions = [
+  const secondaryActions = useMemo(() => ([
     { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshDetail({ bypassCache: true }), disabled: isRefreshing || isLoading }
-  ]
+  ]), [isLoading, isRefreshing, refreshDetail])
 
-  const primaryAction = {
+  const primaryAction = useMemo(() => ({
     label: 'Deploy',
     state: isLoading ? 'disabled' : (viewModel?.actionPosture?.state || (isReadOnly ? 'read-only' : 'unavailable')),
     onClick:
@@ -424,59 +423,71 @@ function ApplicationDetail({ role, api }) {
         ? () => navigate(newDeployRoute)
         : undefined,
     description: isLoading ? '' : (viewModel?.actionPosture?.note || 'Deploy handoff is unavailable on this route.')
-  }
+  }), [isLoading, isReadOnly, navigate, newDeployRoute, viewModel?.actionPosture?.note, viewModel?.actionPosture?.state])
+  const pageIssue = !isLoading && !isFailure && !isUnavailable ? (viewModel?.actionPosture?.issue || null) : null
+  const pageIssues = useMemo(() => (pageIssue ? [pageIssue] : []), [pageIssue])
+  const pageChrome = useMemo(() => (
+    <NewExperiencePageHeader
+      title="Application"
+      objectIdentity={applicationName}
+      role={role}
+      showRoleNote={false}
+      stateSummaryItems={
+          viewModel?.stateSummaryItems || [
+            { label: 'Environment', value: '' },
+            { label: 'Current version', value: '' },
+            { label: 'Recent state', value: '' }
+          ]
+        }
+      primaryAction={primaryAction}
+      secondaryActions={secondaryActions}
+      actionNote={isLoading ? '' : (viewModel?.actionPosture?.note || '')}
+      showActionNote={false}
+    />
+  ), [applicationName, isLoading, primaryAction, role, secondaryActions, viewModel?.actionPosture?.note, viewModel?.stateSummaryItems])
+  const stickyRail = useMemo(() => (
+    <>
+      <NewPageContextRail items={pageIssues} />
+    </>
+  ), [pageIssues])
+  useNewExperiencePageChrome(pageChrome)
+  useNewExperienceStickyRail(stickyRail)
 
   const deploymentReturnTo = buildApplicationReturnTo(applicationName)
 
   return (
     <div className="new-application-page">
-      <NewExperiencePageHeader
-        title="Application"
-        objectIdentity={applicationName}
-        role={role}
-        showRoleNote={false}
-        stateSummaryItems={
-          viewModel?.stateSummaryItems || [
-            { label: 'Environment', value: 'Loading' },
-            { label: 'Current version', value: 'Loading' },
-            { label: 'Recent state', value: 'Loading' }
-          ]
-        }
-        primaryAction={primaryAction}
-        secondaryActions={secondaryActions}
-        actionNote={isLoading ? '' : (viewModel?.actionPosture?.note || '')}
-      />
+      <div className="new-page-context-body">
+        {isFailure ? (
+          <NewStateBlock
+            eyebrow="Failure"
+            title="Application detail could not be loaded"
+            tone="danger"
+            actions={[
+              { label: 'Refresh', onClick: () => refreshDetail({ bypassCache: true }) },
+              { label: 'Open Applications', to: '/new/applications', secondary: true }
+            ]}
+          >
+            {detailState.errorMessage || 'DXCP could not load this application record right now. Refresh to try again.'}
+          </NewStateBlock>
+        ) : null}
 
-      {isFailure ? (
-        <NewStateBlock
-          eyebrow="Failure"
-          title="Application detail could not be loaded"
-          tone="danger"
-          actions={[
-            { label: 'Refresh', onClick: () => refreshDetail({ bypassCache: true }) },
-            { label: 'Open Applications', to: '/new/applications', secondary: true }
-          ]}
-        >
-          {detailState.errorMessage || 'DXCP could not load this application record right now. Refresh to try again.'}
-        </NewStateBlock>
-      ) : null}
+        {isUnavailable ? (
+          <NewStateBlock
+            eyebrow="Unavailable route"
+            title="Application detail is not available on this route"
+            tone="danger"
+            actions={[
+              { label: 'Open Applications', to: '/new/applications' },
+              { label: 'Open Legacy', to: '/services', secondary: true }
+            ]}
+          >
+            {detailState.errorMessage || 'This application is not available from the accessible DXCP application set on this route.'}
+          </NewStateBlock>
+        ) : null}
 
-      {isUnavailable ? (
-        <NewStateBlock
-          eyebrow="Unavailable route"
-          title="Application detail is not available on this route"
-          tone="danger"
-          actions={[
-            { label: 'Open Applications', to: '/new/applications' },
-            { label: 'Open Legacy', to: '/services', secondary: true }
-          ]}
-        >
-          {detailState.errorMessage || 'This application is not available from the accessible DXCP application set on this route.'}
-        </NewStateBlock>
-      ) : null}
-
-      {!isFailure && !isUnavailable ? (
-        <div className="new-application-layout">
+        {!isFailure && !isUnavailable ? (
+          <div className="new-application-layout">
           <div className="new-application-primary">
             <SectionCard className="new-application-card new-application-overview-card">
               <div className="new-section-header">
@@ -510,18 +521,27 @@ function ApplicationDetail({ role, api }) {
                         <h3>Current running summary</h3>
                       </div>
                       <div className="links">
-                        <Link className="link secondary" to={newDeployRoute}>
-                          Open deploy workflow
+                        <Link className="new-activity-action-link" to={newDeployRoute}>
+                          <span>Deploy Workflow</span>
+                          <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                            <path
+                              d="M6 14L14 6"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M8 6H14V12"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
                         </Link>
-                        {viewModel?.currentRunning?.deploymentId ? (
-                          <Link
-                            className="link"
-                            to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
-                            state={{ returnTo: deploymentReturnTo }}
-                          >
-                            Open current deployment detail
-                          </Link>
-                        ) : null}
                       </div>
                     </div>
 
@@ -542,7 +562,7 @@ function ApplicationDetail({ role, api }) {
                                 to={`/new/deployments/${viewModel.currentRunning.deploymentId}`}
                                 state={{ returnTo: deploymentReturnTo }}
                               >
-                                Deployment {viewModel.currentRunning.deploymentId}
+                                {viewModel.currentRunning.deploymentId}
                               </Link>
                             ) : (
                               'Not recorded'
@@ -669,8 +689,9 @@ function ApplicationDetail({ role, api }) {
               )}
             </SectionCard>
           </aside>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

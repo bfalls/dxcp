@@ -1,9 +1,8 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { NewExplanation } from './NewExperienceStatePrimitives.jsx'
 
 function formatRoleLabel(role) {
-  if (role === 'PLATFORM_ADMIN') return 'Platform admin view'
+  if (role === 'PLATFORM_ADMIN') return ''
   if (role === 'DELIVERY_OWNER') return 'Delivery owner view'
   if (role === 'OBSERVER') return 'Observer view'
   return 'Role unavailable'
@@ -32,7 +31,8 @@ export default function NewExperiencePageHeader({
   secondaryActions = [],
   role = 'UNKNOWN',
   actionNote = '',
-  showRoleNote = true
+  showRoleNote = true,
+  showActionNote = true
 }) {
   const hasPrimaryAction = Boolean(primaryAction)
   const primaryActionState = primaryAction?.state || 'available'
@@ -50,7 +50,7 @@ export default function NewExperiencePageHeader({
       <div className="new-page-header-identity">
         <h1 className={hasObjectIdentity ? 'new-page-header-eyebrow' : 'new-page-header-title'}>{title}</h1>
         {hasObjectIdentity ? <div className="new-page-object-identity">{objectIdentity}</div> : null}
-        {showRoleNote ? (
+        {showRoleNote && formatRoleLabel(role) ? (
           <div className="new-page-meta-row">
             <div className="new-page-role-note">{formatRoleLabel(role)}</div>
           </div>
@@ -60,7 +60,7 @@ export default function NewExperiencePageHeader({
             {stateSummaryItems.map((item) => (
               <span key={item.label} className="new-page-state-item">
                 <span className="new-page-state-label">{item.label}</span>
-                <span className="new-page-state-value">{item.value}</span>
+                <span className="new-page-state-value">{item.value || '\u00A0'}</span>
               </span>
             ))}
           </div>
@@ -122,11 +122,13 @@ export default function NewExperiencePageHeader({
           </div>
         </div>
       ) : null}
-      {actionNote && hasPrimaryAction ? (
+      {actionNoteId ? <span id={actionNoteId} className="visually-hidden">{actionNote}</span> : null}
+      {showActionNote && actionNote && hasPrimaryAction ? (
         <div className="new-page-header-note">
-          <NewExplanation title={actionStateTitle} tone={actionStateTone}>
-            <span id={actionNoteId}>{actionNote}</span>
-          </NewExplanation>
+          <div className={`new-page-header-note-inline new-page-header-note-inline-${actionStateTone}`}>
+            <strong>{actionStateTitle}</strong>
+            <span>{actionNote}</span>
+          </div>
         </div>
       ) : null}
     </header>

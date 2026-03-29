@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App.jsx'
 import { createApiClient } from '../apiClient.js'
+import { NewPageContextRail } from '../new-experience/NewExperienceStatePrimitives.jsx'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 
@@ -1117,7 +1118,7 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({ role: 'DELIVERY_OWNER', deployAllowed: true, rollbackAllowed: false })
 
     const newView = renderApp('/')
-    await newView.findByText('New Experience Preview')
+    await newView.findByText('Preview under /new/*')
     await newView.findByRole('heading', { name: 'Applications', level: 1 })
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
   })
@@ -1136,7 +1137,7 @@ export async function runAllTests() {
 
     await view.findByText('DXCP Control Plane')
     fireEvent.click(view.getByRole('link', { name: 'Open New Experience' }))
-    await view.findByText('New Experience Preview')
+    await view.findByText('Preview under /new/*')
     await view.findByText('Application')
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
 
@@ -1157,7 +1158,7 @@ export async function runAllTests() {
     globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER')
     const newView = renderApp('/new/deployments/9831')
 
-    await newView.findByText('New Experience Preview')
+    await newView.findByText('Preview under /new/*')
     await newView.findByText('Deployment 9831')
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'new')
 
@@ -1176,7 +1177,7 @@ export async function runAllTests() {
     const legacyView = renderApp('/services')
 
     await legacyView.findByText('DXCP Control Plane')
-    assert.equal(legacyView.queryByText('New Experience Preview'), null)
+    assert.equal(legacyView.queryByText('Preview under /new/*'), null)
     assert.equal(window.localStorage.getItem(EXPERIENCE_CHOICE_STORAGE_KEY), 'legacy')
   })
 
@@ -1217,11 +1218,21 @@ export async function runAllTests() {
     await view.findByText('Payments Platform')
     await view.findAllByText('Current version')
     await view.findAllByText('v1.32.1')
-    await view.findByText('Deploy blocked')
-    await view.findByText('Deploy is blocked because Deployment 9842 is still in progress for sandbox. Open that deployment to follow the current work before starting another deploy.')
-    assert.ok(view.getByRole('link', { name: 'Open deploy workflow' }))
-    assert.ok(view.getByRole('link', { name: 'Open current deployment detail' }))
+    const deployControl = view.getByRole('button', { name: 'Deploy' })
+    const issueButton = await view.findByRole('button', { name: /Danger issue: Deploy blocked/i })
+    assert.ok(view.container.querySelector('.new-shell-sticky-region .new-shell-sticky-rail .new-page-context-rail'))
+    assert.ok(view.container.querySelector('.new-shell-page-chrome .new-page-header'))
+    assert.equal(
+      deployControl.title,
+      'Deploy is blocked because Deployment 9842 is still in progress for sandbox. Open that deployment to follow the current work before starting another deploy.'
+    )
+    assert.equal(view.queryByText('Deployment 9842 is still in progress for sandbox. Open that deployment before starting another deploy.'), null)
+    fireEvent.click(issueButton)
+    await view.findByText('Deployment 9842 is still in progress for sandbox. Open that deployment before starting another deploy.')
+    assert.equal(view.queryByText('Application issues'), null)
+    assert.ok(view.getByRole('link', { name: 'Deploy Workflow' }))
     assert.ok(view.getByRole('link', { name: 'Open deployment 9842' }))
+    assert.ok(view.getByRole('link', { name: '9831' }))
     await view.findByText(/Max 1 active deployment at a time/)
     await view.findByText('Guardrail posture')
     await view.findByText('Permission-limited detail')
@@ -1344,12 +1355,11 @@ export async function runAllTests() {
     globalThis.fetch = buildNewExperienceFetch('OBSERVER')
     const view = renderApp('/new/applications/payments-api')
 
-    await view.findByText('Read-only access')
     await view.findByText(
-      'Observers can inspect the application summary, current running state, and recent deployment state here, but deploy remains read-only on this route.'
+      'Observers can inspect the application summary, current running state, and recent deployment state here, but Deploy remains read-only.'
     )
     await view.findByText('Read-only')
-    await view.findByText('Open deploy workflow')
+    await view.findByText('Deploy Workflow')
     await view.findByText('Recent deployment state')
     assert.equal(view.queryByRole('link', { name: 'Admin' }), null)
   })
@@ -1372,6 +1382,87 @@ export async function runAllTests() {
     await view.findAllByText('Supporting application reads are degraded')
     await view.findByText('Running state is unavailable')
     await view.findByText('No recent deployment state is available')
+  })
+
+  await runTest('New experience application route stays clean when no object-level issues are present', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildNewExperienceFetch('DELIVERY_OWNER', {
+      versionsByService: { 'payments-api': ['v1.33.0'] },
+      serviceStatusesByService: {
+        'payments-api': {
+          service: 'payments-api',
+          environment: 'sandbox',
+          hasDeployments: true,
+          currentRunning: {
+            environment: 'sandbox',
+            version: 'v1.32.1',
+            deploymentId: '9831',
+            deploymentKind: 'ROLL_FORWARD',
+            derivedAt: '2025-01-03T00:03:00Z'
+          },
+          latest: {
+            id: '9831',
+            state: 'SUCCEEDED',
+            outcome: 'SUCCEEDED',
+            version: 'v1.32.1',
+            createdAt: '2025-01-02T23:40:00Z',
+            updatedAt: '2025-01-03T00:03:00Z'
+          }
+        }
+      },
+      deploymentHistoryByService: {
+        'payments-api': [
+          {
+            id: '9831',
+            state: 'SUCCEEDED',
+            outcome: 'SUCCEEDED',
+            environment: 'sandbox',
+            version: 'v1.32.1',
+            createdAt: '2025-01-02T23:40:00Z',
+            updatedAt: '2025-01-03T00:03:00Z',
+            deliveryGroupId: 'payments'
+          }
+        ]
+      }
+    })
+    const view = renderApp('/new/applications/payments-api')
+
+    await view.findByText('Application')
+    await view.findByText('Current running summary')
+    assert.equal(view.queryByText('Application issues'), null)
+    assert.equal(view.queryByText('Deploy blocked'), null)
+  })
+
+  await runTest('New page context rail handles multiple issues with overflow controls', async () => {
+    const view = render(
+      <MemoryRouter>
+        <NewPageContextRail
+          items={[
+            { id: 'issue-a', title: 'Deploy blocked', summary: 'Deploy blocked', tone: 'danger', body: 'A deployment is already running.' },
+            { id: 'issue-b', title: 'Release note missing', summary: 'Release note missing', tone: 'warning', body: 'Add a release note before handoff.' },
+            { id: 'issue-c', title: 'Context degraded', summary: 'Context degraded', tone: 'neutral', body: 'Supporting reads may be stale.' }
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    await view.findByRole('button', { name: /Danger issue: Deploy blocked/i })
+    await view.findByRole('button', { name: /Warning issue: Release note missing/i })
+    await view.findByRole('button', { name: '1 more issue' })
+    assert.equal(view.queryByRole('button', { name: /Note issue: Context degraded/i }), null)
+
+    fireEvent.click(view.getByRole('button', { name: '1 more issue' }))
+    await view.findByRole('button', { name: /Note issue: Context degraded/i })
+
+    fireEvent.click(view.getByRole('button', { name: /Note issue: Context degraded/i }))
+    await view.findByText('Supporting reads may be stale.')
   })
 
   await runTest('New experience application route shows a failure state when the application record cannot load', async () => {
