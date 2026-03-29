@@ -293,6 +293,26 @@ body {
   overflow-wrap: anywhere;
 }
 
+.new-page-object-identity-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+}
+
+.new-page-object-identity-link svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.new-page-object-identity-link:hover,
+.new-page-object-identity-link:focus-visible {
+  color: var(--accent-2);
+}
+
 .new-page-state-summary {
   display: flex;
   gap: 10px;

@@ -1543,7 +1543,8 @@ export async function runAllTests() {
     }, view, 'new-deploy-enabled')
     await view.findByText('DXCP has confirmed that guardrails allow this deploy now.')
     await view.findAllByText('Ready')
-    assert.ok(view.getAllByRole('link', { name: 'Back to Application' }).length >= 1)
+    assert.equal(view.queryByRole('link', { name: 'Back to Application' }), null)
+    assert.ok(view.getByRole('link', { name: 'Back to application payments-api' }))
     await view.findByText('Policy and guardrails')
   })
 

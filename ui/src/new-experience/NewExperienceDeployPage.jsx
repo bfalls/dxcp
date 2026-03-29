@@ -427,6 +427,34 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
   const { applicationName = 'payments-api' } = useParams()
   const location = useLocation()
   const returnTo = buildReturnTo(location, applicationName)
+  const applicationIdentityLink = (
+    <Link
+      className="new-page-object-identity-link"
+      to={returnTo.to || `/new/applications/${applicationName}`}
+      title="Back to application"
+      aria-label={`Back to application ${applicationName}`}
+    >
+      <span>{applicationName}</span>
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+        <path
+          d="M6 14L14 6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M8 6H14V12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </Link>
+  )
   const [baseState, setBaseState] = useState({
     kind: 'loading',
     base: null,
@@ -626,11 +654,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
 
   const secondaryActions = [
     {
-      label: returnTo.label || 'Back to Application',
-      to: returnTo.to || `/new/applications/${applicationName}`,
-      description: 'Return to the application record without leaving the new experience.'
-    },
-    {
       label: baseState.kind === 'refreshing' ? 'Refreshing...' : 'Refresh',
       onClick: () => refreshBase({ bypassCache: true }),
       disabled: baseState.kind === 'loading' || baseState.kind === 'refreshing',
@@ -643,7 +666,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       <div className="new-deploy-page">
         <NewExperiencePageHeader
           title="Deploy Application"
-          objectIdentity={`Application: ${applicationName}`}
+          objectIdentity={applicationIdentityLink}
           role={role}
           stateSummaryItems={[{ label: 'Workflow state', value: 'Unavailable' }]}
           primaryAction={{ label: 'Deploy', state: 'unavailable', description: 'Deploy is unavailable on this route.' }}
@@ -670,7 +693,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       <div className="new-deploy-page">
         <NewExperiencePageHeader
           title="Deploy Application"
-          objectIdentity={`Application: ${applicationName}`}
+          objectIdentity={applicationIdentityLink}
           role={role}
           stateSummaryItems={[{ label: 'Workflow state', value: 'Unavailable' }]}
           primaryAction={{ label: 'Deploy', state: 'unavailable', description: 'Deploy is unavailable on this route.' }}
@@ -692,19 +715,12 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
     )
   }
 
-  const stateSummaryItems = [
-    { label: 'Environment', value: selectedEnvironment?.label || 'Not selected' },
-    { label: 'Deployment Group', value: base?.deliveryGroup?.name || 'Not assigned' },
-    { label: 'Deployment Strategy', value: selectedStrategy?.name || 'Choose a Deployment Strategy' }
-  ]
-
   return (
     <div className="new-deploy-page">
       <NewExperiencePageHeader
         title="Deploy Application"
-        objectIdentity={`Application: ${applicationName}`}
+        objectIdentity={applicationIdentityLink}
         role={role}
-        stateSummaryItems={stateSummaryItems}
         primaryAction={{
           label: submitState.kind === 'submitting' ? 'Deploying...' : 'Deploy',
           state: posture.primaryActionState,
@@ -722,9 +738,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
               <h3>Intent entry</h3>
               <p className="helper">Define the deployment intent in DXCP product language before any deploy is attempted.</p>
             </div>
-            <Link className="link secondary" to={returnTo.to || `/new/applications/${applicationName}`}>
-              {returnTo.label || 'Back to Application'}
-            </Link>
           </div>
 
           {baseState.kind === 'loading' ? (
