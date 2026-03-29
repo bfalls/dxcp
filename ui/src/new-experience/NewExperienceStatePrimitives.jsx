@@ -1,7 +1,7 @@
-import React, { useId, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-const MAX_VISIBLE_CONTEXT_ISSUES = 2
+const DEFAULT_MAX_VISIBLE_CONTEXT_ISSUES = 2
 
 function getIssueKey(item, index) {
   return item.id || `${item.title || 'issue'}-${index}`
@@ -18,8 +18,27 @@ function getToneLabel(tone) {
   return 'Note'
 }
 
-function isOverflowSelection(items, selectedKey) {
-  return items.slice(MAX_VISIBLE_CONTEXT_ISSUES).some((item, index) => getIssueKey(item, index + MAX_VISIBLE_CONTEXT_ISSUES) === selectedKey)
+function normalizeIssue(item, index) {
+  const actions = Array.isArray(item?.actions)
+    ? item.actions
+    : item?.action
+      ? [item.action]
+      : []
+
+  return {
+    ...item,
+    id: getIssueKey(item, index),
+    summary: getIssueSummary(item),
+    title: item?.title || getIssueSummary(item),
+    tone: item?.tone || 'neutral',
+    actions
+  }
+}
+
+function isOverflowSelection(items, selectedKey, maxVisibleItems) {
+  return items
+    .slice(maxVisibleItems)
+    .some((item, index) => item.id === getIssueKey(item, index + maxVisibleItems) || item.id === selectedKey)
 }
 
 export function NewExplanation({ title, children, tone = 'neutral', actions = [] }) {
@@ -46,22 +65,52 @@ export function NewExplanation({ title, children, tone = 'neutral', actions = []
   )
 }
 
-function getContextRailSummary(items) {
+function getContextRailSummary(items, summary) {
+  if (summary) return summary
   if (!Array.isArray(items) || items.length === 0) return ''
   if (items.length === 1) return items[0].summary || items[0].title || '1 issue'
   return `${items.length} page issues`
 }
 
-export function NewPageContextRail({ items = [], defaultExpanded = false, sticky = false }) {
-  const normalizedItems = Array.isArray(items) ? items : []
+export function NewPageContextRail({
+  items = [],
+  summary = '',
+  defaultExpanded = false,
+  defaultExpandedIssueId,
+  sticky = false,
+  ariaLabel = 'Page context issues',
+  maxVisibleItems = DEFAULT_MAX_VISIBLE_CONTEXT_ISSUES
+}) {
+  const normalizedItems = useMemo(
+    () => (Array.isArray(items) ? items : []).map((item, index) => normalizeIssue(item, index)),
+    [items]
+  )
 
-  const [selectedIssueKey, setSelectedIssueKey] = useState(defaultExpanded && normalizedItems.length > 0 ? getIssueKey(normalizedItems[0], 0) : null)
+  const [selectedIssueKey, setSelectedIssueKey] = useState(
+    defaultExpandedIssueId || (defaultExpanded && normalizedItems.length > 0 ? normalizedItems[0].id : null)
+  )
   const [showOverflow, setShowOverflow] = useState(defaultExpanded)
   const detailsId = useId()
   const overflowId = useId()
-  const visibleItems = normalizedItems.slice(0, MAX_VISIBLE_CONTEXT_ISSUES)
-  const overflowItems = normalizedItems.slice(MAX_VISIBLE_CONTEXT_ISSUES)
-  const selectedIssue = normalizedItems.find((item, index) => getIssueKey(item, index) === selectedIssueKey) || null
+  const visibleItems = normalizedItems.slice(0, maxVisibleItems)
+  const overflowItems = normalizedItems.slice(maxVisibleItems)
+  const selectedIssue = normalizedItems.find((item) => item.id === selectedIssueKey) || null
+
+  useEffect(() => {
+    if (defaultExpandedIssueId && normalizedItems.some((item) => item.id === defaultExpandedIssueId)) {
+      setSelectedIssueKey(defaultExpandedIssueId)
+      return
+    }
+    if (selectedIssueKey && !normalizedItems.some((item) => item.id === selectedIssueKey)) {
+      setSelectedIssueKey(defaultExpanded && normalizedItems[0] ? normalizedItems[0].id : null)
+    }
+  }, [defaultExpanded, defaultExpandedIssueId, normalizedItems, selectedIssueKey])
+
+  useEffect(() => {
+    if (!showOverflow && overflowItems.some((item) => item.id === selectedIssueKey)) {
+      setSelectedIssueKey(null)
+    }
+  }, [overflowItems, selectedIssueKey, showOverflow])
 
   if (normalizedItems.length === 0) return null
 
@@ -72,7 +121,7 @@ export function NewPageContextRail({ items = [], defaultExpanded = false, sticky
   const toggleOverflow = () => {
     setShowOverflow((current) => {
       const next = !current
-      if (!next && isOverflowSelection(items, selectedIssueKey)) {
+      if (!next && isOverflowSelection(normalizedItems, selectedIssueKey, maxVisibleItems)) {
         setSelectedIssueKey(null)
       }
       return next
@@ -82,14 +131,14 @@ export function NewPageContextRail({ items = [], defaultExpanded = false, sticky
   return (
     <section
       className={`new-page-context-rail${sticky ? ' new-page-context-rail-sticky' : ''}`}
-      aria-label="Page context issues"
+      aria-label={ariaLabel}
       data-expanded={selectedIssue ? 'true' : 'false'}
     >
       <div className="new-page-context-rail-bar">
-        <span className="new-page-context-rail-summary">{getContextRailSummary(normalizedItems)}</span>
+        <span className="new-page-context-rail-summary">{getContextRailSummary(normalizedItems, summary)}</span>
         <div className="new-page-context-rail-button-group">
-          {visibleItems.map((item, index) => {
-            const issueKey = getIssueKey(item, index)
+          {visibleItems.map((item) => {
+            const issueKey = item.id
             const isSelected = selectedIssueKey === issueKey
             return (
               <button
@@ -121,10 +170,10 @@ export function NewPageContextRail({ items = [], defaultExpanded = false, sticky
         </div>
       </div>
 
-      {showOverflow && overflowItems.length > 0 ? (
+          {showOverflow && overflowItems.length > 0 ? (
         <div className="new-page-context-rail-overflow" id={overflowId}>
-          {overflowItems.map((item, index) => {
-            const issueKey = getIssueKey(item, index + MAX_VISIBLE_CONTEXT_ISSUES)
+          {overflowItems.map((item) => {
+            const issueKey = item.id
             const isSelected = selectedIssueKey === issueKey
             return (
               <button

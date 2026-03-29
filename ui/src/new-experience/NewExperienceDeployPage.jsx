@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { NewExplanation, NewPageContextRail, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import {
   loadDeployBaseData,
   loadDeployEnvironmentContext,
@@ -423,6 +423,22 @@ function combineDegradedReasons(baseState, environmentState) {
   return [...(baseState.degradedReasons || []), ...(environmentState.degradedReasons || [])].filter(Boolean)
 }
 
+function buildDeployPageContextIssues(posture) {
+  if (!posture?.local || posture.local.tone === 'neutral') return []
+  if (posture.local.title === 'Complete deploy intent' || posture.local.title === 'Checking readiness') return []
+
+  return [
+    {
+      id: 'deploy-page-context-issue',
+      title: posture.local.title,
+      summary: posture.local.summary || posture.local.title,
+      tone: posture.local.tone,
+      body: posture.local.body,
+      actions: posture.local.actions || []
+    }
+  ]
+}
+
 export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
   const { applicationName = 'payments-api' } = useParams()
   const location = useLocation()
@@ -626,6 +642,10 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
     [base, changeSummary, posture, selectedEnvironment, selectedStrategy, validationState, version]
   )
   const degradedReasons = combineDegradedReasons(baseState, environmentState)
+  const pageContextIssues = useMemo(() => {
+    if (baseState.kind === 'loading' || baseState.kind === 'failure' || baseState.kind === 'unavailable') return []
+    return buildDeployPageContextIssues(posture)
+  }, [baseState.kind, posture])
 
   const handleDeploy = async () => {
     if (posture.primaryActionState !== 'available') return
@@ -731,6 +751,8 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
         actionNote={posture.headerNote}
       />
 
+      <NewPageContextRail items={pageContextIssues} />
+
       <div className="new-deploy-layout">
         <SectionCard className="new-deploy-intent-card">
           <div className="new-section-header">
@@ -829,11 +851,13 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                 </div>
               ) : null}
 
-              <div className="new-deploy-action-review">
-                <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
-                  {posture.local.body}
-                </NewExplanation>
-              </div>
+              {pageContextIssues.length === 0 ? (
+                <div className="new-deploy-action-review">
+                  <NewExplanation title={posture.local.title} tone={posture.local.tone} actions={posture.local.actions}>
+                    {posture.local.body}
+                  </NewExplanation>
+                </div>
+              ) : null}
 
               {submitState.kind === 'success' ? (
                 <NewExplanation

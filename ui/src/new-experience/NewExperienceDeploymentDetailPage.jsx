@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { NewExplanation, NewPageContextRail, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 import { loadDeploymentDetailData } from './newExperienceDeploymentsData.js'
 
@@ -121,6 +121,21 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
   }, [detailState.errorMessage, isDegraded, isFailure, isUnavailable])
 
   useNewExperienceAlertRail(alertRailItems)
+  const pageContextIssues = useMemo(() => {
+    if (isLoading || isFailure || isUnavailable || !viewModel?.currentRunning || viewModel.currentRunning.kind === 'ready') return []
+    return [
+      {
+        id: 'deployment-current-running-unavailable',
+        title: 'Running version context is unavailable',
+        summary: 'Running version context is unavailable',
+        tone: 'warning',
+        body: viewModel.currentRunning.explanation,
+        action: viewModel.application
+          ? { label: 'Open Application', to: `/new/applications/${viewModel.application}` }
+          : undefined
+      }
+    ]
+  }, [isFailure, isLoading, isUnavailable, viewModel])
 
   const secondaryActions = buildSecondaryActions(viewModel, returnTo, isRefreshing, refreshDetail)
 
@@ -195,6 +210,8 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
         secondaryActions={secondaryActions}
         actionNote="Deployment detail stays narrative-first. Supporting diagnostics remain bounded so the route does not turn into an execution console."
       />
+
+      <NewPageContextRail items={pageContextIssues} />
 
       {returnTo ? (
         <SectionCard className="new-detail-context-card">
@@ -375,9 +392,10 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
                 </dl>
               </div>
             ) : (
-              <NewExplanation title="Current running context is unavailable" tone="warning">
-                {viewModel?.currentRunning?.explanation}
-              </NewExplanation>
+              <div className="new-detail-support-stack">
+                <span className="badge warn">Context unavailable</span>
+                <p className="helper">{viewModel?.currentRunning?.explanation}</p>
+              </div>
             )}
           </SectionCard>
 

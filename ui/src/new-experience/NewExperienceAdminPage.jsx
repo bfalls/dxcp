@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import { NewExplanation, NewPageContextRail, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
 import {
   buildAdminViewModel,
@@ -57,6 +57,58 @@ function formatStrategies(recipeIds, recipesById) {
     .map((recipeId) => recipesById.get(recipeId)?.name || recipeId)
     .filter(Boolean)
   return labels.length > 0 ? labels.join(', ') : 'None selected'
+}
+
+function buildAdminPageContextIssues({ isDegraded, degradedReasons, mode, warnings, errors, saveBlockedBySettings, mutationAvailability }) {
+  const items = []
+
+  if (isDegraded) {
+    items.push({
+      id: 'admin-supporting-reads-degraded',
+      title: 'Supporting reads are degraded',
+      summary: 'Supporting reads are degraded',
+      tone: 'warning',
+      body:
+        degradedReasons.length > 0
+          ? degradedReasons.join(' ')
+          : 'The governance object remains available, but one or more supporting reads could not be refreshed.'
+    })
+  }
+
+  if (mode === 'review' && warnings.length > 0) {
+    items.push({
+      id: 'admin-review-warnings',
+      title: 'Warnings need review before save',
+      summary: `${warnings.length} warning${warnings.length === 1 ? '' : 's'} to review`,
+      tone: 'warning',
+      body: warnings.map((warning) => warning.text).join(' ')
+    })
+  }
+
+  if (mode === 'review' && errors.length > 0) {
+    items.push({
+      id: 'admin-review-errors',
+      title: 'Errors are blocking save',
+      summary: `${errors.length} save error${errors.length === 1 ? '' : 's'}`,
+      tone: 'danger',
+      body: errors.map((error) => error.text).join(' ')
+    })
+  }
+
+  if (mode === 'review' && saveBlockedBySettings) {
+    items.push({
+      id: 'admin-save-blocked',
+      title: 'Save is blocked',
+      summary: 'Save is blocked',
+      tone: 'danger',
+      body:
+        mutationAvailability === 'unknown'
+          ? 'DXCP could not confirm mutation availability on this route. Review stays available, but Save remains blocked until the route can confirm mutation posture again.'
+          : 'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'
+    })
+  }
+
+  return items
 }
 
 export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
@@ -138,33 +190,36 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
         }
       ]
     }
-    if (isDegraded) {
-      return [
-        {
-          id: 'admin-degraded',
-          tone: 'warning',
-          title: 'Supporting reads are degraded',
-          body: 'The governance object remains available, but one or more supporting reads could not be refreshed.'
-        }
-      ]
-    }
-    if (viewModel?.saveBlockedBySettings) {
-      return [
-        {
-          id: 'admin-save-blocked',
-          tone: 'danger',
-          title: 'Save blocked',
-          body:
-            adminState.viewModel?.mutationAvailability === 'unknown'
-              ? 'Save remains blocked because mutation availability could not be confirmed on this route.'
-              : 'Save is blocked before mutation because DXCP is in read-only mode.'
-        }
-      ]
-    }
     return []
-  }, [adminState.errorMessage, adminState.viewModel?.mutationAvailability, isDegraded, isFailure, viewModel?.saveBlockedBySettings])
+  }, [adminState.errorMessage, isFailure])
 
   useNewExperienceAlertRail(alertRailItems)
+  const pageContextIssues = useMemo(
+    () =>
+      buildAdminPageContextIssues({
+        isDegraded,
+        degradedReasons: adminState.viewModel?.degradedReasons || [],
+        mode,
+        warnings: viewModel?.warnings || [],
+        errors: viewModel?.errors || [],
+        saveBlockedBySettings: viewModel?.saveBlockedBySettings || false,
+        mutationAvailability: adminState.viewModel?.mutationAvailability
+      }),
+    [
+      adminState.viewModel?.degradedReasons,
+      adminState.viewModel?.mutationAvailability,
+      isDegraded,
+      mode,
+      viewModel?.errors,
+      viewModel?.saveBlockedBySettings,
+      viewModel?.warnings
+    ]
+  )
+  const pageContextSummary = useMemo(() => {
+    if (pageContextIssues.length <= 1) return ''
+    if (mode === 'review') return `${pageContextIssues.length} review issues`
+    return `${pageContextIssues.length} admin issues`
+  }, [mode, pageContextIssues.length])
 
   function resetReviewState(nextMode) {
     setMode(nextMode)
@@ -378,12 +433,7 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
         ]}
         actionNote={actionNote}
       />
-
-      {isDegraded ? (
-        <NewExplanation title="Supporting reads are degraded" tone="warning">
-          {(adminState.viewModel?.degradedReasons || []).join(' ')}
-        </NewExplanation>
-      ) : null}
+      <NewPageContextRail items={pageContextIssues} summary={pageContextSummary} />
 
       <div className="new-admin-layout">
         <div className="new-admin-primary">
