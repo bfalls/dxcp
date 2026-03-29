@@ -240,8 +240,12 @@ test.describe("govtest thin UI proof", () => {
         new RegExp(`/new/applications/${escapedRegExp(encodeURIComponent(configuredService))}/deploy$`),
       );
       await expect(page.getByRole("heading", { name: "Deploy Application", exact: true })).toBeVisible();
-      await expect(page.getByText("Read-only access")).toBeVisible();
-      await expect(page.getByText("Observers can review deploy intent and readiness, but deploy remains read-only on this workflow.")).toBeVisible();
+      await expect(page.getByText("Read-only workflow")).toBeVisible();
+      await expect(
+        page.getByText(
+          "This workflow remains visible so you can understand deploy requirements, current policy, and the next handoff without being invited into a blocked mutation path.",
+        ),
+      ).toBeVisible();
       await expect(page.locator(".new-page-read-only-value")).toHaveText("Read-only");
       await expect(page.getByText("Loading deploy intent")).toHaveCount(0, { timeout: 20000 });
       await expect(page.getByText("Deploy workflow could not be loaded")).toHaveCount(0);

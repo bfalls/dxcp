@@ -53,15 +53,17 @@ function getContextRailSummary(items) {
 }
 
 export function NewPageContextRail({ items = [], defaultExpanded = false, sticky = false }) {
-  if (!Array.isArray(items) || items.length === 0) return null
+  const normalizedItems = Array.isArray(items) ? items : []
 
-  const [selectedIssueKey, setSelectedIssueKey] = useState(defaultExpanded ? getIssueKey(items[0], 0) : null)
+  const [selectedIssueKey, setSelectedIssueKey] = useState(defaultExpanded && normalizedItems.length > 0 ? getIssueKey(normalizedItems[0], 0) : null)
   const [showOverflow, setShowOverflow] = useState(defaultExpanded)
   const detailsId = useId()
   const overflowId = useId()
-  const visibleItems = items.slice(0, MAX_VISIBLE_CONTEXT_ISSUES)
-  const overflowItems = items.slice(MAX_VISIBLE_CONTEXT_ISSUES)
-  const selectedIssue = items.find((item, index) => getIssueKey(item, index) === selectedIssueKey) || null
+  const visibleItems = normalizedItems.slice(0, MAX_VISIBLE_CONTEXT_ISSUES)
+  const overflowItems = normalizedItems.slice(MAX_VISIBLE_CONTEXT_ISSUES)
+  const selectedIssue = normalizedItems.find((item, index) => getIssueKey(item, index) === selectedIssueKey) || null
+
+  if (normalizedItems.length === 0) return null
 
   const toggleIssue = (issueKey) => {
     setSelectedIssueKey((current) => (current === issueKey ? null : issueKey))
@@ -84,7 +86,7 @@ export function NewPageContextRail({ items = [], defaultExpanded = false, sticky
       data-expanded={selectedIssue ? 'true' : 'false'}
     >
       <div className="new-page-context-rail-bar">
-        <span className="new-page-context-rail-summary">{getContextRailSummary(items)}</span>
+        <span className="new-page-context-rail-summary">{getContextRailSummary(normalizedItems)}</span>
         <div className="new-page-context-rail-button-group">
           {visibleItems.map((item, index) => {
             const issueKey = getIssueKey(item, index)
