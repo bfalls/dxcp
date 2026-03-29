@@ -170,19 +170,24 @@ Tradeoff:
 
 ---
 
-## Decision 10: Single environment in v1
+## Decision 10: Multi-environment context is explicit and supported
 
-DXCP supports a single environment ("sandbox") in v1.
+DXCP supports multiple named environments under delivery-group policy.
+The earlier sandbox-only constraint was a temporary implementation limitation and is superseded by the current product requirement.
 
 We do:
-- Enforce a single environment in the API and policy layer.
+- Treat environment as an explicit operating context for delivery-facing workflows.
+- Preserve environment on DeploymentIntent, DeploymentRecord, CurrentRunningState, rollback semantics, and history filtering.
+- Allow delivery groups to define allowed environments and environment-scoped guardrails.
 
 We do not:
-- Support multi-environment rollouts in v1.
+- Treat environment as an incidental display field.
+- Assume one global environment for all routes.
+- Collapse multi-environment support into row-level duplication when a higher-level context selector is the right UX.
 
 Tradeoff:
-- Simplified governance and UI
-- Environment expansion becomes a breaking change
+- More explicit context handling in the UI and routing model
+- Correctness and clarity for running state, deployment history, rollback scope, and guardrail application
 
 ---
 
