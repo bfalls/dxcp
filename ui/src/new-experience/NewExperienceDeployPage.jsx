@@ -715,20 +715,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
         actionNote={posture.headerNote}
       />
 
-      {returnTo?.kind === 'application' ? (
-        <SectionCard className="new-detail-context-card">
-          <div className="new-detail-context-row">
-            <div>
-              <strong>Opened from Application</strong>
-              <p className="helper">{returnTo.scopeSummary || 'Return to the application record without losing application-level context.'}</p>
-            </div>
-            <Link className="link" to={returnTo.to || `/new/applications/${applicationName}`}>
-              {returnTo.label || 'Back to Application'}
-            </Link>
-          </div>
-        </SectionCard>
-      ) : null}
-
       <div className="new-deploy-layout">
         <SectionCard className="new-deploy-intent-card">
           <div className="new-section-header">
