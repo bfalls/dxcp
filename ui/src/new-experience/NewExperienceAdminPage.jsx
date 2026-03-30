@@ -1,16 +1,57 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import { NewExplanation, NewPageContextRail, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import NewExperienceAdminWorkspaceShell from './NewExperienceAdminWorkspaceShell.jsx'
+import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
-import {
-  buildAdminViewModel,
-  createAdminDraft,
-  loadAdminData,
-  reviewAdminGroupDraft,
-  saveAdminGroupDraft
-} from './newExperienceAdminData.js'
+
+const ADMIN_TABS = [
+  {
+    id: 'delivery-groups',
+    label: 'Delivery Groups',
+    shortLabel: 'Policy boundaries',
+    description: 'Define governance boundaries, ownership, and rollout guardrails for groups of services.'
+  },
+  {
+    id: 'recipes',
+    label: 'Recipes',
+    shortLabel: 'Deployment patterns',
+    description: 'Manage reusable deployment behaviors and the rollout patterns available to delivery groups.'
+  },
+  {
+    id: 'environments',
+    label: 'Environments',
+    shortLabel: 'Foundation setup',
+    description: 'Establish the platform environments that delivery policy and routing will build on.'
+  },
+  {
+    id: 'dg-environment-policy',
+    label: 'DG Environment Policy',
+    shortLabel: 'Group access rules',
+    description: 'Control which environments each delivery group can use and in what order.'
+  },
+  {
+    id: 'service-environment-routing',
+    label: 'Service Environment Routing',
+    shortLabel: 'Service pathing',
+    description: 'Assign environment-specific routing behavior for each governed service.'
+  },
+  {
+    id: 'audit',
+    label: 'Audit',
+    shortLabel: 'Governance history',
+    description: 'Review governance activity, actor accountability, and recent administrative change history.'
+  },
+  {
+    id: 'system-settings',
+    label: 'System Settings',
+    shortLabel: 'Platform controls',
+    description: 'Configure platform-wide guardrails, operational limits, and administrative posture.'
+  }
+]
+
+const DEFAULT_TAB = 'environments'
 
 function BlockedAdminState({ role }) {
   useNewExperienceAlertRail([
@@ -52,647 +93,297 @@ function BlockedAdminState({ role }) {
   )
 }
 
-function formatStrategies(recipeIds, recipesById) {
-  const labels = recipeIds
-    .map((recipeId) => recipesById.get(recipeId)?.name || recipeId)
-    .filter(Boolean)
-  return labels.length > 0 ? labels.join(', ') : 'None selected'
+function normalizeAdminEnvironment(row) {
+  const environmentId = String(row?.environment_id || row?.id || row?.name || '').trim()
+  return {
+    id: environmentId,
+    displayName: String(row?.display_name || row?.displayName || environmentId).trim(),
+    type: row?.type === 'prod' ? 'prod' : 'non_prod',
+    isEnabled: row?.is_enabled !== false
+  }
 }
 
-function buildAdminPageContextIssues({ isDegraded, degradedReasons, mode, warnings, errors, saveBlockedBySettings, mutationAvailability }) {
-  const items = []
+function EnvironmentSummary({ rows }) {
+  const enabledCount = rows.filter((row) => row.isEnabled).length
+  const productionCount = rows.filter((row) => row.type === 'prod').length
+  const nonProductionCount = rows.length - productionCount
 
-  if (isDegraded) {
-    items.push({
-      id: 'admin-supporting-reads-degraded',
-      title: 'Supporting reads are degraded',
-      summary: 'Supporting reads are degraded',
-      tone: 'warning',
-      body:
-        degradedReasons.length > 0
-          ? degradedReasons.join(' ')
-          : 'The governance object remains available, but one or more supporting reads could not be refreshed.'
-    })
-  }
-
-  if (mode === 'review' && warnings.length > 0) {
-    items.push({
-      id: 'admin-review-warnings',
-      title: 'Warnings need review before save',
-      summary: `${warnings.length} warning${warnings.length === 1 ? '' : 's'} to review`,
-      tone: 'warning',
-      body: warnings.map((warning) => warning.text).join(' ')
-    })
-  }
-
-  if (mode === 'review' && errors.length > 0) {
-    items.push({
-      id: 'admin-review-errors',
-      title: 'Errors are blocking save',
-      summary: `${errors.length} save error${errors.length === 1 ? '' : 's'}`,
-      tone: 'danger',
-      body: errors.map((error) => error.text).join(' ')
-    })
-  }
-
-  if (mode === 'review' && saveBlockedBySettings) {
-    items.push({
-      id: 'admin-save-blocked',
-      title: 'Save is blocked',
-      summary: 'Save is blocked',
-      tone: 'danger',
-      body:
-        mutationAvailability === 'unknown'
-          ? 'DXCP could not confirm mutation availability on this route. Review stays available, but Save remains blocked until the route can confirm mutation posture again.'
-          : 'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'
-    })
-  }
-
-  return items
-}
-
-export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
-  const [adminState, setAdminState] = useState({
-    kind: 'loading',
-    errorMessage: '',
-    viewModel: null
-  })
-  const [selectedGroupId, setSelectedGroupId] = useState('')
-  const [mode, setMode] = useState('view')
-  const [draft, setDraft] = useState(null)
-  const [review, setReview] = useState({ warnings: [], errors: [] })
-  const [warningAcknowledged, setWarningAcknowledged] = useState(false)
-  const [saveNote, setSaveNote] = useState('')
-  const [reviewBusy, setReviewBusy] = useState(false)
-  const [saveBusy, setSaveBusy] = useState(false)
-  const [saveError, setSaveError] = useState('')
-
-  const refreshAdmin = useCallback(
-    async (options = {}) => {
-      setAdminState((current) => ({
-        kind: current.kind === 'ready' || current.kind === 'degraded' || current.kind === 'empty' ? 'refreshing' : 'loading',
-        errorMessage: '',
-        viewModel: current.viewModel
-      }))
-      const nextState = await loadAdminData(api, options)
-      setAdminState(nextState)
-    },
-    [api]
+  return (
+    <div className="new-admin-summary-grid">
+      <div className="new-admin-summary-item">
+        <span>Configured environments</span>
+        <strong>{rows.length}</strong>
+        <p>Foundation objects available for policy and routing.</p>
+      </div>
+      <div className="new-admin-summary-item">
+        <span>Enabled now</span>
+        <strong>{enabledCount}</strong>
+        <p>Environments currently open for governance configuration.</p>
+      </div>
+      <div className="new-admin-summary-item">
+        <span>Topology mix</span>
+        <strong>{productionCount}/{nonProductionCount}</strong>
+        <p>{productionCount} production and {nonProductionCount} non-production environments.</p>
+      </div>
+    </div>
   )
+}
 
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      setAdminState({ kind: 'loading', errorMessage: '', viewModel: null })
-      const nextState = await loadAdminData(api)
-      if (active) {
-        setAdminState(nextState)
+function EnvironmentsPanel({ api }) {
+  const [state, setState] = useState({ kind: 'loading', rows: [], errorMessage: '' })
+
+  const loadEnvironments = useCallback(async () => {
+    setState((current) => ({ kind: current.kind === 'ready' ? 'refreshing' : 'loading', rows: current.rows, errorMessage: '' }))
+    try {
+      const result = await api.get('/environments')
+      if (!Array.isArray(result)) {
+        setState({ kind: 'failure', rows: [], errorMessage: result?.message || 'DXCP could not load environment foundation data.' })
+        return
       }
-    }
-    load()
-    return () => {
-      active = false
+      const rows = result
+        .map(normalizeAdminEnvironment)
+        .filter((row) => row.id)
+        .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      setState({ kind: rows.length > 0 ? 'ready' : 'empty', rows, errorMessage: '' })
+    } catch (error) {
+      setState({ kind: 'failure', rows: [], errorMessage: error?.message || 'DXCP could not load environment foundation data.' })
     }
   }, [api])
 
   useEffect(() => {
-    const firstGroupId = adminState.viewModel?.groups?.[0]?.id || ''
-    setSelectedGroupId((current) => {
-      if (current && adminState.viewModel?.groups?.some((group) => group.id === current)) return current
-      return firstGroupId
-    })
-  }, [adminState.viewModel])
+    loadEnvironments()
+  }, [loadEnvironments])
 
-  const viewModel = useMemo(
-    () => buildAdminViewModel(adminState, selectedGroupId, mode, draft, review, warningAcknowledged),
-    [adminState, selectedGroupId, mode, draft, review, warningAcknowledged]
+  if (state.kind === 'loading') {
+    return (
+      <SectionCard className="new-admin-card">
+        <div className="new-card-loading" aria-label="Loading environments">
+          <div className="new-card-loading-lines">
+            <div className="new-card-loading-line new-card-loading-line-1" />
+            <div className="new-card-loading-line new-card-loading-line-2" />
+            <div className="new-card-loading-line new-card-loading-line-3" />
+          </div>
+        </div>
+      </SectionCard>
+    )
+  }
+
+  if (state.kind === 'failure') {
+    return (
+      <SectionCard className="new-admin-card">
+        <div className="new-admin-panel-header">
+          <div>
+            <span className="new-admin-panel-eyebrow">Foundation setup</span>
+            <h3>Environments</h3>
+            <p>Establish the platform environments that delivery policy and routing will build on.</p>
+          </div>
+        </div>
+        <NewStateBlock
+          eyebrow="Data unavailable"
+          title="Environment foundation could not be loaded"
+          tone="warning"
+          actions={[{ label: 'Retry', onClick: loadEnvironments }]}
+        >
+          {state.errorMessage}
+        </NewStateBlock>
+      </SectionCard>
+    )
+  }
+
+  if (state.kind === 'empty') {
+    return (
+      <SectionCard className="new-admin-card">
+        <div className="new-admin-panel-header">
+          <div>
+            <span className="new-admin-panel-eyebrow">Foundation setup</span>
+            <h3>Environments</h3>
+            <p>Establish the platform environments that delivery policy and routing will build on.</p>
+          </div>
+        </div>
+        <NewExplanation title="No environments configured" tone="warning">
+          The workspace is ready, but no environments have been defined yet. This tab will become the operating surface for environment setup in the next phase.
+        </NewExplanation>
+        <div className="new-admin-empty-card">
+          <strong>Environment foundation is empty</strong>
+          <p>Define your first environment to unlock delivery group policy, service routing, and governed rollout paths.</p>
+        </div>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <SectionCard className="new-admin-card">
+      <div className="new-admin-panel-header">
+        <div>
+          <span className="new-admin-panel-eyebrow">Foundation setup</span>
+          <h3>Environments</h3>
+          <p>Establish the platform environments that delivery policy and routing will build on.</p>
+        </div>
+        <button className="button secondary" type="button" onClick={loadEnvironments}>
+          {state.kind === 'refreshing' ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+
+      <EnvironmentSummary rows={state.rows} />
+
+      <div className="new-admin-environment-list" role="list" aria-label="Configured environments">
+        {state.rows.map((row) => (
+          <article key={row.id} className="new-admin-environment-item" role="listitem">
+            <div className="new-admin-environment-main">
+              <div className="new-admin-environment-name-row">
+                <strong>{row.displayName}</strong>
+                <span className={`new-admin-status-pill${row.isEnabled ? ' is-enabled' : ' is-disabled'}`}>
+                  {row.isEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              <p>{row.type === 'prod' ? 'Production environment foundation' : 'Non-production environment foundation'}</p>
+            </div>
+            <dl className="new-admin-environment-meta">
+              <div>
+                <dt>ID</dt>
+                <dd>{row.id}</dd>
+              </div>
+              <div>
+                <dt>Type</dt>
+                <dd>{row.type === 'prod' ? 'Production' : 'Non-production'}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+
+      <div className="new-admin-empty-card">
+        <strong>Phase 1 foundation view</strong>
+        <p>This tab is now the canonical home for environment administration. Create, edit, and binding workflows can land here in the next phase without reopening the page architecture.</p>
+      </div>
+    </SectionCard>
   )
+}
+
+function PlaceholderPanel({ eyebrow, title, description, emptyTitle, emptyBody }) {
+  return (
+    <SectionCard className="new-admin-card">
+      <div className="new-admin-panel-header">
+        <div>
+          <span className="new-admin-panel-eyebrow">{eyebrow}</span>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </div>
+      </div>
+      <div className="new-admin-empty-card">
+        <strong>{emptyTitle}</strong>
+        <p>{emptyBody}</p>
+      </div>
+    </SectionCard>
+  )
+}
+
+export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
 
   useEffect(() => {
-    if (!viewModel?.baseGroup) return
-    setDraft((current) => (current ? current : createAdminDraft(viewModel.baseGroup)))
-  }, [viewModel?.baseGroup])
+    if (role !== 'PLATFORM_ADMIN') return
+    if (ADMIN_TABS.some((tab) => tab.id === requestedTab)) return
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('tab', DEFAULT_TAB)
+    setSearchParams(nextParams, { replace: true })
+  }, [requestedTab, role, searchParams, setSearchParams])
 
-  const isLoading = adminState.kind === 'loading'
-  const isRefreshing = adminState.kind === 'refreshing'
-  const isFailure = adminState.kind === 'failure'
-  const isEmpty = adminState.kind === 'empty'
-  const isDegraded = adminState.kind === 'degraded'
-
-  const alertRailItems = useMemo(() => {
-    if (isFailure) {
-      return [
-        {
-          id: 'admin-failure',
-          tone: 'danger',
-          title: 'Admin data could not be loaded',
-          body: adminState.errorMessage || 'DXCP could not load governance data right now. Refresh to try again.'
-        }
-      ]
-    }
-    return []
-  }, [adminState.errorMessage, isFailure])
-
-  useNewExperienceAlertRail(alertRailItems)
-  const pageContextIssues = useMemo(
-    () =>
-      buildAdminPageContextIssues({
-        isDegraded,
-        degradedReasons: adminState.viewModel?.degradedReasons || [],
-        mode,
-        warnings: viewModel?.warnings || [],
-        errors: viewModel?.errors || [],
-        saveBlockedBySettings: viewModel?.saveBlockedBySettings || false,
-        mutationAvailability: adminState.viewModel?.mutationAvailability
-      }),
-    [
-      adminState.viewModel?.degradedReasons,
-      adminState.viewModel?.mutationAvailability,
-      isDegraded,
-      mode,
-      viewModel?.errors,
-      viewModel?.saveBlockedBySettings,
-      viewModel?.warnings
-    ]
+  const activeTab = useMemo(
+    () => (ADMIN_TABS.some((tab) => tab.id === requestedTab) ? requestedTab : DEFAULT_TAB),
+    [requestedTab]
   )
-  const pageContextSummary = useMemo(() => {
-    if (pageContextIssues.length <= 1) return ''
-    if (mode === 'review') return `${pageContextIssues.length} review issues`
-    return `${pageContextIssues.length} admin issues`
-  }, [mode, pageContextIssues.length])
+  const activeTabDefinition = ADMIN_TABS.find((tab) => tab.id === activeTab) || ADMIN_TABS[2]
 
-  function resetReviewState(nextMode) {
-    setMode(nextMode)
-    setReview({ warnings: [], errors: [] })
-    setWarningAcknowledged(false)
-    setSaveError('')
-    setSaveNote('')
-  }
-
-  function updateDraft(field, value) {
-    setDraft((current) => ({
-      ...current,
-      [field]: value
-    }))
-    setReview({ warnings: [], errors: [] })
-    setWarningAcknowledged(false)
-    setSaveError('')
-    setSaveNote('')
-  }
-
-  function toggleRecipe(recipeId) {
-    setDraft((current) => {
-      const next = new Set(current.allowedRecipes)
-      if (next.has(recipeId)) {
-        next.delete(recipeId)
-      } else {
-        next.add(recipeId)
-      }
-      return {
-        ...current,
-        allowedRecipes: Array.from(next).sort()
-      }
-    })
-    setReview({ warnings: [], errors: [] })
-    setWarningAcknowledged(false)
-    setSaveError('')
-    setSaveNote('')
-  }
-
-  async function moveToReview() {
-    if (!viewModel?.baseGroup || !draft) return
-    setReviewBusy(true)
-    setSaveError('')
-    setSaveNote('')
-    const nextReview = await reviewAdminGroupDraft(api, viewModel.baseGroup, draft)
-    setReview({ warnings: nextReview.warnings, errors: nextReview.errors })
-    setMode('review')
-    setWarningAcknowledged(false)
-    setReviewBusy(false)
-  }
-
-  async function handleSave() {
-    if (!viewModel?.baseGroup || !viewModel.canSave) return
-    const payloadReview = await reviewAdminGroupDraft(api, viewModel.baseGroup, draft)
-    if (payloadReview.errors.length > 0) {
-      setReview({ warnings: payloadReview.warnings, errors: payloadReview.errors })
-      setSaveError('Save remains blocked until the review errors are resolved.')
-      return
-    }
-    setSaveBusy(true)
-    const result = await saveAdminGroupDraft(api, viewModel.baseGroup.id, payloadReview.payload)
-    if (!result.ok) {
-      setSaveBusy(false)
-      setSaveError(result.errorMessage)
-      return
-    }
-    const nextState = await loadAdminData(api, { bypassCache: true })
-    setAdminState(nextState)
-    setSelectedGroupId(result.group?.id || viewModel.baseGroup.id)
-    setMode('view')
-    setDraft(null)
-    setReview({ warnings: [], errors: [] })
-    setWarningAcknowledged(false)
-    setSaveBusy(false)
-    setSaveError('')
-    setSaveNote('Deployment Group saved. Future deployments now use the reviewed guardrail and Deployment Strategy rules.')
-  }
-
-  const primaryAction = (() => {
-    if (isFailure) {
-      return { label: 'Refresh', state: 'available', onClick: () => refreshAdmin({ bypassCache: true }) }
-    }
-    if (mode === 'view') {
-      return {
-        label: 'Edit',
-        state: viewModel?.baseGroup ? 'available' : 'disabled',
-        onClick: () => resetReviewState('edit'),
-        disabled: !viewModel?.baseGroup,
-        description: 'Enter edit mode for this Deployment Group.'
-      }
-    }
-    if (mode === 'edit') {
-      return {
-        label: reviewBusy ? 'Reviewing...' : 'Review changes',
-        state: viewModel?.hasChanges ? 'available' : 'disabled',
-        onClick: moveToReview,
-        disabled: !viewModel?.hasChanges || reviewBusy,
-        description: 'Review the change impact before save.'
-      }
-    }
-    return {
-      label: saveBusy ? 'Saving...' : 'Save',
-      state: viewModel?.saveBlockedBySettings || viewModel?.errors.length > 0 ? 'blocked' : viewModel?.canSave ? 'available' : 'disabled',
-      onClick: handleSave,
-      disabled: !viewModel?.canSave || saveBusy,
-      description: 'Save becomes available only after review is complete.'
-    }
-  })()
-
-  const actionNote = (() => {
-    if (isFailure) {
-      return 'Admin remains unavailable until DXCP can load governance data for this route.'
-    }
-    if (mode === 'view') {
-      return 'Admin objects stay read-first. Enter Edit before DXCP exposes review and save actions.'
-    }
-    if (mode === 'edit') {
-      return 'Review changes before save so impact, warnings, and blocked outcomes stay visible before mutation.'
-    }
-    if (viewModel?.saveBlockedBySettings) {
-      return adminState.viewModel?.mutationAvailability === 'unknown'
-        ? 'Save is blocked before mutation because DXCP could not confirm mutation availability on this route.'
-        : 'Save is blocked before mutation because DXCP is in read-only mode. Review remains visible so you can understand the impact without attempting a failed save.'
-    }
-    if (viewModel?.errors.length > 0) {
-      return 'Save is blocked before mutation. Resolve the blocking review errors and return to this review step.'
-    }
-    if (viewModel?.saveRequiresWarningAcknowledgement && !warningAcknowledged) {
-      return 'Warnings do not block this change, but acknowledgement is required before Save becomes available.'
-    }
-    return 'Review stays visible before save so the governance impact remains explicit, not implied.'
-  })()
+  useNewExperienceAlertRail([])
 
   if (role !== 'PLATFORM_ADMIN') {
     return <BlockedAdminState role={role} />
   }
 
-  if (isFailure) {
-    return (
-      <div className="new-admin-page">
-        <NewExperiencePageHeader
-          title="Admin"
-          objectIdentity="Admin workspace"
-          role={role}
-          stateSummaryItems={[{ label: 'Route state', value: 'Unavailable' }]}
-          primaryAction={primaryAction}
-          secondaryActions={[{ label: 'Open Applications', to: '/new/applications' }]}
-          actionNote={actionNote}
-        />
-        <NewStateBlock
-          eyebrow="Read failure"
-          title="Governance data is unavailable right now"
-          tone="danger"
-          actions={[
-            { label: 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }) },
-            { label: 'Open Applications', to: '/new/applications', secondary: true }
-          ]}
-        >
-          {adminState.errorMessage || 'DXCP could not load governance data right now. Refresh to try again.'}
-        </NewStateBlock>
-      </div>
-    )
+  const handleSelectTab = (tabId) => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('tab', tabId)
+    setSearchParams(nextParams)
   }
 
-  if (isEmpty) {
-    return (
-      <div className="new-admin-page">
-        <NewExperiencePageHeader
-          title="Admin"
-          objectIdentity="Admin workspace"
-          role={role}
-          stateSummaryItems={[{ label: 'Workspace', value: 'Empty' }]}
-          primaryAction={{ label: 'Refresh', state: 'available', onClick: () => refreshAdmin({ bypassCache: true }) }}
-          secondaryActions={[{ label: 'Open Legacy Admin', to: '/admin' }]}
-          actionNote="No governance objects are available on this route yet."
-        />
-        <NewStateBlock
-          eyebrow="Empty"
-          title="No Deployment Groups are configured yet"
-          actions={[
-            { label: 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }) },
-            { label: 'Open Legacy Admin', to: '/admin', secondary: true }
-          ]}
-        >
-          DXCP did not return any Deployment Groups for this route yet. Governance review remains object-first once the first Deployment Group is available.
-        </NewStateBlock>
-      </div>
+  let panel = null
+  if (activeTab === 'environments') {
+    panel = <EnvironmentsPanel api={api} />
+  } else if (activeTab === 'delivery-groups') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Policy boundaries"
+        title="Delivery Groups"
+        description="Define governance boundaries, ownership, and rollout guardrails for groups of services."
+        emptyTitle="Delivery group governance is being refit for the new workspace"
+        emptyBody="This panel will host the delivery group editor and review flow without forcing Admin to scroll through unrelated governance tasks."
+      />
+    )
+  } else if (activeTab === 'recipes') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Deployment patterns"
+        title="Recipes"
+        description="Manage reusable deployment behaviors and the rollout patterns available to delivery groups."
+        emptyTitle="Recipe administration is being staged into this workspace"
+        emptyBody="This panel is reserved for deployment strategy review, lifecycle management, and reference visibility in a dedicated task surface."
+      />
+    )
+  } else if (activeTab === 'dg-environment-policy') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Group access rules"
+        title="DG Environment Policy"
+        description="Control which environments each delivery group can use and in what order."
+        emptyTitle="Delivery group environment policy is reserved here"
+        emptyBody="Bindings, enablement posture, and ordered environment access will move into this focused panel in the next implementation phase."
+      />
+    )
+  } else if (activeTab === 'service-environment-routing') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Service pathing"
+        title="Service Environment Routing"
+        description="Assign environment-specific routing behavior for each governed service."
+        emptyTitle="Service routing administration is staged for this panel"
+        emptyBody="Environment-specific recipe routing will land here as a dedicated workflow so service pathing stays separate from foundation and policy setup."
+      />
+    )
+  } else if (activeTab === 'audit') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Governance history"
+        title="Audit"
+        description="Review governance activity, actor accountability, and recent administrative change history."
+        emptyTitle="Audit review will surface here"
+        emptyBody="This panel will consolidate administrative history and change accountability without exposing the rest of Admin as a long diagnostic page."
+      />
+    )
+  } else if (activeTab === 'system-settings') {
+    panel = (
+      <PlaceholderPanel
+        eyebrow="Platform controls"
+        title="System Settings"
+        description="Configure platform-wide guardrails, operational limits, and administrative posture."
+        emptyTitle="Platform settings are being moved into this workspace"
+        emptyBody="Global rate limits, mutation posture, and administrative controls will land here as a dedicated governance panel."
+      />
     )
   }
 
   return (
-    <div className="new-admin-page">
+    <>
       <NewExperiencePageHeader
         title="Admin"
-        objectIdentity={`Deployment Group: ${viewModel?.baseGroup?.name || 'Deployment Group'}`}
+        objectIdentity="Admin workspace"
         role={role}
-        stateSummaryItems={[
-          { label: 'Workspace', value: 'Deployment Groups' },
-          { label: 'Mode', value: mode === 'view' ? 'Inspect' : mode === 'edit' ? 'Edit' : 'Review' },
-          { label: 'Pending changes', value: viewModel?.hasChanges ? `${viewModel.changeSummary.length}` : 'None' }
-        ]}
-        primaryAction={primaryAction}
-        secondaryActions={[
-          mode === 'review'
-            ? { label: 'Back to edit', onClick: () => setMode('edit') }
-            : mode === 'edit'
-              ? { label: 'Cancel edit', onClick: () => resetReviewState('view') }
-              : { label: 'Open Applications', to: '/new/applications' },
-          { label: isRefreshing ? 'Refreshing...' : 'Refresh', onClick: () => refreshAdmin({ bypassCache: true }), disabled: isLoading || isRefreshing },
-          { label: 'Open Legacy Admin', to: '/admin' }
-        ]}
-        actionNote={actionNote}
+        primaryAction={{ label: activeTabDefinition.label, state: 'read-only' }}
       />
-      <NewPageContextRail items={pageContextIssues} summary={pageContextSummary} />
-
-      <div className="new-admin-layout">
-        <div className="new-admin-primary">
-          {saveNote ? (
-            <NewExplanation title="Save complete" tone="neutral">
-              {saveNote}
-            </NewExplanation>
-          ) : null}
-          {saveError ? (
-            <NewExplanation title="Save could not be completed" tone="danger">
-              {saveError}
-            </NewExplanation>
-          ) : null}
-
-          <SectionCard className="new-admin-card">
-            <div className="new-section-header">
-              <div>
-                <h3>Governance object</h3>
-                <p className="helper">Admin stays object-first and review-first instead of collapsing into a generic settings list.</p>
-              </div>
-              <div className="links">
-                <Link className="link secondary" to="/new/deployments">
-                  Open Deployments
-                </Link>
-              </div>
-            </div>
-
-            <label className="new-field" htmlFor="new-admin-group">
-              <span>Deployment Group</span>
-              <select
-                id="new-admin-group"
-                value={selectedGroupId}
-                onChange={(event) => {
-                  setSelectedGroupId(event.target.value)
-                  setDraft(null)
-                  resetReviewState('view')
-                }}
-              >
-                {(adminState.viewModel?.groups || []).map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <dl className="new-object-summary-grid" aria-label="Deployment Group summary">
-              <dt>Deployment Group</dt>
-              <dd>{viewModel?.baseGroup?.name}</dd>
-              <dt>Owner</dt>
-              <dd>{viewModel?.baseGroup?.owner}</dd>
-              <dt>Applications governed</dt>
-              <dd>{viewModel?.baseGroup?.services.length}</dd>
-              <dt>Allowed Deployment Strategies</dt>
-              <dd>{formatStrategies(viewModel?.baseGroup?.allowedRecipes || [], viewModel?.recipesById || new Map())}</dd>
-              <dt>Current deploy quota</dt>
-              <dd>{viewModel?.baseGroup?.guardrails.dailyDeployQuota} deploys/day</dd>
-              <dt>Current rollback quota</dt>
-              <dd>{viewModel?.baseGroup?.guardrails.dailyRollbackQuota} rollbacks/day</dd>
-              <dt>Current concurrency</dt>
-              <dd>{viewModel?.baseGroup?.guardrails.maxConcurrentDeployments} active deployment(s)</dd>
-            </dl>
-          </SectionCard>
-
-          <SectionCard className="new-admin-card">
-            <div className="new-section-header">
-              <div>
-                <h3>{mode === 'view' ? 'Current policy shape' : mode === 'edit' ? 'Edit draft' : 'Review before save'}</h3>
-                <p className="helper">
-                  {mode === 'view'
-                    ? 'Current policy stays visible before edit so governance understanding comes first.'
-                    : mode === 'edit'
-                      ? 'Editing is section-based and calm. Review is a separate, visible step before mutation.'
-                      : 'Review compares current and proposed state so Save is never the first serious review moment.'}
-                </p>
-              </div>
-            </div>
-
-            {mode === 'view' ? (
-              <div className="new-explanation-stack">
-                <NewExplanation title="Current governance posture" tone="neutral">
-                  {viewModel?.baseGroup?.description}
-                </NewExplanation>
-                <NewExplanation title="Current impact" tone="neutral">
-                  Applications in this Deployment Group currently use the listed Deployment Strategies and guardrails for future deployments.
-                </NewExplanation>
-              </div>
-            ) : (
-              <div className="new-admin-edit-grid">
-                <label className="new-field">
-                  <span>Daily deploy quota</span>
-                  <input
-                    aria-label="Daily deploy quota"
-                    type="number"
-                    value={draft?.dailyDeployQuota || ''}
-                    onChange={(event) => updateDraft('dailyDeployQuota', event.target.value)}
-                    readOnly={mode === 'review'}
-                  />
-                </label>
-                <label className="new-field">
-                  <span>Daily rollback quota</span>
-                  <input
-                    aria-label="Daily rollback quota"
-                    type="number"
-                    value={draft?.dailyRollbackQuota || ''}
-                    onChange={(event) => updateDraft('dailyRollbackQuota', event.target.value)}
-                    readOnly={mode === 'review'}
-                  />
-                </label>
-                <label className="new-field">
-                  <span>Max concurrent deployments</span>
-                  <input
-                    aria-label="Max concurrent deployments"
-                    type="number"
-                    value={draft?.maxConcurrentDeployments || ''}
-                    onChange={(event) => updateDraft('maxConcurrentDeployments', event.target.value)}
-                    readOnly={mode === 'review'}
-                  />
-                </label>
-                <label className="new-field new-field-full">
-                  <span>Allowed Deployment Strategies</span>
-                  <div className="new-admin-checkbox-row">
-                    {(viewModel?.availableRecipes || []).map((recipe) => (
-                      <label key={recipe.id} className="new-admin-checkbox">
-                        <input
-                          aria-label={recipe.name}
-                          checked={draft?.allowedRecipes?.includes(recipe.id) === true}
-                          onChange={() => toggleRecipe(recipe.id)}
-                          disabled={mode === 'review' || recipe.status === 'deprecated'}
-                          type="checkbox"
-                        />
-                        <span>{recipe.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </label>
-              </div>
-            )}
-
-            {mode === 'review' ? (
-              <div className="new-admin-review-stack">
-                <div className="new-admin-comparison-list" aria-label="Pending change summary">
-                  {viewModel?.changeSummary.map((change) => (
-                    <div key={change.label} className="new-admin-comparison-row">
-                      <strong>{change.label}</strong>
-                      <div className="new-admin-comparison-values">
-                        <span>Current: {change.current}</span>
-                        <span>Proposed: {change.proposed}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {viewModel?.warnings.length > 0 ? (
-                  <NewExplanation title="Warnings to review" tone="warning">
-                    <ul className="new-admin-message-list">
-                      {viewModel.warnings.map((warning) => (
-                        <li key={warning.id}>{warning.text}</li>
-                      ))}
-                    </ul>
-                  </NewExplanation>
-                ) : null}
-
-                {viewModel?.errors.length > 0 ? (
-                  <NewExplanation title="Errors blocking save" tone="danger">
-                    <ul className="new-admin-message-list">
-                      {viewModel.errors.map((error) => (
-                        <li key={error.id}>{error.text}</li>
-                      ))}
-                    </ul>
-                  </NewExplanation>
-                ) : null}
-
-                {viewModel?.saveBlockedBySettings ? (
-                  <NewExplanation title="Blocked save explanation" tone="danger">
-                    {adminState.viewModel?.mutationAvailability === 'unknown'
-                      ? 'DXCP could not confirm mutation availability on this route. Review stays available, but Save remains blocked until the route can confirm mutation posture again.'
-                      : 'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'}
-                  </NewExplanation>
-                ) : null}
-
-                {viewModel?.saveRequiresWarningAcknowledgement ? (
-                  <label className="new-admin-acknowledgement">
-                    <input
-                      checked={warningAcknowledged}
-                      onChange={(event) => setWarningAcknowledged(event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>I reviewed the warning impact and want to keep this change eligible for save.</span>
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
-          </SectionCard>
-        </div>
-
-        <div className="new-admin-support">
-          <SectionCard className="new-admin-card">
-            <h3>Impact preview</h3>
-            <p className="helper">Impact stays visible before save so governance changes remain serious without becoming diagnostic-first.</p>
-
-            <div className="new-admin-impact-columns">
-              <div>
-                <strong>Newly blocked</strong>
-                <ul className="new-supporting-list">
-                  {viewModel?.impactPreview.newlyBlocked.length > 0 ? (
-                    viewModel.impactPreview.newlyBlocked.map((item) => <li key={item}>{item}</li>)
-                  ) : (
-                    <li>No newly blocked behavior is predicted.</li>
-                  )}
-                </ul>
-              </div>
-              <div>
-                <strong>Newly allowed</strong>
-                <ul className="new-supporting-list">
-                  {viewModel?.impactPreview.newlyAllowed.length > 0 ? (
-                    viewModel.impactPreview.newlyAllowed.map((item) => <li key={item}>{item}</li>)
-                  ) : (
-                    <li>No newly allowed behavior is predicted.</li>
-                  )}
-                </ul>
-              </div>
-            </div>
-
-            <NewExplanation title="Unchanged" tone="neutral">
-              <ul className="new-admin-message-list">
-                {viewModel?.impactPreview.unchanged.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </NewExplanation>
-          </SectionCard>
-
-          <SectionCard className="new-admin-card">
-            <h3>Validation summary</h3>
-            <p className="helper">Warnings, errors, and blocked save remain separate so review meaning stays legible before mutation.</p>
-            <dl className="new-application-support-grid">
-              <dt>Warnings</dt>
-              <dd>{viewModel?.warnings.length}</dd>
-              <dt>Errors</dt>
-              <dd>{viewModel?.errors.length}</dd>
-              <dt>Save posture</dt>
-              <dd>{viewModel?.saveBlockedBySettings ? 'Blocked before mutation' : viewModel?.canSave ? 'Ready after review' : 'Needs review'}</dd>
-            </dl>
-          </SectionCard>
-
-          <SectionCard className="new-admin-card">
-            <h3>Audit and review discipline</h3>
-            <div className="new-explanation-stack">
-              <NewExplanation title="Audit visibility" tone="neutral">
-                {viewModel?.auditSummary}
-              </NewExplanation>
-              <NewExplanation title="Legacy boundary" tone="neutral">
-                Admin remains contained under <code>/new/*</code> while the current Admin experience stays available during rollout.
-              </NewExplanation>
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-    </div>
+      <NewExperienceAdminWorkspaceShell tabs={ADMIN_TABS} activeTab={activeTab} onSelectTab={handleSelectTab}>
+        {panel}
+      </NewExperienceAdminWorkspaceShell>
+    </>
   )
 }

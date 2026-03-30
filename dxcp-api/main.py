@@ -583,23 +583,93 @@ def _environment_sort_key(environment: dict) -> tuple[int, str]:
 
 
 def _group_environment_names(group: dict, enabled_only: bool = True) -> list[str]:
-    group_id = group.get("id")
-    if not group_id:
-        return []
-    environments = [
-        env
-        for env in storage.list_environments()
-        if env.get("delivery_group_id") == group_id
-    ]
-    if enabled_only:
-        environments = [env for env in environments if env.get("is_enabled", True)]
-    environments.sort(key=_environment_sort_key)
     ordered: list[str] = []
-    for env in environments:
+    for env in _group_environment_entries(group, include_disabled=not enabled_only):
+        if enabled_only and not env.get("is_enabled", True):
+            continue
         name = env.get("name")
         if isinstance(name, str) and name and name not in ordered:
             ordered.append(name)
     return ordered
+
+
+def _group_environment_entries(group: dict, include_disabled: bool = True) -> list[dict]:
+    group_id = group.get("id")
+    if not group_id:
+        return []
+    bindings = group.get("environments")
+    entries: list[dict] = []
+    if isinstance(bindings, list) and bindings:
+        for binding in sorted(
+            bindings,
+            key=lambda row: (
+                row.get("order_index") if isinstance(row.get("order_index"), int) else 1_000_000,
+                str(row.get("environment_id") or ""),
+            ),
+        ):
+            env_id = binding.get("environment_id")
+            if not isinstance(env_id, str) or not env_id:
+                continue
+            canonical = storage.get_environment(env_id)
+            if not canonical:
+                continue
+            merged = {
+                **canonical,
+                "promotion_order": binding.get("order_index"),
+                "delivery_group_id": group_id,
+                "is_enabled": bool(canonical.get("is_enabled", True) and binding.get("is_enabled", True)),
+            }
+            if include_disabled or merged.get("is_enabled", True):
+                entries.append(merged)
+        if entries:
+            return entries
+    configured = group.get("allowed_environments")
+    if not isinstance(configured, list):
+        return entries
+    for index, env_id in enumerate(configured, start=1):
+        if not isinstance(env_id, str) or not env_id:
+            continue
+        canonical = storage.get_environment(env_id)
+        if not canonical:
+            continue
+        merged = {**canonical, "promotion_order": index, "delivery_group_id": group_id}
+        if include_disabled or merged.get("is_enabled", True):
+            entries.append(merged)
+    return entries
+
+
+def _accessible_environments_for_actor(actor: Actor, include_disabled: bool = True) -> list[dict]:
+    if actor.role == Role.PLATFORM_ADMIN:
+        environments = storage.list_environments()
+        if not include_disabled:
+            environments = [env for env in environments if env.get("is_enabled", True)]
+        environments.sort(key=_environment_sort_key)
+        return environments
+    deduped: dict[str, dict] = {}
+    for group in _delivery_groups_for_actor(actor):
+        scoped = _group_environment_entries(group, include_disabled=include_disabled)
+        for env in scoped:
+            env_id = env.get("id") or env.get("name")
+            if not isinstance(env_id, str) or not env_id:
+                continue
+            current = deduped.get(env_id)
+            if not current:
+                deduped[env_id] = env
+                continue
+            current_enabled = bool(current.get("is_enabled", True))
+            next_enabled = bool(env.get("is_enabled", True))
+            if next_enabled and not current_enabled:
+                deduped[env_id] = env
+                continue
+            current_order = current.get("promotion_order")
+            next_order = env.get("promotion_order")
+            if isinstance(next_order, int) and (
+                not isinstance(current_order, int) or next_order < current_order
+            ):
+                deduped[env_id] = env
+    environments = list(deduped.values())
+    environments.sort(key=_environment_sort_key)
+    return environments
 
 
 def _promotion_environment_sequence(group: dict) -> list[str]:
@@ -2878,46 +2948,53 @@ def list_services(request: Request, authorization: Optional[str] = Header(None))
 def list_environments(request: Request, authorization: Optional[str] = Header(None)):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    environments = storage.list_environments()
-    allowed_group_ids = {group.get("id") for group in _delivery_groups_for_actor(actor)}
-    filtered = [env for env in environments if env.get("delivery_group_id") in allowed_group_ids]
-    return [Environment(**env).dict() for env in filtered]
+    return [Environment(**env).dict() for env in _accessible_environments_for_actor(actor, include_disabled=True)]
 
 
-@app.get("/v1/admin/environments")
-def list_admin_environments(request: Request, authorization: Optional[str] = Header(None)):
+@app.get("/v1/environments/{environment_id}")
+def get_environment(environment_id: str, request: Request, authorization: Optional[str] = Header(None)):
     actor = get_actor(authorization)
     rate_limiter.check_read(actor.actor_id)
-    role_error = _require_admin_read(actor, "view admin environments")
-    if role_error:
-        return role_error
-    return storage.list_admin_environments()
-
-
-@app.post("/v1/admin/environments", status_code=201)
-def create_admin_environment(payload: dict, request: Request, authorization: Optional[str] = Header(None)):
-    actor = get_actor(authorization)
-    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create admin environments")
-    if role_error:
-        return role_error
-    guardrails.require_mutations_enabled()
-    rate_limiter.check_mutate(actor.actor_id, "admin_environment_create")
-
-    environment_id = (payload.get("environment_id") or "").strip()
     env_id_error = _validate_admin_environment_id(environment_id)
     if env_id_error:
         return env_id_error
-    if storage.get_admin_environment(environment_id):
+    environment = storage.get_environment(environment_id)
+    if not environment:
+        return error_response(404, "NOT_FOUND", "Environment not found")
+    if actor.role != Role.PLATFORM_ADMIN:
+        allowed_ids = {
+            env.get("id") or env.get("name")
+            for env in _accessible_environments_for_actor(actor, include_disabled=True)
+        }
+        if environment_id not in allowed_ids:
+            return error_response(404, "NOT_FOUND", "Environment not found")
+    return Environment(**environment).dict()
+
+
+@app.post("/v1/environments", status_code=201)
+def create_environment(payload: dict, request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "create environments")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "environment_create")
+
+    environment_id = (payload.get("environment_id") or payload.get("id") or payload.get("name") or "").strip()
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    if storage.get_environment(environment_id):
         return error_response(409, "ENVIRONMENT_EXISTS", "Environment already exists")
 
-    display_name = (payload.get("display_name") or "").strip()
+    display_name = (payload.get("display_name") or payload.get("displayName") or environment_id).strip()
     if not display_name:
         return error_response(400, "INVALID_REQUEST", "display_name is required")
     type_value = payload.get("type")
     type_error = _validate_environment_type(type_value)
     if type_error:
         return type_error
-    is_enabled = payload.get("is_enabled")
+    is_enabled = payload.get("is_enabled", True)
     if not isinstance(is_enabled, bool):
         return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
 
@@ -2931,33 +3008,44 @@ def create_admin_environment(payload: dict, request: Request, authorization: Opt
         "updated_at": now,
     }
     storage.insert_admin_environment(row)
-    return row
+    environment = storage.get_environment(environment_id)
+    return Environment(**environment).dict() if environment else Environment(
+        id=environment_id,
+        name=environment_id,
+        display_name=display_name,
+        type=type_value,
+        promotion_order=None,
+        is_enabled=is_enabled,
+        guardrails=None,
+        created_at=now,
+        updated_at=now,
+    ).dict()
 
 
-@app.patch("/v1/admin/environments/{environment_id}")
-def patch_admin_environment(
+@app.patch("/v1/environments/{environment_id}")
+def patch_environment(
     environment_id: str,
     payload: dict,
     request: Request,
     authorization: Optional[str] = Header(None),
 ):
     actor = get_actor(authorization)
-    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update admin environments")
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update environments")
     if role_error:
         return role_error
     guardrails.require_mutations_enabled()
-    rate_limiter.check_mutate(actor.actor_id, "admin_environment_update")
+    rate_limiter.check_mutate(actor.actor_id, "environment_update")
 
     env_id_error = _validate_admin_environment_id(environment_id)
     if env_id_error:
         return env_id_error
-    existing = storage.get_admin_environment(environment_id)
+    existing = storage.get_environment(environment_id)
     if not existing:
         return error_response(404, "NOT_FOUND", "Environment not found")
 
-    next_display_name = existing.get("display_name")
-    if "display_name" in payload:
-        next_display_name = (payload.get("display_name") or "").strip()
+    next_display_name = existing.get("display_name") or environment_id
+    if "display_name" in payload or "displayName" in payload:
+        next_display_name = (payload.get("display_name") or payload.get("displayName") or "").strip()
         if not next_display_name:
             return error_response(400, "INVALID_REQUEST", "display_name must be non-empty")
 
@@ -2974,16 +3062,35 @@ def patch_admin_environment(
         if not isinstance(next_enabled, bool):
             return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
 
-    row = {
-        "environment_id": environment_id,
-        "display_name": next_display_name,
-        "type": next_type,
-        "is_enabled": next_enabled,
-        "created_at": existing.get("created_at"),
-        "updated_at": utc_now(),
-    }
-    storage.update_admin_environment(row)
-    return row
+    storage.update_admin_environment(
+        {
+            "environment_id": environment_id,
+            "display_name": next_display_name,
+            "type": next_type,
+            "is_enabled": next_enabled,
+            "created_at": existing.get("created_at"),
+            "updated_at": utc_now(),
+        }
+    )
+    updated = storage.get_environment(environment_id)
+    return Environment(**updated).dict() if updated else None
+
+
+@app.delete("/v1/environments/{environment_id}", status_code=204)
+def delete_environment(environment_id: str, request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "delete environments")
+    if role_error:
+        return role_error
+    guardrails.require_mutations_enabled()
+    rate_limiter.check_mutate(actor.actor_id, "environment_delete")
+
+    env_id_error = _validate_admin_environment_id(environment_id)
+    if env_id_error:
+        return env_id_error
+    if not storage.delete_environment(environment_id):
+        return error_response(404, "NOT_FOUND", "Environment not found")
+    return Response(status_code=204)
 
 
 @app.get("/v1/admin/delivery-groups/{dg}/environments")

@@ -310,15 +310,25 @@ const buildFetchMock = ({
       }
     ]
   const serviceList = servicesList || [{ service_name: 'demo-service' }]
-  const resolveEnvironments = () =>
-    environments ||
-    groups.map((group, idx) => ({
+  const resolveEnvironments = () => {
+    if (environments) return environments
+    if (adminEnvironments) {
+      return adminEnvList.map((environment, idx) => ({
+        id: environment.environment_id || `env-${idx}`,
+        name: environment.environment_id || `env-${idx}`,
+        display_name: environment.display_name || environment.environment_id || `Environment ${idx + 1}`,
+        type: environment.type || 'non_prod',
+        is_enabled: environment.is_enabled !== false
+      }))
+    }
+    return groups.map((group, idx) => ({
       id: `env-${group.id || idx}`,
       name: idx === 0 ? 'sandbox' : `${group.id || `group-${idx}`}-env`,
       type: 'non_prod',
       delivery_group_id: group.id || 'default',
       is_enabled: true
     }))
+  }
   let uiExposurePolicy = {
     artifactRef: { display: uiExposureArtifactRefDisplay === true },
     externalLinks: { display: uiExposureExternalLinksDisplay === true }
@@ -490,24 +500,34 @@ const buildFetchMock = ({
         max_refresh_interval_seconds: 3600
       })
     }
-    if (pathname === '/v1/admin/environments' && (!options.method || options.method === 'GET')) {
-      return ok(adminEnvList)
+    if (pathname === '/v1/environments' && (!options.method || options.method === 'GET')) {
+      if (failEnvironments) {
+        return Promise.reject(new Error('Failed to load environments'))
+      }
+      return ok(resolveEnvironments())
     }
-    if (pathname === '/v1/admin/environments' && options.method === 'POST') {
+    if (pathname === '/v1/environments' && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}')
-      if (adminEnvList.some((item) => item.environment_id === body.environment_id)) {
+      const environmentId = body.environment_id || body.id || body.name
+      if (adminEnvList.some((item) => item.environment_id === environmentId)) {
         return ok({ code: 'ENVIRONMENT_EXISTS', message: 'Environment already exists' })
       }
       const created = {
-        environment_id: body.environment_id,
-        display_name: body.display_name,
+        environment_id: environmentId,
+        display_name: body.display_name || environmentId,
         type: body.type,
         is_enabled: body.is_enabled === true
       }
       adminEnvList = [...adminEnvList, created]
-      return ok(created)
+      return ok({
+        id: created.environment_id,
+        name: created.environment_id,
+        display_name: created.display_name,
+        type: created.type,
+        is_enabled: created.is_enabled
+      })
     }
-    if (pathname.startsWith('/v1/admin/environments/') && options.method === 'PATCH') {
+    if (pathname.startsWith('/v1/environments/') && options.method === 'PATCH') {
       const environmentId = pathname.split('/').pop()
       const body = JSON.parse(options.body || '{}')
       adminEnvList = adminEnvList.map((item) =>
@@ -520,7 +540,33 @@ const buildFetchMock = ({
             }
           : item
       )
-      return ok(adminEnvList.find((item) => item.environment_id === environmentId) || {})
+      const updated = adminEnvList.find((item) => item.environment_id === environmentId) || {}
+      return ok({
+        id: updated.environment_id,
+        name: updated.environment_id,
+        display_name: updated.display_name,
+        type: updated.type,
+        is_enabled: updated.is_enabled
+      })
+    }
+    if (pathname.startsWith('/v1/environments/') && (!options.method || options.method === 'GET')) {
+      const environmentId = pathname.split('/').pop()
+      const row = adminEnvList.find((item) => item.environment_id === environmentId)
+      if (!row) {
+        return ok({ code: 'NOT_FOUND', message: 'Environment not found' }, { status: 404 })
+      }
+      return ok({
+        id: row.environment_id,
+        name: row.environment_id,
+        display_name: row.display_name,
+        type: row.type,
+        is_enabled: row.is_enabled
+      })
+    }
+    if (pathname.startsWith('/v1/environments/') && options.method === 'DELETE') {
+      const environmentId = pathname.split('/').pop()
+      adminEnvList = adminEnvList.filter((item) => item.environment_id !== environmentId)
+      return new globalThis.Response('', { status: 204 })
     }
     if (pathname.startsWith('/v1/admin/delivery-groups/') && pathname.endsWith('/environments') && (!options.method || options.method === 'GET')) {
       const parts = pathname.split('/')
@@ -568,12 +614,6 @@ const buildFetchMock = ({
       routes[environmentId] = body.recipe_id
       routesByService.set(serviceId, routes)
       return ok({ service_id: serviceId, environment_id: environmentId, recipe_id: body.recipe_id })
-    }
-    if (pathname === '/v1/environments') {
-      if (failEnvironments) {
-        return Promise.reject(new Error('Failed to load environments'))
-      }
-      return ok(resolveEnvironments())
     }
     if (pathname === '/v1/admin/guardrails/validate') {
       return ok(
@@ -1256,7 +1296,7 @@ export async function runAllTests() {
     await view.findByText('payments-api')
     await view.findByText('billing-worker')
     await view.findByText('web-frontend')
-    assert.ok(view.getByText('3 applications in sandbox'))
+    assert.equal(view.getAllByRole('link', { name: /Open Application .*|Open Application in read-only mode .*/ }).length, 3)
     assert.equal(view.queryByRole('columnheader', { name: 'Current Environment' }), null)
     const chooserRows = await view.findAllByRole('link', { name: /Open Application .*|Open Application in read-only mode .*/ })
     assert.equal(chooserRows.length, 3)
@@ -2072,7 +2112,7 @@ export async function runAllTests() {
     await waitFor(() => assert.equal(insightsReads >= 2, true))
   })
 
-  await runTest('New experience admin route proves review-before-save with a completed mutation slice', async () => {
+  await runTest('New experience admin route defaults to environments workspace and shows deep-linkable sub-tabs', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'admin@example.com' }),
@@ -2085,43 +2125,24 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deliveryGroups: [
-        {
-          id: 'payments',
-          name: 'Payments Core',
-          owner: 'team-payments@example.com',
-          description: 'Payments guardrails.',
-          services: ['payments-service'],
-          allowed_recipes: ['bluegreen', 'rolling'],
-          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
-        }
+      adminEnvironments: [
+        { environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true },
+        { environment_id: 'production', display_name: 'Production', type: 'prod', is_enabled: true }
       ],
-      recipes: [
-        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
-        { id: 'rolling', name: 'Rolling', status: 'active' }
-      ],
-      servicesList: [{ service_name: 'payments-service' }]
+      deliveryGroups: [{ id: 'payments', name: 'Payments Core', services: ['payments-service'], allowed_recipes: ['default'] }]
     })
     const view = renderApp('/new/admin')
 
     await view.findByRole('heading', { name: 'Admin' })
-    await view.findByText('Deployment Group: Payments Core')
-    await view.findByText('Governance object')
-    fireEvent.click(view.getByRole('button', { name: 'Edit' }))
-    await view.findByText('Edit draft')
-    fireEvent.click(view.getByRole('checkbox', { name: 'Rolling' }))
-    await waitFor(() => assert.equal(view.getByRole('button', { name: 'Review changes' }).disabled, false))
-    fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
-    await view.findByRole('heading', { name: 'Review before save' })
-    await view.findByText('Current: Blue-Green, Rolling')
-    await view.findByText('Proposed: Blue-Green')
-    await view.findByText('Impact preview')
-    fireEvent.click(view.getByRole('button', { name: 'Save' }))
-    await view.findByText('Save complete')
-    await view.findByText('Deployment Group saved. Future deployments now use the reviewed guardrail and Deployment Strategy rules.')
+    const environmentsTab = await view.findByRole('tab', { name: /Environments/i })
+    await view.findByRole('tab', { name: /Delivery Groups/i })
+    assert.equal(environmentsTab.getAttribute('aria-selected'), 'true')
+    await view.findByRole('heading', { name: 'Environments' })
+    await view.findByText('Sandbox')
+    await view.findAllByText('Production')
   })
 
-  await runTest('New experience admin route separates warnings from errors during review', async () => {
+  await runTest('New experience admin route switches panels without rendering the old long page', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'admin@example.com' }),
@@ -2134,45 +2155,19 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      deliveryGroups: [
-        {
-          id: 'payments',
-          name: 'Payments Core',
-          owner: 'team-payments@example.com',
-          description: 'Payments guardrails.',
-          services: ['payments-service'],
-          allowed_recipes: ['bluegreen', 'rolling'],
-          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
-        }
-      ],
-      recipes: [
-        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
-        { id: 'rolling', name: 'Rolling', status: 'active' }
-      ],
-      servicesList: [{ service_name: 'payments-service' }],
-      guardrailValidation: {
-        validation_status: 'WARNING',
-        messages: [{ type: 'WARNING', field: 'allowed_recipes', message: 'Applications in this Deployment Group would lose access to Rolling.' }]
-      }
+      adminEnvironments: [{ environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }]
     })
     const view = renderApp('/new/admin')
 
-    await view.findByRole('heading', { name: 'Admin' })
-    await view.findByText('Deployment Group: Payments Core')
-    fireEvent.click(view.getByRole('button', { name: 'Edit' }))
-    fireEvent.click(view.getByRole('checkbox', { name: 'Rolling' }))
-    await waitFor(() => assert.equal(view.getByRole('button', { name: 'Review changes' }).disabled, false))
-    fireEvent.click(view.getByRole('button', { name: 'Review changes' }))
-    await view.findAllByText('Warnings to review')
-    await view.findAllByText('Applications in this Deployment Group would lose access to Rolling.')
-    assert.equal(view.queryByText('Errors blocking save'), null)
-    const saveButton = view.getByRole('button', { name: 'Save' })
-    assert.equal(saveButton.disabled, true)
-    fireEvent.click(view.getByRole('checkbox', { name: /reviewed the warning impact/i }))
-    assert.equal(view.getByRole('button', { name: 'Save' }).disabled, false)
+    await view.findByText('Sandbox')
+    assert.equal(view.queryByText('Delivery group governance is being refit for the new workspace'), null)
+    fireEvent.click(view.getByRole('tab', { name: /Delivery Groups/i }))
+    await view.findByText('Delivery group governance is being refit for the new workspace')
+    assert.equal(view.queryByText('Sandbox'), null)
+    assert.equal(view.getByRole('tab', { name: /Delivery Groups/i }).getAttribute('aria-selected'), 'true')
   })
 
-  await runTest('New experience admin route shows review errors and blocked-save explanation before mutation', async () => {
+  await runTest('New experience admin route preserves the active workspace tab on refresh through the query string', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'admin@example.com' }),
@@ -2184,86 +2179,15 @@ export async function runAllTests() {
     globalThis.fetch = buildFetchMock({
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
-      rollbackAllowed: true,
-      deliveryGroups: [
-        {
-          id: 'payments',
-          name: 'Payments Core',
-          owner: 'team-payments@example.com',
-          description: 'Payments guardrails.',
-          services: ['payments-service'],
-          allowed_recipes: ['bluegreen', 'rolling'],
-          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
-        }
-      ],
-      recipes: [
-        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
-        { id: 'rolling', name: 'Rolling', status: 'active' }
-      ],
-      servicesList: [{ service_name: 'payments-service' }],
-      guardrailValidation: {
-        validation_status: 'ERROR',
-        messages: [{ type: 'ERROR', field: 'guardrails', message: 'Daily deploy quota must stay greater than or equal to the daily rollback quota.' }]
-      }
+      rollbackAllowed: true
     })
-    const errorView = renderApp('/new/admin')
+    const view = renderApp('/new/admin?tab=audit')
 
-    await errorView.findByRole('heading', { name: 'Admin' })
-    await errorView.findByText('Deployment Group: Payments Core')
-    fireEvent.click(errorView.getByRole('button', { name: 'Edit' }))
-    fireEvent.click(errorView.getByRole('checkbox', { name: 'Rolling' }))
-    await waitFor(() => assert.equal(errorView.getByRole('button', { name: 'Review changes' }).disabled, false))
-    fireEvent.click(errorView.getByRole('button', { name: 'Review changes' }))
-    await errorView.findByText('Errors blocking save')
-    await errorView.findByText('Daily deploy quota must stay greater than or equal to the daily rollback quota.')
-    assert.ok(errorView.getByRole('button', { name: 'Save' }).disabled)
-
-    cleanup()
-
-    window.__DXCP_AUTH0_FACTORY__ = async () => ({
-      isAuthenticated: async () => true,
-      getUser: async () => ({ email: 'admin@example.com' }),
-      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
-      loginWithRedirect: async () => {},
-      logout: async () => {},
-      handleRedirectCallback: async () => {}
-    })
-    globalThis.fetch = buildFetchMock({
-      role: 'PLATFORM_ADMIN',
-      deployAllowed: true,
-      rollbackAllowed: true,
-      mutationsDisabled: true,
-      deliveryGroups: [
-        {
-          id: 'payments',
-          name: 'Payments Core',
-          owner: 'team-payments@example.com',
-          description: 'Payments guardrails.',
-          services: ['payments-service'],
-          allowed_recipes: ['bluegreen', 'rolling'],
-          guardrails: { daily_deploy_quota: 5, daily_rollback_quota: 3, max_concurrent_deployments: 1 }
-        }
-      ],
-      recipes: [
-        { id: 'bluegreen', name: 'Blue-Green', status: 'active' },
-        { id: 'rolling', name: 'Rolling', status: 'active' }
-      ],
-      servicesList: [{ service_name: 'payments-service' }]
-    })
-    const blockedView = renderApp('/new/admin')
-
-    await blockedView.findByRole('heading', { name: 'Admin' })
-    await blockedView.findByText('Deployment Group: Payments Core')
-    fireEvent.click(blockedView.getByRole('button', { name: 'Edit' }))
-    fireEvent.click(blockedView.getByRole('checkbox', { name: 'Rolling' }))
-    await waitFor(() => assert.equal(blockedView.getByRole('button', { name: 'Review changes' }).disabled, false))
-    fireEvent.click(blockedView.getByRole('button', { name: 'Review changes' }))
-    await blockedView.findByText('Blocked save explanation')
-    await blockedView.findByText(
-      'DXCP is currently in read-only mode. Review stays available, but this change cannot be saved until platform mutations are re-enabled.'
-    )
-    await blockedView.findByText('Impact preview')
-    assert.ok(blockedView.getByRole('button', { name: 'Save' }).disabled)
+    await view.findByRole('heading', { name: 'Admin' })
+    await view.findByText('Audit review will surface here')
+    const auditTab = view.getByRole('tab', { name: /Audit/i })
+    assert.equal(auditTab.getAttribute('aria-selected'), 'true')
+    assert.equal(view.queryByText('Sandbox'), null)
   })
 
   await runTest('New experience admin route blocks non-admin access without rendering a partial Admin shell', async () => {

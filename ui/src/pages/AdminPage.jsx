@@ -24,6 +24,16 @@ function normalizedOwnersPreview(ownerValue) {
   return owners.join(', ')
 }
 
+function normalizeFoundationEnvironment(row) {
+  const environmentId = String(row?.environment_id || row?.id || row?.name || '').trim()
+  return {
+    environment_id: environmentId,
+    display_name: String(row?.display_name || row?.displayName || environmentId).trim(),
+    type: row?.type === 'prod' ? 'prod' : 'non_prod',
+    is_enabled: row?.is_enabled !== false
+  }
+}
+
 export default function AdminPage({
   api,
   adminReadOnly,
@@ -281,9 +291,9 @@ export default function AdminPage({
 
   const loadFoundationEnvironments = React.useCallback(async () => {
     if (!isPlatformAdmin) return
-    const result = await api.get('/admin/environments', { bypassCache: true, cacheTtlMs: 0 })
+    const result = await api.get('/environments', { bypassCache: true, cacheTtlMs: 0 })
     if (Array.isArray(result)) {
-      setFoundationEnvRows(result)
+      setFoundationEnvRows(result.map(normalizeFoundationEnvironment).filter((row) => row.environment_id))
       return
     }
     setFoundationEnvError(result?.message || 'Failed to load environments.')
@@ -393,12 +403,12 @@ export default function AdminPage({
       return
     }
     const result = foundationEnvEditingId
-      ? await api.patch(`/admin/environments/${encodeURIComponent(foundationEnvEditingId)}`, {
+      ? await api.patch(`/environments/${encodeURIComponent(foundationEnvEditingId)}`, {
           display_name: payload.display_name,
           type: payload.type,
           is_enabled: payload.is_enabled
         })
-      : await api.post('/admin/environments', payload)
+      : await api.post('/environments', payload)
     if (result?.code) {
       setFoundationEnvError(`${result.code}: ${result.message}`)
       return

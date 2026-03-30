@@ -856,95 +856,156 @@ class Storage:
     def list_environments(self) -> List[dict]:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM environments ORDER BY name ASC")
+        cur.execute("SELECT * FROM admin_environments ORDER BY environment_id ASC")
         rows = cur.fetchall()
         conn.close()
-        return [self._row_to_environment(row) for row in rows]
+        return [
+            {
+                "id": row["environment_id"],
+                "name": row["environment_id"],
+                "display_name": row["display_name"],
+                "type": row["type"],
+                "promotion_order": None,
+                "is_enabled": bool(row["is_enabled"]),
+                "guardrails": None,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
 
     def get_environment(self, environment_id: str) -> Optional[dict]:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM environments WHERE id = ?", (environment_id,))
+        cur.execute("SELECT * FROM admin_environments WHERE environment_id = ?", (environment_id,))
         row = cur.fetchone()
         conn.close()
         if not row:
             return None
-        return self._row_to_environment(row)
+        return {
+            "id": row["environment_id"],
+            "name": row["environment_id"],
+            "display_name": row["display_name"],
+            "type": row["type"],
+            "promotion_order": None,
+            "is_enabled": bool(row["is_enabled"]),
+            "guardrails": None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM environments WHERE name = ? AND delivery_group_id = ?",
-            (name, delivery_group_id),
-        )
-        row = cur.fetchone()
-        conn.close()
-        if not row:
+        canonical = self.get_environment(name)
+        if not canonical:
             return None
-        return self._row_to_environment(row)
+        bindings = self.list_delivery_group_environment_policy(delivery_group_id)
+        binding = next((row for row in bindings if row.get("environment_id") == name), None)
+        group = self.get_delivery_group(delivery_group_id)
+        if binding is None:
+            allowed = group.get("allowed_environments") if group else None
+            if allowed is not None and name not in allowed:
+                return None
+            promotion_order = None
+            if isinstance(allowed, list) and name in allowed:
+                promotion_order = allowed.index(name) + 1
+            return {
+                **canonical,
+                "promotion_order": promotion_order,
+                "delivery_group_id": delivery_group_id,
+            }
+        return {
+            **canonical,
+            "promotion_order": binding.get("order_index"),
+            "delivery_group_id": delivery_group_id,
+            "is_enabled": bool(canonical.get("is_enabled", True) and binding.get("is_enabled", True)),
+        }
 
     def insert_environment(self, environment: dict) -> dict:
-        if self.get_environment(environment["id"]):
-            return environment
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO environments (
-                id, name, display_name, type, promotion_order, delivery_group_id, is_enabled, guardrails,
-                created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                environment["id"],
-                environment["name"],
-                environment.get("display_name"),
-                environment["type"],
-                environment.get("promotion_order"),
-                environment["delivery_group_id"],
-                1 if environment.get("is_enabled", True) else 0,
-                self._serialize_json(environment.get("guardrails")),
-                environment.get("created_at"),
-                environment.get("created_by"),
-                environment.get("updated_at"),
-                environment.get("updated_by"),
-                environment.get("last_change_reason"),
-            ),
-        )
-        conn.commit()
-        conn.close()
-        return environment
+        environment_id = environment.get("environment_id") or environment.get("name") or environment.get("id")
+        if not isinstance(environment_id, str) or not environment_id:
+            raise ValueError("environment id is required")
+        existing = self.get_environment(environment_id)
+        if existing:
+            return existing
+        now = environment.get("created_at") or utc_now()
+        canonical = {
+            "environment_id": environment_id,
+            "display_name": environment.get("display_name") or environment_id,
+            "type": environment["type"],
+            "is_enabled": environment.get("is_enabled", True),
+            "created_at": now,
+            "updated_at": environment.get("updated_at") or now,
+        }
+        self.insert_admin_environment(canonical)
+        delivery_group_id = environment.get("delivery_group_id")
+        if delivery_group_id:
+            order_index = environment.get("promotion_order")
+            if not isinstance(order_index, int):
+                order_index = 0
+            self.upsert_delivery_group_environment_policy(
+                {
+                    "delivery_group_id": delivery_group_id,
+                    "environment_id": environment_id,
+                    "is_enabled": environment.get("is_enabled", True),
+                    "order_index": order_index,
+                }
+            )
+        return self.get_environment(environment_id) or {
+            "id": environment_id,
+            "name": environment_id,
+            "display_name": canonical["display_name"],
+            "type": canonical["type"],
+            "promotion_order": environment.get("promotion_order"),
+            "is_enabled": canonical["is_enabled"],
+            "guardrails": None,
+            "created_at": canonical["created_at"],
+            "updated_at": canonical["updated_at"],
+        }
 
     def update_environment(self, environment: dict) -> dict:
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE environments
-            SET name = ?, display_name = ?, type = ?, promotion_order = ?, delivery_group_id = ?, is_enabled = ?, guardrails = ?,
-                created_at = ?, created_by = ?, updated_at = ?, updated_by = ?, last_change_reason = ?
-            WHERE id = ?
-            """,
-            (
-                environment["name"],
-                environment.get("display_name"),
-                environment["type"],
-                environment.get("promotion_order"),
-                environment["delivery_group_id"],
-                1 if environment.get("is_enabled", True) else 0,
-                self._serialize_json(environment.get("guardrails")),
-                environment.get("created_at"),
-                environment.get("created_by"),
-                environment.get("updated_at"),
-                environment.get("updated_by"),
-                environment.get("last_change_reason"),
-                environment["id"],
-            ),
+        environment_id = environment.get("environment_id") or environment.get("name") or environment.get("id")
+        if not isinstance(environment_id, str) or not environment_id:
+            raise ValueError("environment id is required")
+        existing = self.get_environment(environment_id)
+        if not existing:
+            raise ValueError("environment not found")
+        self.update_admin_environment(
+            {
+                "environment_id": environment_id,
+                "display_name": environment.get("display_name") or existing.get("display_name") or environment_id,
+                "type": environment.get("type") or existing["type"],
+                "is_enabled": environment.get("is_enabled", existing.get("is_enabled", True)),
+                "created_at": environment.get("created_at") or existing.get("created_at"),
+                "updated_at": environment.get("updated_at") or utc_now(),
+            }
         )
-        conn.commit()
-        conn.close()
-        return environment
+        delivery_group_id = environment.get("delivery_group_id")
+        if delivery_group_id:
+            existing_binding = next(
+                (
+                    row
+                    for row in self.list_delivery_group_environment_policy(delivery_group_id)
+                    if row.get("environment_id") == environment_id
+                ),
+                None,
+            )
+            order_index = environment.get("promotion_order")
+            if not isinstance(order_index, int):
+                order_index = existing_binding.get("order_index", 0) if existing_binding else 0
+            self.upsert_delivery_group_environment_policy(
+                {
+                    "delivery_group_id": delivery_group_id,
+                    "environment_id": environment_id,
+                    "is_enabled": environment.get(
+                        "is_enabled",
+                        existing_binding.get("is_enabled", existing.get("is_enabled", True))
+                        if existing_binding
+                        else existing.get("is_enabled", True),
+                    ),
+                    "order_index": order_index,
+                }
+            )
+        return self.get_environment(environment_id) or existing
 
     def ensure_default_delivery_group(self) -> Optional[dict]:
         if self._has_delivery_groups():
@@ -976,7 +1037,7 @@ class Storage:
         return row is not None
 
     def ensure_default_environments(self) -> List[dict]:
-        if self._has_environments():
+        if self.list_environments():
             return []
         now = utc_now()
         created = []
@@ -986,22 +1047,26 @@ class Storage:
             for index, env_name in enumerate(env_names):
                 if not isinstance(env_name, str) or not env_name.strip():
                     continue
-                env = {
-                    "id": f"{group['id']}:{env_name}",
-                    "name": env_name,
-                    "display_name": None,
-                    "type": self._derive_environment_type(env_name),
-                    "promotion_order": index + 1,
-                    "delivery_group_id": group["id"],
-                    "is_enabled": True,
-                    "guardrails": None,
-                    "created_at": now,
-                    "created_by": "system",
-                    "updated_at": now,
-                    "updated_by": "system",
-                }
-                self.insert_environment(env)
-                created.append(env)
+                if not self.get_environment(env_name):
+                    self.insert_admin_environment(
+                        {
+                            "environment_id": env_name,
+                            "display_name": env_name,
+                            "type": self._derive_environment_type(env_name),
+                            "is_enabled": True,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    )
+                    created.append(self.get_environment(env_name))
+                self.upsert_delivery_group_environment_policy(
+                    {
+                        "delivery_group_id": group["id"],
+                        "environment_id": env_name,
+                        "is_enabled": True,
+                        "order_index": index + 1,
+                    }
+                )
         return created
 
     def ensure_default_recipe(self) -> Optional[dict]:
@@ -1069,41 +1134,29 @@ class Storage:
         return created
 
     def list_admin_environments(self) -> List[dict]:
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM admin_environments ORDER BY environment_id ASC")
-        rows = cur.fetchall()
-        conn.close()
         return [
             {
-                "environment_id": row["environment_id"],
+                "environment_id": row["id"],
                 "display_name": row["display_name"],
                 "type": row["type"],
-                "is_enabled": bool(row["is_enabled"]),
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
+                "is_enabled": row["is_enabled"],
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("updated_at"),
             }
-            for row in rows
+            for row in self.list_environments()
         ]
 
     def get_admin_environment(self, environment_id: str) -> Optional[dict]:
-        conn = self._connect()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM admin_environments WHERE environment_id = ?",
-            (environment_id,),
-        )
-        row = cur.fetchone()
-        conn.close()
+        row = self.get_environment(environment_id)
         if not row:
             return None
         return {
-            "environment_id": row["environment_id"],
+            "environment_id": row["id"],
             "display_name": row["display_name"],
             "type": row["type"],
-            "is_enabled": bool(row["is_enabled"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
+            "is_enabled": row["is_enabled"],
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
         }
 
     def insert_admin_environment(self, environment: dict) -> dict:
@@ -1247,6 +1300,17 @@ class Storage:
         conn.commit()
         conn.close()
         return row
+
+    def delete_environment(self, environment_id: str) -> bool:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM delivery_group_environment_policy WHERE environment_id = ?", (environment_id,))
+        cur.execute("DELETE FROM service_environment_routing WHERE environment_id = ?", (environment_id,))
+        cur.execute("DELETE FROM admin_environments WHERE environment_id = ?", (environment_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
 
     def has_active_deployment(self) -> bool:
         conn = self._connect()
@@ -1838,139 +1902,171 @@ class DynamoStorage:
         return response.get("Items", [])
 
     def list_environments(self) -> List[dict]:
-        items = self._scan_environments()
-        environments = []
-        for item in items:
-            environments.append(
-                {
-                    "id": item.get("id"),
-                    "name": item.get("name"),
-                    "display_name": item.get("display_name"),
-                    "type": item.get("type"),
-                    "promotion_order": item.get("promotion_order"),
-                    "delivery_group_id": item.get("delivery_group_id"),
-                    "is_enabled": bool(item.get("is_enabled", True)),
-                    "guardrails": item.get("guardrails"),
-                    "created_at": item.get("created_at"),
-                    "created_by": item.get("created_by"),
-                    "updated_at": item.get("updated_at"),
-                    "updated_by": item.get("updated_by"),
-                    "last_change_reason": item.get("last_change_reason"),
-                }
-            )
-        environments.sort(key=lambda env: env.get("name", ""))
-        return environments
-
-    def get_environment(self, environment_id: str) -> Optional[dict]:
-        response = self.table.get_item(Key={"pk": "ENVIRONMENT", "sk": environment_id})
-        item = response.get("Item")
-        if not item:
-            return None
-        return {
-            "id": item.get("id"),
-            "name": item.get("name"),
-            "display_name": item.get("display_name"),
-            "type": item.get("type"),
-            "promotion_order": item.get("promotion_order"),
-            "delivery_group_id": item.get("delivery_group_id"),
-            "is_enabled": bool(item.get("is_enabled", True)),
-            "guardrails": item.get("guardrails"),
-            "created_at": item.get("created_at"),
-            "created_by": item.get("created_by"),
-            "updated_at": item.get("updated_at"),
-            "updated_by": item.get("updated_by"),
-            "last_change_reason": item.get("last_change_reason"),
-        }
-
-    def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
-        items = self._scan_environments()
-        for item in items:
-            if item.get("name") == name and item.get("delivery_group_id") == delivery_group_id:
-                return {
-                    "id": item.get("id"),
-                    "name": item.get("name"),
-                    "display_name": item.get("display_name"),
-                    "type": item.get("type"),
-                    "promotion_order": item.get("promotion_order"),
-                    "delivery_group_id": item.get("delivery_group_id"),
-                    "is_enabled": bool(item.get("is_enabled", True)),
-                    "guardrails": item.get("guardrails"),
-                    "created_at": item.get("created_at"),
-                    "created_by": item.get("created_by"),
-                    "updated_at": item.get("updated_at"),
-                    "updated_by": item.get("updated_by"),
-                    "last_change_reason": item.get("last_change_reason"),
-                }
-        return None
-
-    def insert_environment(self, environment: dict) -> dict:
-        if self.get_environment(environment["id"]):
-            return environment
-        item = {
-            "pk": "ENVIRONMENT",
-            "sk": environment["id"],
-            "id": environment["id"],
-            "name": environment["name"],
-            "display_name": environment.get("display_name"),
-            "type": environment["type"],
-            "promotion_order": environment.get("promotion_order"),
-            "delivery_group_id": environment["delivery_group_id"],
-            "is_enabled": environment.get("is_enabled", True),
-            "guardrails": environment.get("guardrails"),
-            "created_at": environment.get("created_at"),
-            "created_by": environment.get("created_by"),
-            "updated_at": environment.get("updated_at"),
-            "updated_by": environment.get("updated_by"),
-            "last_change_reason": environment.get("last_change_reason"),
-        }
-        self.table.put_item(Item=item)
-        return environment
-
-    def update_environment(self, environment: dict) -> dict:
-        item = {
-            "pk": "ENVIRONMENT",
-            "sk": environment["id"],
-            "id": environment["id"],
-            "name": environment["name"],
-            "display_name": environment.get("display_name"),
-            "type": environment["type"],
-            "promotion_order": environment.get("promotion_order"),
-            "delivery_group_id": environment["delivery_group_id"],
-            "is_enabled": environment.get("is_enabled", True),
-            "guardrails": environment.get("guardrails"),
-            "created_at": environment.get("created_at"),
-            "created_by": environment.get("created_by"),
-            "updated_at": environment.get("updated_at"),
-            "updated_by": environment.get("updated_by"),
-            "last_change_reason": environment.get("last_change_reason"),
-        }
-        self.table.put_item(Item=item)
-        return environment
-
-    def list_admin_environments(self) -> List[dict]:
         response = self.table.scan(FilterExpression=Attr("pk").eq("ADMIN_ENVIRONMENT"))
         items = response.get("Items", [])
         rows = [
             {
-                "environment_id": item.get("environment_id"),
+                "id": item.get("environment_id"),
+                "name": item.get("environment_id"),
                 "display_name": item.get("display_name"),
                 "type": item.get("type"),
+                "promotion_order": None,
                 "is_enabled": bool(item.get("is_enabled", True)),
+                "guardrails": None,
                 "created_at": item.get("created_at"),
                 "updated_at": item.get("updated_at"),
             }
             for item in items
         ]
-        rows.sort(key=lambda row: row.get("environment_id", ""))
+        rows.sort(key=lambda env: env.get("name", ""))
         return rows
 
-    def get_admin_environment(self, environment_id: str) -> Optional[dict]:
+    def get_environment(self, environment_id: str) -> Optional[dict]:
         response = self.table.get_item(Key={"pk": "ADMIN_ENVIRONMENT", "sk": environment_id})
         item = response.get("Item")
         if not item:
             return None
         return {
-            "environment_id": item.get("environment_id"),
+            "id": item.get("environment_id"),
+            "name": item.get("environment_id"),
+            "display_name": item.get("display_name"),
+            "type": item.get("type"),
+            "promotion_order": None,
+            "is_enabled": bool(item.get("is_enabled", True)),
+            "guardrails": None,
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+        }
+
+    def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
+        canonical = self.get_environment(name)
+        if not canonical:
+            return None
+        bindings = self.list_delivery_group_environment_policy(delivery_group_id)
+        binding = next((row for row in bindings if row.get("environment_id") == name), None)
+        group = self.get_delivery_group(delivery_group_id)
+        if binding is None:
+            allowed = group.get("allowed_environments") if group else None
+            if allowed is not None and name not in allowed:
+                return None
+            promotion_order = None
+            if isinstance(allowed, list) and name in allowed:
+                promotion_order = allowed.index(name) + 1
+            return {**canonical, "promotion_order": promotion_order, "delivery_group_id": delivery_group_id}
+        return {
+            **canonical,
+            "promotion_order": binding.get("order_index"),
+            "delivery_group_id": delivery_group_id,
+            "is_enabled": bool(canonical.get("is_enabled", True) and binding.get("is_enabled", True)),
+        }
+
+    def insert_environment(self, environment: dict) -> dict:
+        environment_id = environment.get("environment_id") or environment.get("name") or environment.get("id")
+        if not isinstance(environment_id, str) or not environment_id:
+            raise ValueError("environment id is required")
+        existing = self.get_environment(environment_id)
+        if existing:
+            return existing
+        now = environment.get("created_at") or utc_now()
+        self.insert_admin_environment(
+            {
+                "environment_id": environment_id,
+                "display_name": environment.get("display_name") or environment_id,
+                "type": environment["type"],
+                "is_enabled": environment.get("is_enabled", True),
+                "created_at": now,
+                "updated_at": environment.get("updated_at") or now,
+            }
+        )
+        delivery_group_id = environment.get("delivery_group_id")
+        if delivery_group_id:
+            order_index = environment.get("promotion_order")
+            if not isinstance(order_index, int):
+                order_index = 0
+            self.upsert_delivery_group_environment_policy(
+                {
+                    "delivery_group_id": delivery_group_id,
+                    "environment_id": environment_id,
+                    "is_enabled": environment.get("is_enabled", True),
+                    "order_index": order_index,
+                }
+            )
+        return self.get_environment(environment_id) or {
+            "id": environment_id,
+            "name": environment_id,
+            "display_name": environment.get("display_name") or environment_id,
+            "type": environment["type"],
+            "promotion_order": environment.get("promotion_order"),
+            "is_enabled": environment.get("is_enabled", True),
+            "guardrails": None,
+            "created_at": now,
+            "updated_at": environment.get("updated_at") or now,
+        }
+
+    def update_environment(self, environment: dict) -> dict:
+        environment_id = environment.get("environment_id") or environment.get("name") or environment.get("id")
+        if not isinstance(environment_id, str) or not environment_id:
+            raise ValueError("environment id is required")
+        existing = self.get_environment(environment_id)
+        if not existing:
+            raise ValueError("environment not found")
+        self.update_admin_environment(
+            {
+                "environment_id": environment_id,
+                "display_name": environment.get("display_name") or existing.get("display_name") or environment_id,
+                "type": environment.get("type") or existing["type"],
+                "is_enabled": environment.get("is_enabled", existing.get("is_enabled", True)),
+                "created_at": environment.get("created_at") or existing.get("created_at"),
+                "updated_at": environment.get("updated_at") or utc_now(),
+            }
+        )
+        delivery_group_id = environment.get("delivery_group_id")
+        if delivery_group_id:
+            existing_binding = next(
+                (
+                    row
+                    for row in self.list_delivery_group_environment_policy(delivery_group_id)
+                    if row.get("environment_id") == environment_id
+                ),
+                None,
+            )
+            order_index = environment.get("promotion_order")
+            if not isinstance(order_index, int):
+                order_index = existing_binding.get("order_index", 0) if existing_binding else 0
+            self.upsert_delivery_group_environment_policy(
+                {
+                    "delivery_group_id": delivery_group_id,
+                    "environment_id": environment_id,
+                    "is_enabled": environment.get(
+                        "is_enabled",
+                        existing_binding.get("is_enabled", existing.get("is_enabled", True))
+                        if existing_binding
+                        else existing.get("is_enabled", True),
+                    ),
+                    "order_index": order_index,
+                }
+            )
+        return self.get_environment(environment_id) or existing
+
+    def list_admin_environments(self) -> List[dict]:
+        return [
+            {
+                "environment_id": row["id"],
+                "display_name": row["display_name"],
+                "type": row["type"],
+                "is_enabled": row["is_enabled"],
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("updated_at"),
+            }
+            for row in self.list_environments()
+        ]
+
+    def get_admin_environment(self, environment_id: str) -> Optional[dict]:
+        item = self.get_environment(environment_id)
+        if not item:
+            return None
+        return {
+            "environment_id": item.get("id"),
             "display_name": item.get("display_name"),
             "type": item.get("type"),
             "is_enabled": bool(item.get("is_enabled", True)),
@@ -2075,6 +2171,17 @@ class DynamoStorage:
         self.table.put_item(Item=item)
         return row
 
+    def delete_environment(self, environment_id: str) -> bool:
+        deleted = self.get_environment(environment_id) is not None
+        self.table.delete_item(Key={"pk": "ADMIN_ENVIRONMENT", "sk": environment_id})
+        for row in self.list_delivery_groups():
+            self.table.delete_item(Key={"pk": "DG_ENV_POLICY", "sk": f"{row['id']}#{environment_id}"})
+        for service in self.list_services():
+            service_id = service.get("service_name")
+            if service_id:
+                self.table.delete_item(Key={"pk": "SERVICE_ENV_ROUTING", "sk": f"{service_id}#{environment_id}"})
+        return deleted
+
     def insert_delivery_group(self, group: dict) -> dict:
         item = {
             "pk": "DELIVERY_GROUP",
@@ -2130,22 +2237,23 @@ class DynamoStorage:
         for index, env_name in enumerate(allowed):
             if not isinstance(env_name, str) or not env_name.strip():
                 continue
-            if self.get_environment_for_group(env_name, group["id"]):
-                continue
-            self.insert_environment(
+            if not self.get_environment(env_name):
+                self.insert_admin_environment(
+                    {
+                        "environment_id": env_name,
+                        "display_name": env_name,
+                        "type": self._derive_environment_type(env_name),
+                        "is_enabled": True,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+            self.upsert_delivery_group_environment_policy(
                 {
-                    "id": f"{group['id']}:{env_name}",
-                    "name": env_name,
-                    "display_name": None,
-                    "type": self._derive_environment_type(env_name),
-                    "promotion_order": index + 1,
                     "delivery_group_id": group["id"],
+                    "environment_id": env_name,
                     "is_enabled": True,
-                    "guardrails": None,
-                    "created_at": now,
-                    "created_by": "system",
-                    "updated_at": now,
-                    "updated_by": "system",
+                    "order_index": index + 1,
                 }
             )
 
@@ -2413,17 +2521,8 @@ class DynamoStorage:
         return group
 
     def ensure_default_environments(self) -> List[dict]:
-        try:
-            existing = self.table.get_item(
-                Key={"pk": "ENVIRONMENT", "sk": "default:sandbox"},
-                ConsistentRead=True,
-            ).get("Item")
-            if existing:
-                return []
-        except Exception:
-            existing = self._scan_environments(limit=1)
-            if existing:
-                return []
+        if self.list_environments():
+            return []
         now = utc_now()
         created = []
         for group in self.list_delivery_groups():
@@ -2432,22 +2531,26 @@ class DynamoStorage:
             for index, env_name in enumerate(env_names):
                 if not isinstance(env_name, str) or not env_name.strip():
                     continue
-                env = {
-                    "id": f"{group['id']}:{env_name}",
-                    "name": env_name,
-                    "display_name": None,
-                    "type": self._derive_environment_type(env_name),
-                    "promotion_order": index + 1,
-                    "delivery_group_id": group["id"],
-                    "is_enabled": True,
-                    "guardrails": None,
-                    "created_at": now,
-                    "created_by": "system",
-                    "updated_at": now,
-                    "updated_by": "system",
-                }
-                self.insert_environment(env)
-                created.append(env)
+                if not self.get_environment(env_name):
+                    self.insert_admin_environment(
+                        {
+                            "environment_id": env_name,
+                            "display_name": env_name,
+                            "type": self._derive_environment_type(env_name),
+                            "is_enabled": True,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    )
+                    created.append(self.get_environment(env_name))
+                self.upsert_delivery_group_environment_policy(
+                    {
+                        "delivery_group_id": group["id"],
+                        "environment_id": env_name,
+                        "is_enabled": True,
+                        "order_index": index + 1,
+                    }
+                )
         return created
 
     def ensure_default_recipe(self) -> Optional[dict]:

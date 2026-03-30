@@ -158,9 +158,11 @@ class Environment(BaseModel):
     display_name: Optional[str] = None
     type: EnvironmentType
     promotion_order: Optional[int] = None
-    delivery_group_id: str
+    delivery_group_id: Optional[str] = None
     is_enabled: bool
     guardrails: Optional[DeliveryGroupGuardrails] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class Recipe(BaseModel):
