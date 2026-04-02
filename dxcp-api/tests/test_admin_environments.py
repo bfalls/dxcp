@@ -254,12 +254,12 @@ async def test_canonical_environment_crud_and_admin_alias_share_single_store(tmp
     cur = conn.cursor()
     cur.execute("SELECT environment_id, display_name, is_enabled FROM admin_environments WHERE environment_id = ?", ("staging",))
     admin_row = cur.fetchone()
-    cur.execute("SELECT id FROM environments WHERE id = ? OR name = ?", ("staging", "staging"))
-    duplicate_row = cur.fetchone()
+    cur.execute("SELECT id, name, display_name, is_enabled FROM environments WHERE id = ?", ("staging",))
+    canonical_row = cur.fetchone()
     conn.close()
 
-    assert admin_row == ("staging", "Staging Final", 1)
-    assert duplicate_row is None
+    assert admin_row is None
+    assert canonical_row == ("staging", "staging", "Staging Final", 1)
 
 
 async def test_canonical_environment_visibility_delete_and_permissions(tmp_path: Path, monkeypatch):

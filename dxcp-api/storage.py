@@ -856,43 +856,20 @@ class Storage:
     def list_environments(self) -> List[dict]:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM admin_environments ORDER BY environment_id ASC")
+        cur.execute("SELECT * FROM environments ORDER BY name ASC")
         rows = cur.fetchall()
         conn.close()
-        return [
-            {
-                "id": row["environment_id"],
-                "name": row["environment_id"],
-                "display_name": row["display_name"],
-                "type": row["type"],
-                "promotion_order": None,
-                "is_enabled": bool(row["is_enabled"]),
-                "guardrails": None,
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+        return [self._row_to_environment(row) for row in rows]
 
     def get_environment(self, environment_id: str) -> Optional[dict]:
         conn = self._connect()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM admin_environments WHERE environment_id = ?", (environment_id,))
+        cur.execute("SELECT * FROM environments WHERE id = ?", (environment_id,))
         row = cur.fetchone()
         conn.close()
         if not row:
             return None
-        return {
-            "id": row["environment_id"],
-            "name": row["environment_id"],
-            "display_name": row["display_name"],
-            "type": row["type"],
-            "promotion_order": None,
-            "is_enabled": bool(row["is_enabled"]),
-            "guardrails": None,
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        return self._row_to_environment(row)
 
     def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
         canonical = self.get_environment(name)
@@ -1164,17 +1141,25 @@ class Storage:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO admin_environments (
-                environment_id, display_name, type, is_enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO environments (
+                id, name, display_name, type, promotion_order, delivery_group_id, is_enabled, guardrails,
+                created_at, created_by, updated_at, updated_by, last_change_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 environment["environment_id"],
+                environment["environment_id"],
                 environment["display_name"],
                 environment["type"],
+                None,
+                "",
                 1 if environment.get("is_enabled", True) else 0,
+                None,
                 environment["created_at"],
+                None,
                 environment["updated_at"],
+                None,
+                None,
             ),
         )
         conn.commit()
@@ -1186,11 +1171,12 @@ class Storage:
         cur = conn.cursor()
         cur.execute(
             """
-            UPDATE admin_environments
-            SET display_name = ?, type = ?, is_enabled = ?, updated_at = ?
-            WHERE environment_id = ?
+            UPDATE environments
+            SET name = ?, display_name = ?, type = ?, is_enabled = ?, updated_at = ?
+            WHERE id = ?
             """,
             (
+                environment["environment_id"],
                 environment["display_name"],
                 environment["type"],
                 1 if environment.get("is_enabled", True) else 0,
@@ -1210,7 +1196,7 @@ class Storage:
             SELECT p.delivery_group_id, p.environment_id, p.is_enabled, p.order_index,
                    e.display_name, e.type
             FROM delivery_group_environment_policy p
-            LEFT JOIN admin_environments e ON e.environment_id = p.environment_id
+            LEFT JOIN environments e ON e.id = p.environment_id
             WHERE p.delivery_group_id = ?
             ORDER BY p.order_index ASC, p.environment_id ASC
             """,
@@ -1261,7 +1247,7 @@ class Storage:
             SELECT r.service_id, r.environment_id, r.recipe_id,
                    e.display_name, e.type
             FROM service_environment_routing r
-            LEFT JOIN admin_environments e ON e.environment_id = r.environment_id
+            LEFT JOIN environments e ON e.id = r.environment_id
             WHERE r.service_id = ?
             ORDER BY r.environment_id ASC
             """,
@@ -1306,8 +1292,9 @@ class Storage:
         cur = conn.cursor()
         cur.execute("DELETE FROM delivery_group_environment_policy WHERE environment_id = ?", (environment_id,))
         cur.execute("DELETE FROM service_environment_routing WHERE environment_id = ?", (environment_id,))
-        cur.execute("DELETE FROM admin_environments WHERE environment_id = ?", (environment_id,))
+        cur.execute("DELETE FROM environments WHERE id = ?", (environment_id,))
         deleted = cur.rowcount > 0
+        cur.execute("DELETE FROM admin_environments WHERE environment_id = ?", (environment_id,))
         conn.commit()
         conn.close()
         return deleted
@@ -1901,42 +1888,34 @@ class DynamoStorage:
         response = self.table.scan(**params)
         return response.get("Items", [])
 
+    def _environment_from_item(self, item: dict) -> dict:
+        return {
+            "id": item.get("id") or item.get("sk"),
+            "name": item.get("name") or item.get("sk"),
+            "display_name": item.get("display_name"),
+            "type": item.get("type"),
+            "promotion_order": item.get("promotion_order"),
+            "delivery_group_id": item.get("delivery_group_id"),
+            "is_enabled": bool(item.get("is_enabled", True)),
+            "guardrails": item.get("guardrails"),
+            "created_at": item.get("created_at"),
+            "created_by": item.get("created_by"),
+            "updated_at": item.get("updated_at"),
+            "updated_by": item.get("updated_by"),
+            "last_change_reason": item.get("last_change_reason"),
+        }
+
+    def _get_environment_item(self, environment_id: str) -> Optional[dict]:
+        return self.table.get_item(Key={"pk": "ENVIRONMENT", "sk": environment_id}).get("Item")
+
     def list_environments(self) -> List[dict]:
-        response = self.table.scan(FilterExpression=Attr("pk").eq("ADMIN_ENVIRONMENT"))
-        items = response.get("Items", [])
-        rows = [
-            {
-                "id": item.get("environment_id"),
-                "name": item.get("environment_id"),
-                "display_name": item.get("display_name"),
-                "type": item.get("type"),
-                "promotion_order": None,
-                "is_enabled": bool(item.get("is_enabled", True)),
-                "guardrails": None,
-                "created_at": item.get("created_at"),
-                "updated_at": item.get("updated_at"),
-            }
-            for item in items
-        ]
+        rows = [self._environment_from_item(item) for item in self._scan_environments()]
         rows.sort(key=lambda env: env.get("name", ""))
         return rows
 
     def get_environment(self, environment_id: str) -> Optional[dict]:
-        response = self.table.get_item(Key={"pk": "ADMIN_ENVIRONMENT", "sk": environment_id})
-        item = response.get("Item")
-        if not item:
-            return None
-        return {
-            "id": item.get("environment_id"),
-            "name": item.get("environment_id"),
-            "display_name": item.get("display_name"),
-            "type": item.get("type"),
-            "promotion_order": None,
-            "is_enabled": bool(item.get("is_enabled", True)),
-            "guardrails": None,
-            "created_at": item.get("created_at"),
-            "updated_at": item.get("updated_at"),
-        }
+        item = self._get_environment_item(environment_id)
+        return self._environment_from_item(item) if item else None
 
     def get_environment_for_group(self, name: str, delivery_group_id: str) -> Optional[dict]:
         canonical = self.get_environment(name)
@@ -2076,9 +2055,10 @@ class DynamoStorage:
 
     def insert_admin_environment(self, environment: dict) -> dict:
         item = {
-            "pk": "ADMIN_ENVIRONMENT",
+            "pk": "ENVIRONMENT",
             "sk": environment["environment_id"],
-            "environment_id": environment["environment_id"],
+            "id": environment["environment_id"],
+            "name": environment["environment_id"],
             "display_name": environment["display_name"],
             "type": environment["type"],
             "is_enabled": environment.get("is_enabled", True),
@@ -2092,14 +2072,17 @@ class DynamoStorage:
         return environment
 
     def update_admin_environment(self, environment: dict) -> dict:
+        existing = self._get_environment_item(environment["environment_id"]) or {}
         item = {
-            "pk": "ADMIN_ENVIRONMENT",
+            **existing,
+            "pk": "ENVIRONMENT",
             "sk": environment["environment_id"],
-            "environment_id": environment["environment_id"],
+            "id": existing.get("id") or environment["environment_id"],
+            "name": existing.get("name") or environment["environment_id"],
             "display_name": environment["display_name"],
             "type": environment["type"],
             "is_enabled": environment.get("is_enabled", True),
-            "created_at": environment.get("created_at"),
+            "created_at": environment.get("created_at") or existing.get("created_at"),
             "updated_at": environment["updated_at"],
         }
         self.table.put_item(Item=item)
@@ -2173,6 +2156,7 @@ class DynamoStorage:
 
     def delete_environment(self, environment_id: str) -> bool:
         deleted = self.get_environment(environment_id) is not None
+        self.table.delete_item(Key={"pk": "ENVIRONMENT", "sk": environment_id})
         self.table.delete_item(Key={"pk": "ADMIN_ENVIRONMENT", "sk": environment_id})
         for row in self.list_delivery_groups():
             self.table.delete_item(Key={"pk": "DG_ENV_POLICY", "sk": f"{row['id']}#{environment_id}"})

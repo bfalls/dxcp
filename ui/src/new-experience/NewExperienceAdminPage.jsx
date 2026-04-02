@@ -2,56 +2,35 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
-import NewExperienceAdminWorkspaceShell from './NewExperienceAdminWorkspaceShell.jsx'
+import NewExperienceAdminWorkspaceShell, { NewExperienceAdminSectionStrip } from './NewExperienceAdminWorkspaceShell.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
-import { useNewExperienceAlertRail } from './NewExperienceShell.jsx'
+import { useNewExperienceAlertRail, useNewExperienceStickyRail } from './NewExperienceShell.jsx'
+import { loadAccessibleEnvironmentOptions } from './newExperienceApplicationsData.js'
 
 const ADMIN_TABS = [
   {
     id: 'delivery-groups',
     label: 'Delivery Groups',
-    shortLabel: 'Policy boundaries',
     description: 'Define governance boundaries, ownership, and rollout guardrails for groups of services.'
   },
   {
     id: 'recipes',
     label: 'Recipes',
-    shortLabel: 'Deployment patterns',
     description: 'Manage reusable deployment behaviors and the rollout patterns available to delivery groups.'
   },
   {
     id: 'environments',
     label: 'Environments',
-    shortLabel: 'Foundation setup',
     description: 'Establish the platform environments that delivery policy and routing will build on.'
-  },
-  {
-    id: 'dg-environment-policy',
-    label: 'DG Environment Policy',
-    shortLabel: 'Group access rules',
-    description: 'Control which environments each delivery group can use and in what order.'
-  },
-  {
-    id: 'service-environment-routing',
-    label: 'Service Environment Routing',
-    shortLabel: 'Service pathing',
-    description: 'Assign environment-specific routing behavior for each governed service.'
-  },
-  {
-    id: 'audit',
-    label: 'Audit',
-    shortLabel: 'Governance history',
-    description: 'Review governance activity, actor accountability, and recent administrative change history.'
   },
   {
     id: 'system-settings',
     label: 'System Settings',
-    shortLabel: 'Platform controls',
     description: 'Configure platform-wide guardrails, operational limits, and administrative posture.'
   }
 ]
 
-const DEFAULT_TAB = 'environments'
+const DEFAULT_TAB = 'delivery-groups'
 
 function BlockedAdminState({ role }) {
   useNewExperienceAlertRail([
@@ -93,16 +72,6 @@ function BlockedAdminState({ role }) {
   )
 }
 
-function normalizeAdminEnvironment(row) {
-  const environmentId = String(row?.environment_id || row?.id || row?.name || '').trim()
-  return {
-    id: environmentId,
-    displayName: String(row?.display_name || row?.displayName || environmentId).trim(),
-    type: row?.type === 'prod' ? 'prod' : 'non_prod',
-    isEnabled: row?.is_enabled !== false
-  }
-}
-
 function EnvironmentSummary({ rows }) {
   const enabledCount = rows.filter((row) => row.isEnabled).length
   const productionCount = rows.filter((row) => row.type === 'prod').length
@@ -134,20 +103,18 @@ function EnvironmentsPanel({ api }) {
 
   const loadEnvironments = useCallback(async () => {
     setState((current) => ({ kind: current.kind === 'ready' ? 'refreshing' : 'loading', rows: current.rows, errorMessage: '' }))
-    try {
-      const result = await api.get('/environments')
-      if (!Array.isArray(result)) {
-        setState({ kind: 'failure', rows: [], errorMessage: result?.message || 'DXCP could not load environment foundation data.' })
-        return
-      }
-      const rows = result
-        .map(normalizeAdminEnvironment)
-        .filter((row) => row.id)
-        .sort((left, right) => left.displayName.localeCompare(right.displayName))
-      setState({ kind: rows.length > 0 ? 'ready' : 'empty', rows, errorMessage: '' })
-    } catch (error) {
-      setState({ kind: 'failure', rows: [], errorMessage: error?.message || 'DXCP could not load environment foundation data.' })
+    const result = await loadAccessibleEnvironmentOptions(api)
+    if (result.kind === 'failure') {
+      setState({ kind: 'failure', rows: [], errorMessage: result.errorMessage || 'DXCP could not load environment foundation data.' })
+      return
     }
+    const rows = (result.environmentOptions || []).map((environment) => ({
+      id: String(environment?.name || '').trim(),
+      displayName: String(environment?.display_name || environment?.label || environment?.name || '').trim(),
+      type: environment?.type === 'prod' ? 'prod' : 'non_prod',
+      isEnabled: true
+    })).filter((row) => row.id)
+    setState({ kind: rows.length > 0 ? 'ready' : 'empty', rows, errorMessage: '' })
   }, [api])
 
   useEffect(() => {
@@ -298,20 +265,31 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
 
   useNewExperienceAlertRail([])
 
+  const handleSelectTab = useCallback((tabId) => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('tab', tabId)
+    setSearchParams(nextParams)
+  }, [searchParams, setSearchParams])
+
+  const stickyAdminStrip = useMemo(
+    () => (
+      <NewExperienceAdminSectionStrip
+        tabs={ADMIN_TABS}
+        activeTab={activeTab}
+        onSelectTab={handleSelectTab}
+      />
+    ),
+    [activeTab, handleSelectTab]
+  )
+
+  useNewExperienceStickyRail(role === 'PLATFORM_ADMIN' ? stickyAdminStrip : null)
+
   if (role !== 'PLATFORM_ADMIN') {
     return <BlockedAdminState role={role} />
   }
 
-  const handleSelectTab = (tabId) => {
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('tab', tabId)
-    setSearchParams(nextParams)
-  }
-
   let panel = null
-  if (activeTab === 'environments') {
-    panel = <EnvironmentsPanel api={api} />
-  } else if (activeTab === 'delivery-groups') {
+  if (activeTab === 'delivery-groups') {
     panel = (
       <PlaceholderPanel
         eyebrow="Policy boundaries"
@@ -331,36 +309,8 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
         emptyBody="This panel is reserved for deployment strategy review, lifecycle management, and reference visibility in a dedicated task surface."
       />
     )
-  } else if (activeTab === 'dg-environment-policy') {
-    panel = (
-      <PlaceholderPanel
-        eyebrow="Group access rules"
-        title="DG Environment Policy"
-        description="Control which environments each delivery group can use and in what order."
-        emptyTitle="Delivery group environment policy is reserved here"
-        emptyBody="Bindings, enablement posture, and ordered environment access will move into this focused panel in the next implementation phase."
-      />
-    )
-  } else if (activeTab === 'service-environment-routing') {
-    panel = (
-      <PlaceholderPanel
-        eyebrow="Service pathing"
-        title="Service Environment Routing"
-        description="Assign environment-specific routing behavior for each governed service."
-        emptyTitle="Service routing administration is staged for this panel"
-        emptyBody="Environment-specific recipe routing will land here as a dedicated workflow so service pathing stays separate from foundation and policy setup."
-      />
-    )
-  } else if (activeTab === 'audit') {
-    panel = (
-      <PlaceholderPanel
-        eyebrow="Governance history"
-        title="Audit"
-        description="Review governance activity, actor accountability, and recent administrative change history."
-        emptyTitle="Audit review will surface here"
-        emptyBody="This panel will consolidate administrative history and change accountability without exposing the rest of Admin as a long diagnostic page."
-      />
-    )
+  } else if (activeTab === 'environments') {
+    panel = <EnvironmentsPanel api={api} />
   } else if (activeTab === 'system-settings') {
     panel = (
       <PlaceholderPanel
@@ -374,16 +324,10 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
   }
 
   return (
-    <>
-      <NewExperiencePageHeader
-        title="Admin"
-        objectIdentity="Admin workspace"
-        role={role}
-        primaryAction={{ label: activeTabDefinition.label, state: 'read-only' }}
-      />
-      <NewExperienceAdminWorkspaceShell tabs={ADMIN_TABS} activeTab={activeTab} onSelectTab={handleSelectTab}>
+    <div className="new-admin-page">
+      <NewExperienceAdminWorkspaceShell>
         {panel}
       </NewExperienceAdminWorkspaceShell>
-    </>
+    </div>
   )
 }

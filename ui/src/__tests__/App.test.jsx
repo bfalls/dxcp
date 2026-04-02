@@ -2112,7 +2112,7 @@ export async function runAllTests() {
     await waitFor(() => assert.equal(insightsReads >= 2, true))
   })
 
-  await runTest('New experience admin route defaults to environments workspace and shows deep-linkable sub-tabs', async () => {
+  await runTest('New experience admin route shows a compact sticky subsection strip and bounded workspace', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
       getUser: async () => ({ email: 'admin@example.com' }),
@@ -2133,13 +2133,20 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
-    await view.findByRole('heading', { name: 'Admin' })
-    const environmentsTab = await view.findByRole('tab', { name: /Environments/i })
-    await view.findByRole('tab', { name: /Delivery Groups/i })
-    assert.equal(environmentsTab.getAttribute('aria-selected'), 'true')
-    await view.findByRole('heading', { name: 'Environments' })
-    await view.findByText('Sandbox')
-    await view.findAllByText('Production')
+    await view.findByRole('tablist', { name: 'Admin sub-tabs' })
+    assert.equal(view.queryByRole('heading', { name: 'Admin' }), null)
+    const tabs = await view.findAllByRole('tab')
+    assert.equal(tabs.length, 4)
+    const deliveryGroupsTab = view.getByRole('tab', { name: /Delivery Groups/i })
+    const recipesTab = view.getByRole('tab', { name: /Recipes/i })
+    const environmentsTab = view.getByRole('tab', { name: /Environments/i })
+    const systemSettingsTab = view.getByRole('tab', { name: /System Settings/i })
+    assert.equal(deliveryGroupsTab.getAttribute('aria-selected'), 'true')
+    assert.equal(recipesTab.getAttribute('aria-selected'), 'false')
+    assert.equal(environmentsTab.getAttribute('aria-selected'), 'false')
+    assert.equal(systemSettingsTab.getAttribute('aria-selected'), 'false')
+    await view.findByRole('heading', { name: 'Delivery Groups' })
+    assert.equal(view.queryByText('Focused governance workspace'), null)
   })
 
   await runTest('New experience admin route switches panels without rendering the old long page', async () => {
@@ -2159,12 +2166,12 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
-    await view.findByText('Sandbox')
-    assert.equal(view.queryByText('Delivery group governance is being refit for the new workspace'), null)
-    fireEvent.click(view.getByRole('tab', { name: /Delivery Groups/i }))
     await view.findByText('Delivery group governance is being refit for the new workspace')
     assert.equal(view.queryByText('Sandbox'), null)
-    assert.equal(view.getByRole('tab', { name: /Delivery Groups/i }).getAttribute('aria-selected'), 'true')
+    fireEvent.click(view.getByRole('tab', { name: /Environments/i }))
+    await view.findByText('Sandbox')
+    assert.equal(view.queryByText('Delivery group governance is being refit for the new workspace'), null)
+    assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 
   await runTest('New experience admin route preserves the active workspace tab on refresh through the query string', async () => {
@@ -2181,13 +2188,34 @@ export async function runAllTests() {
       deployAllowed: true,
       rollbackAllowed: true
     })
-    const view = renderApp('/new/admin?tab=audit')
+    const view = renderApp('/new/admin?tab=recipes')
 
-    await view.findByRole('heading', { name: 'Admin' })
-    await view.findByText('Audit review will surface here')
-    const auditTab = view.getByRole('tab', { name: /Audit/i })
-    assert.equal(auditTab.getAttribute('aria-selected'), 'true')
+    await view.findByText('Recipe administration is being staged into this workspace')
+    const recipesTab = view.getByRole('tab', { name: /Recipes/i })
+    assert.equal(recipesTab.getAttribute('aria-selected'), 'true')
     assert.equal(view.queryByText('Sandbox'), null)
+  })
+
+  await runTest('New experience admin route supports ?tab=environments in the sticky subsection strip', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      adminEnvironments: [{ environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }]
+    })
+    const view = renderApp('/new/admin?tab=environments')
+
+    await view.findByRole('heading', { name: 'Environments' })
+    await view.findByText('Sandbox')
+    assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 
   await runTest('New experience admin route blocks non-admin access without rendering a partial Admin shell', async () => {

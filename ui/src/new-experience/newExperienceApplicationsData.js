@@ -35,6 +35,43 @@ function buildEnvironmentOptions(environments) {
     }))
 }
 
+export async function loadAccessibleEnvironmentOptions(api, options = {}) {
+  const requestOptions = { ...options }
+  const selectedEnvironmentName = options.environmentName || ''
+  delete requestOptions.environmentName
+
+  let environmentsPayload
+  try {
+    environmentsPayload = await api.get('/environments', requestOptions)
+  } catch (error) {
+    return {
+      kind: 'failure',
+      environmentOptions: [],
+      selectedEnvironmentName: '',
+      errorMessage: 'DXCP could not load environment context right now. Refresh to try again.'
+    }
+  }
+
+  if (!Array.isArray(environmentsPayload)) {
+    return {
+      kind: 'failure',
+      environmentOptions: [],
+      selectedEnvironmentName: '',
+      errorMessage: formatApiError(environmentsPayload, 'DXCP could not load environment context right now. Refresh to try again.')
+    }
+  }
+
+  const environmentOptions = buildEnvironmentOptions(environmentsPayload)
+  const selectedEnvironment = resolveSelectedEnvironment(environmentOptions, selectedEnvironmentName)
+
+  return {
+    kind: environmentOptions.length > 0 ? 'ready' : 'empty',
+    environmentOptions,
+    selectedEnvironmentName: selectedEnvironment?.name || '',
+    errorMessage: ''
+  }
+}
+
 function resolveSelectedEnvironment(environmentOptions, selectedEnvironmentName) {
   if (!Array.isArray(environmentOptions) || environmentOptions.length === 0) return null
   const selectedByName = environmentOptions.find((environment) => environment.name === selectedEnvironmentName)
