@@ -65,6 +65,7 @@ Core shared components in `ui/src/components`:
 - `TwoColumn.jsx`: primary/supporting two-column layout primitive.
 
 New experience shared primitives in `ui/src/new-experience`:
+- `NewBackToCollectionButton.jsx`: reusable back-to-collection pattern button with a leading chevron for collection-to-detail flows.
 - `NewExperiencePageHeader.jsx`: reusable page/object header for `/new/*` screens.
 - `NewExperienceShell.jsx`: new experience shell and alert/sticky rail integration helpers.
 - `NewExperienceStatePrimitives.jsx`: shared explanation blocks and state blocks for loading/empty/failure/degraded states.

@@ -1,5 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import NewBackToCollectionButton from './NewBackToCollectionButton.jsx'
 
 function formatRoleLabel(role) {
   if (role === 'PLATFORM_ADMIN') return ''
@@ -29,6 +30,7 @@ export default function NewExperiencePageHeader({
   stateSummaryItems = [],
   primaryAction,
   secondaryActions = [],
+  backToCollection,
   role = 'UNKNOWN',
   actionNote = '',
   showRoleNote = true,
@@ -48,6 +50,13 @@ export default function NewExperiencePageHeader({
   return (
     <header className="new-page-header">
       <div className="new-page-header-identity">
+        {backToCollection ? (
+          <NewBackToCollectionButton
+            label={backToCollection.label}
+            to={backToCollection.to}
+            onClick={backToCollection.onClick}
+          />
+        ) : null}
         <h1 className={hasObjectIdentity ? 'new-page-header-eyebrow' : 'new-page-header-title'}>{title}</h1>
         {hasObjectIdentity ? <div className="new-page-object-identity">{objectIdentity}</div> : null}
         {showRoleNote && formatRoleLabel(role) ? (

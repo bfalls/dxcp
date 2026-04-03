@@ -557,13 +557,13 @@ function EnvironmentsPanel({ api }) {
       <NewExperiencePageHeader
         title={isCreating ? 'Create environment' : 'Environment'}
         objectIdentity={isDetail ? (draft.displayName || draft.id) : undefined}
+        backToCollection={{ label: 'Back to Environments', onClick: openListView }}
         primaryAction={{
           label: isCreating ? 'Create environment' : 'Save changes',
           onClick: saveEnvironment,
           disabled: isCreating ? !draft.id.trim() || !draft.displayName.trim() : !hasDetailChanges
         }}
         secondaryActions={[
-          { label: 'Back to Environments', onClick: openListView },
           ...(isDetail ? [{ label: 'Delete', onClick: () => deleteEnvironment(selectedEnvironment || { id: editingId }) }] : [])
         ]}
         role="PLATFORM_ADMIN"
