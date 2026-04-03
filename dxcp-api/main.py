@@ -2966,7 +2966,6 @@ def validate_promotion(
     group = context["group"]
     target_env = context["target_env"]
     recipe = context["recipe"]
-    execution_plan = context["execution_plan"]
     policy_snapshot = _policy_snapshot_for_environment(group, target_env)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
         return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
