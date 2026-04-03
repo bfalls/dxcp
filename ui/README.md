@@ -46,3 +46,32 @@ Notes:
 - Rollback prompts for confirmation and uses idempotency keys.
 - Services come from the backend registry (/v1/services).
 - Production uses /config.json for runtime Auth0 and API configuration (see docs/AUTH.md).
+
+## Shared UI Components
+
+Before creating a new UI primitive, check the existing shared components first and reuse them where possible.
+
+Core shared components in `ui/src/components`:
+- `AlertRail.jsx`: global alert rail and alert presentation shell.
+- `AppShell.jsx`: primary shell wrapper for legacy app layout.
+- `DefinitionGrid.jsx`: labeled value grid for compact detail summaries.
+- `HeaderStatus.jsx`: small status treatment in page headers.
+- `InfoTooltip.jsx`: lightweight inline help / info disclosure.
+- `LayoutContainer.jsx`: bounded page-width layout container.
+- `LoadingText.jsx`: loading text treatment.
+- `OperationalDataList.jsx`: shared operational list/table control used by collection-style screens such as Applications and Environment Service routing.
+- `PageHeader.jsx`: legacy page header composition.
+- `SectionCard.jsx`: standard section surface/card wrapper.
+- `TwoColumn.jsx`: primary/supporting two-column layout primitive.
+
+New experience shared primitives in `ui/src/new-experience`:
+- `NewExperiencePageHeader.jsx`: reusable page/object header for `/new/*` screens.
+- `NewExperienceShell.jsx`: new experience shell and alert/sticky rail integration helpers.
+- `NewExperienceStatePrimitives.jsx`: shared explanation blocks and state blocks for loading/empty/failure/degraded states.
+- `NewExperienceAdminWorkspaceShell.jsx`: admin workspace shell and subsection strip.
+- `NewSegmentedTabs.jsx`: reusable compact segmented tab control for rounded enterprise panels.
+
+Reuse guidance:
+- Prefer composition with these primitives over creating one-off wrappers.
+- If a new pattern is needed more than once, promote it into one of these shared locations instead of duplicating local markup.
+- When adding a new shared primitive, update this README so future Codex sessions can discover it quickly.

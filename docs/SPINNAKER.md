@@ -196,10 +196,10 @@ Notes:
 
 ## DXCP pipeline contract
 
-DXCP maps `spinnakerApplication` and `spinnakerPipeline` from the selected Recipe.
+DXCP resolves a Recipe from authoritative service + environment routing, then maps `spinnakerApplication` and `spinnakerPipeline` from that resolved Recipe.
 Rollback uses the stored mapping from the deployment record; if it is missing, rollback fails with a clear error.
 
-DXCP supplies intent (service + artifact/version). Spinnaker owns engine configuration (URLs, tokens, credentials).
+DXCP supplies intent (service + environment + artifact/version). Spinnaker owns engine configuration (URLs, tokens, credentials).
 
 ## Engine controller config (Spinnaker-side)
 

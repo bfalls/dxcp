@@ -304,13 +304,22 @@ async def test_canonical_environment_visibility_delete_and_permissions(tmp_path:
             "/v1/environments",
             headers=auth_header(["dxcp-platform-admins"]),
         )
-        deleted = await client.delete(
+        delete_blocked = await client.delete(
             "/v1/environments/staging",
             headers=auth_header(["dxcp-platform-admins"]),
+        )
+        retired = await client.patch(
+            "/v1/environments/staging",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json={"lifecycle_state": "retired"},
         )
         visible_after_delete = await client.get(
             "/v1/environments",
             headers=auth_header(["dxcp-platform-admins"]),
+        )
+        visible_after_retire_for_operator = await client.get(
+            "/v1/environments",
+            headers=observer_headers,
         )
 
     assert create_forbidden.status_code == 403
@@ -320,23 +329,32 @@ async def test_canonical_environment_visibility_delete_and_permissions(tmp_path:
     assert created.status_code == 201
     assert bind.status_code == 200
     assert any(row["name"] == "staging" for row in visible_after_bind.json())
-    assert deleted.status_code == 204
-    assert all(row["name"] != "staging" for row in visible_after_delete.json())
+    assert delete_blocked.status_code == 409
+    assert delete_blocked.json()["code"] == "ENVIRONMENT_DELETE_BLOCKED_REFERENCED"
+    assert retired.status_code == 200
+    assert retired.json()["lifecycle_state"] == "retired"
+    assert retired.json()["is_enabled"] is False
+    assert any(row["name"] == "staging" and row["lifecycle_state"] == "retired" for row in visible_after_delete.json())
+    assert all(row["name"] != "staging" for row in visible_after_retire_for_operator.json())
 
 
-async def test_no_environments_means_no_admin_or_operational_phantoms(tmp_path: Path, monkeypatch):
+async def test_unreferenced_environment_can_be_hard_deleted(tmp_path: Path, monkeypatch):
     async with _client(tmp_path, monkeypatch) as client:
-        initial = await client.get(
+        created = await client.post(
             "/v1/environments",
             headers=auth_header(["dxcp-platform-admins"]),
+            json={
+                "environment_id": "scratch",
+                "display_name": "Scratch",
+                "type": "non_prod",
+                "lifecycle_state": "active",
+            },
         )
-        for row in initial.json():
-            delete_resp = await client.delete(
-                f"/v1/environments/{row['id']}",
-                headers=auth_header(["dxcp-platform-admins"]),
-            )
-            assert delete_resp.status_code == 204
-
+        assert created.status_code == 201
+        delete_resp = await client.delete(
+            "/v1/environments/scratch",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
         canonical_after_delete = await client.get(
             "/v1/environments",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -346,7 +364,27 @@ async def test_no_environments_means_no_admin_or_operational_phantoms(tmp_path: 
             headers=auth_header(["dxcp-observers"]),
         )
 
+    assert delete_resp.status_code == 204
     assert canonical_after_delete.status_code == 200
-    assert canonical_after_delete.json() == []
+    assert all(row["id"] != "scratch" for row in canonical_after_delete.json())
     assert operational_after_delete.status_code == 200
-    assert operational_after_delete.json() == []
+    assert all(row["id"] != "scratch" for row in operational_after_delete.json())
+
+
+async def test_referenced_default_environments_are_not_hard_deleted(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch) as client:
+        initial = await client.get(
+            "/v1/environments",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        results = {}
+        for row in initial.json():
+            delete_resp = await client.delete(
+                f"/v1/environments/{row['id']}",
+                headers=auth_header(["dxcp-platform-admins"]),
+            )
+            results[row["id"]] = delete_resp
+
+    assert "sandbox" in results
+    assert results["sandbox"].status_code == 409
+    assert results["sandbox"].json()["code"] == "ENVIRONMENT_DELETE_BLOCKED_REFERENCED"

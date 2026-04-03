@@ -16,16 +16,17 @@ It does not introduce new features or commitments.
 - Engine identity is explicit but informational only (`engine_type=SPINNAKER`).
 
 ### Recipe model
-- Recipes are first-class, centrally managed objects with:
+- Recipes are first-class, centrally managed execution patterns with:
   `recipe_revision` and `effective_behavior_summary` captured at deploy time.
 - Recipe updates increment `recipe_revision` and preserve a frozen
   `effective_behavior_summary` on each DeploymentRecord.
 - Deprecated recipes are blocked by policy and reported with explicit error
   codes.
+- In the common deploy path, recipes are resolved from service + environment routing rather than required as operator-facing input.
 
 ### Policy model
 - Policy is enforced at the API boundary:
-  allowlists, delivery-group guardrails, single environment, rate limits,
+  allowlists, delivery-group guardrails, multi-environment routing, rate limits,
   and idempotency.
 - DeliveryGroup acts as the governance boundary; Service capabilities are
   compatibility checks, not permission grants.
@@ -51,7 +52,6 @@ It does not introduce new features or commitments.
 
 - Multi-engine execution or user-selectable engines.
 - Non-S3 artifact sources or non-AWS cloud providers.
-- Multi-environment delivery (only `sandbox` is allowed in v1).
 - Pipeline editing, pipeline graphs, or raw engine configuration exposure.
 - Arbitrary deployment parameters or free-form pipeline composition.
 
@@ -61,7 +61,7 @@ It does not introduce new features or commitments.
 1. Update or create a Recipe via admin APIs.
 2. Ensure `effective_behavior_summary` is accurate and user-facing.
 3. Confirm `recipe_revision` increments on update.
-4. Update DeliveryGroup `allowed_recipes` to permit use.
+4. Update the relevant service + environment routing and any DeliveryGroup `allowed_recipes` policy needed to permit use.
 5. Verify UI shows recipe revision and behavior summary on deployment detail.
 
 Notes:
@@ -101,11 +101,11 @@ Notes:
 ## Compatibility Rules (What Can Change vs What Cannot)
 
 ### Stable and must not change in v1
-- `/v1` intent-based API structure and required fields.
+- `/v1` intent-based API structure and governed environment semantics.
 - Policy error codes and user-facing error semantics.
 - Normalized deployment outcomes and failure categories.
 - `engine_type` remains informational only.
-- Single environment (`sandbox`) semantics and enforcement.
+- Service + environment routing as the authoritative execution-selection model.
 - S3-only artifactRef in v1.
 
 ### Can evolve without breaking users

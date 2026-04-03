@@ -117,6 +117,17 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             "updated_by": "system",
         }
     )
+    main.storage.upsert_service_environment_routing(
+        {
+            "service_id": "payments",
+            "environment_id": "sandbox",
+            "recipe_id": "standard",
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

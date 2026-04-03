@@ -80,25 +80,25 @@ function mapValidationBlock(result, context, applicationName, selectedEnvironmen
       return {
         title: 'Deploy blocked',
         tone: 'danger',
-        body: `The selected Deployment Strategy is not allowed for ${groupName}. Choose an allowed strategy before you deploy.`,
+        body: `The routed delivery behavior is not allowed for ${groupName}. Review service-environment routing or policy before you deploy.`,
         actions: defaultActions,
-        blockedReadinessLabel: 'The selected Deployment Strategy is allowed for this Deployment Group.'
+        blockedReadinessLabel: 'The routed delivery behavior is allowed for this Deployment Group.'
       }
     case 'RECIPE_INCOMPATIBLE':
       return {
         title: 'Deploy blocked',
         tone: 'danger',
-        body: 'The selected Deployment Strategy is not compatible with this Application. Choose a different strategy before you deploy.',
+        body: 'The routed delivery behavior is not compatible with this Application. Review routing or recipe compatibility before you deploy.',
         actions: defaultActions,
-        blockedReadinessLabel: 'The selected Deployment Strategy is compatible with this Application.'
+        blockedReadinessLabel: 'The routed delivery behavior is compatible with this Application.'
       }
     case 'RECIPE_DEPRECATED':
       return {
         title: 'Deploy blocked',
         tone: 'danger',
-        body: 'The selected Deployment Strategy is deprecated and cannot be used for new deployments. Choose a current strategy before you deploy.',
+        body: 'The routed delivery behavior is deprecated and cannot be used for new deployments. Review routing before you deploy.',
         actions: defaultActions,
-        blockedReadinessLabel: 'The selected Deployment Strategy is current and available for new deployments.'
+        blockedReadinessLabel: 'The routed delivery behavior is current and available for new deployments.'
       }
     default:
       return {
@@ -128,7 +128,6 @@ function deriveDeployPosture({
   role,
   base,
   selectedEnvironment,
-  selectedStrategy,
   version,
   changeSummary,
   validationState,
@@ -137,7 +136,6 @@ function deriveDeployPosture({
   submitting
 }) {
   const selectedEnvironmentLabel = selectedEnvironment?.label || selectedEnvironment?.name || 'the selected environment'
-  const selectedStrategyName = selectedStrategy?.name || 'the selected Deployment Strategy'
 
   if (role === 'OBSERVER') {
     return {
@@ -230,7 +228,7 @@ function deriveDeployPosture({
       local: {
         title: 'Complete deploy intent',
         tone: 'warning',
-        body: 'Choose an enabled environment, select a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
+        body: 'Choose an enabled environment, select a deployable version, and add a change summary before DXCP can validate this deploy intent.',
         actions: []
       },
       blockedReadinessLabel: 'An enabled environment is selected.'
@@ -251,48 +249,6 @@ function deriveDeployPosture({
     }
   }
 
-  if ((base?.deployableStrategies || []).length === 0) {
-    return {
-      primaryActionState: 'blocked',
-      headerNote: 'Deploy is blocked because no current Deployment Strategy is available for this Deployment Group.',
-      local: {
-        title: 'Deploy blocked',
-        tone: 'danger',
-        body: 'DXCP did not return a current Deployment Strategy that can be used for a new deploy on this route. Review Deployment Group policy before you deploy again.',
-        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
-      },
-      blockedReadinessLabel: 'A current Deployment Strategy is available for this Deployment Group.'
-    }
-  }
-
-  if (!selectedStrategy?.id) {
-    return {
-      primaryActionState: 'disabled',
-      headerNote: 'Choose an allowed Deployment Strategy before DXCP can validate this deploy intent.',
-      local: {
-        title: 'Complete deploy intent',
-        tone: 'warning',
-        body: 'Select the deploy target, choose a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
-        actions: []
-      },
-      blockedReadinessLabel: ''
-    }
-  }
-
-  if (selectedStrategy?.status === 'deprecated') {
-    return {
-      primaryActionState: 'blocked',
-      headerNote: `Deploy is blocked because ${selectedStrategyName} is deprecated.`,
-      local: {
-        title: 'Deploy blocked',
-        tone: 'danger',
-        body: 'The selected Deployment Strategy is deprecated and cannot be used for new deployments. Choose a current strategy before you deploy.',
-        actions: [{ label: 'Open Application', to: `/new/applications/${applicationName}` }]
-      },
-      blockedReadinessLabel: 'The selected Deployment Strategy is current and available for new deployments.'
-    }
-  }
-
   if (!version || !changeSummary.trim()) {
     return {
       primaryActionState: 'disabled',
@@ -300,7 +256,7 @@ function deriveDeployPosture({
       local: {
         title: 'Complete deploy intent',
         tone: 'warning',
-        body: 'Select the deploy target, choose a deployable Deployment Strategy and version, and add a change summary before DXCP can validate this deploy intent.',
+        body: 'Select the deploy target, choose a deployable version, and add a change summary before DXCP can validate this deploy intent.',
         actions: []
       },
       blockedReadinessLabel: ''
@@ -361,7 +317,7 @@ function deriveDeployPosture({
   }
 }
 
-function buildReadinessItems({ base, selectedEnvironment, selectedStrategy, version, changeSummary, posture, validationState }) {
+function buildReadinessItems({ base, selectedEnvironment, version, changeSummary, posture, validationState }) {
   const items = [
     {
       label: 'Application context is confirmed.',
@@ -373,15 +329,6 @@ function buildReadinessItems({ base, selectedEnvironment, selectedStrategy, vers
         !selectedEnvironment?.name
           ? 'pending'
           : selectedEnvironment.isEnabled === false || posture.blockedReadinessLabel === `${selectedEnvironment.label || selectedEnvironment.name} is enabled for deploy on this route.`
-            ? 'blocked'
-            : 'met'
-    },
-    {
-      label: 'Deployment Strategy is current and allowed for this Deployment Group.',
-      status:
-        !selectedStrategy?.id
-          ? (base?.deployableStrategies || []).length === 0 ? 'blocked' : 'pending'
-          : selectedStrategy.status === 'deprecated'
             ? 'blocked'
             : 'met'
     },
@@ -483,7 +430,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
     errorMessage: ''
   })
   const [environmentName, setEnvironmentName] = useState('')
-  const [strategyId, setStrategyId] = useState('')
   const [version, setVersion] = useState('')
   const [changeSummary, setChangeSummary] = useState('')
   const [environmentState, setEnvironmentState] = useState({
@@ -536,9 +482,8 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
     const base = baseState.base
     if (!base) return
     if (!environmentName && base.defaultEnvironmentName) setEnvironmentName(base.defaultEnvironmentName)
-    if (!strategyId && base.defaultStrategyId) setStrategyId(base.defaultStrategyId)
     if (!version && base.defaultVersion) setVersion(base.defaultVersion)
-  }, [baseState.base, environmentName, strategyId, version])
+  }, [baseState.base, environmentName, version])
 
   useEffect(() => {
     if (!baseState.base || !environmentName) {
@@ -557,27 +502,24 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       degradedReasons: [],
       errorMessage: ''
     }))
-    loadDeployEnvironmentContext(api, applicationName, environmentName, strategyId).then((nextState) => {
+    loadDeployEnvironmentContext(api, applicationName, environmentName).then((nextState) => {
       if (active) setEnvironmentState(nextState)
     })
     return () => {
       active = false
     }
-  }, [api, applicationName, baseState.base, environmentName, strategyId])
+  }, [api, applicationName, baseState.base, environmentName])
 
   useEffect(() => {
     const base = baseState.base
-    const selectedStrategy = base?.allowedStrategies?.find((item) => item.id === strategyId) || null
     if (
       !base ||
       role === 'OBSERVER' ||
       base.mutationsDisabled === true ||
       base.allowedActions?.actions?.deploy !== true ||
       !environmentName ||
-      !strategyId ||
       !version ||
-      !changeSummary.trim() ||
-      selectedStrategy?.status === 'deprecated'
+      !changeSummary.trim()
     ) {
       setValidationState({ kind: 'idle', result: null, errorMessage: '', diagnostics: null })
       return
@@ -594,7 +536,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       validateDeployIntent(api, {
         service: applicationName,
         environment: environmentName,
-        recipeId: strategyId,
         version,
         changeSummary: changeSummary.trim()
       }).then((nextState) => {
@@ -606,16 +547,12 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       active = false
       window.clearTimeout(timeoutId)
     }
-  }, [api, applicationName, baseState.base, changeSummary, environmentName, role, strategyId, version])
+  }, [api, applicationName, baseState.base, changeSummary, environmentName, role, version])
 
   const base = baseState.base
   const selectedEnvironment = useMemo(
     () => base?.environments?.find((item) => item.name === environmentName) || null,
     [base?.environments, environmentName]
-  )
-  const selectedStrategy = useMemo(
-    () => base?.allowedStrategies?.find((item) => item.id === strategyId) || null,
-    [base?.allowedStrategies, strategyId]
   )
   const posture = useMemo(
     () =>
@@ -623,7 +560,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
         role,
         base,
         selectedEnvironment,
-        selectedStrategy,
         version,
         changeSummary,
         validationState,
@@ -631,20 +567,19 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
         applicationName,
         submitting: submitState.kind === 'submitting'
       }),
-    [applicationName, base, changeSummary, environmentState.context, role, selectedEnvironment, selectedStrategy, submitState.kind, validationState, version]
+    [applicationName, base, changeSummary, environmentState.context, role, selectedEnvironment, submitState.kind, validationState, version]
   )
   const readinessItems = useMemo(
     () =>
       buildReadinessItems({
         base,
         selectedEnvironment,
-        selectedStrategy,
         version,
         changeSummary,
         posture,
         validationState
       }),
-    [base, changeSummary, posture, selectedEnvironment, selectedStrategy, validationState, version]
+    [base, changeSummary, posture, selectedEnvironment, validationState, version]
   )
   const degradedReasons = combineDegradedReasons(baseState, environmentState)
   const pageContextIssues = useMemo(() => {
@@ -659,8 +594,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
       service: applicationName,
       environment: environmentName,
       version,
-      changeSummary: changeSummary.trim(),
-      recipeId: strategyId
+      changeSummary: changeSummary.trim()
     })
     if (result && result.code) {
       setSubmitState({
@@ -769,7 +703,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
 
           {baseState.kind === 'loading' ? (
             <NewStateBlock eyebrow="Loading" title="Loading deploy intent">
-              DXCP is loading deployable targets, Deployment Strategy options, and current policy context for this Application.
+              DXCP is loading deployable targets, registered versions, and current policy context for this Application.
             </NewStateBlock>
           ) : (
             <>
@@ -790,22 +724,6 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                     {(base?.environments || []).map((environment) => (
                       <option key={environment.name} value={environment.name}>
                         {environment.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="new-field" htmlFor="new-deploy-strategy">
-                  <span>Deployment Strategy</span>
-                  <select
-                    id="new-deploy-strategy"
-                    value={strategyId}
-                    onChange={(event) => setStrategyId(event.target.value)}
-                    disabled={posture.primaryActionState === 'read-only'}
-                  >
-                    <option value="">Choose a Deployment Strategy</option>
-                    {(base?.allowedStrategies || []).map((strategy) => (
-                      <option key={strategy.id} value={strategy.id}>
-                        {strategy.name}{strategy.status === 'deprecated' ? ' (Deprecated)' : ''}
                       </option>
                     ))}
                   </select>
@@ -840,10 +758,10 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                 </label>
               </div>
 
-              {selectedStrategy ? (
+              {environmentState.context?.policySummary?.resolvedRecipe ? (
                 <div className="new-explanation-stack">
-                  <NewExplanation title="Selected Deployment Strategy" tone="neutral">
-                    {selectedStrategy.summary}
+                  <NewExplanation title="Resolved delivery behavior" tone="neutral">
+                    {environmentState.context.policySummary.resolvedRecipe.effectiveBehaviorSummary || 'DXCP resolved a delivery behavior for this service and environment.'}
                   </NewExplanation>
                 </div>
               ) : null}
@@ -851,7 +769,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
               {(base?.unavailableEnvironments || []).length > 0 ? (
                 <div className="new-explanation-stack">
                   <NewExplanation title="Unavailable deploy targets" tone="warning">
-                    {`${base.unavailableEnvironments.map((environment) => environment.label).join(', ')} ${base.unavailableEnvironments.length === 1 ? 'is' : 'are'} currently not enabled for deploy on this route, so DXCP keeps them out of the deploy target list.`}
+                    {`${base.unavailableEnvironments.map((environment) => environment.label).join(', ')} ${base.unavailableEnvironments.length === 1 ? 'is' : 'are'} not available for new deploy targets on this route, so DXCP keeps ${base.unavailableEnvironments.length === 1 ? 'it' : 'them'} out of the environment picker.`}
                   </NewExplanation>
                 </div>
               ) : null}
@@ -917,17 +835,15 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
                   ? base.environments.map((environment) => environment.label).join(', ')
                   : 'No enabled environment is currently available.'}
               </dd>
-              <dt>Allowed Deployment Strategies</dt>
-              <dd>
-                {(base?.allowedStrategies || []).length > 0
-                  ? base.allowedStrategies.map((strategy) => strategy.name).join(', ')
-                  : 'No allowed Deployment Strategy is currently available.'}
-              </dd>
               <dt>Deployable versions</dt>
               <dd>
                 {base?.versions?.length > 0
                   ? `${base.versions.length} registered version${base.versions.length === 1 ? '' : 's'} available`
                   : 'No registered version is currently available.'}
+              </dd>
+              <dt>Resolved delivery behavior</dt>
+              <dd>
+                {environmentState.context?.policySummary?.resolvedRecipe?.name || 'DXCP resolves delivery behavior after an environment is selected.'}
               </dd>
             </dl>
 
@@ -958,7 +874,7 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
 
             <div className="new-explanation-stack">
               <NewExplanation title="What Deploy creates" tone="neutral">
-                Deploy creates a Deployment record for this Application, Environment, Version, and Deployment Strategy. The resulting Deployment record remains the authoritative place to follow progress.
+                Deploy creates a Deployment record for this Application, Environment, Version, and change summary. The resulting Deployment record also captures the resolved delivery behavior used for execution.
               </NewExplanation>
               <NewExplanation title="Current handoff posture" tone="neutral">
                 Supporting policy context remains available here, but it stays subordinate to the action-first deploy task and readiness review.

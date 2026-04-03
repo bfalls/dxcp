@@ -318,7 +318,13 @@ const buildFetchMock = ({
         name: environment.environment_id || `env-${idx}`,
         display_name: environment.display_name || environment.environment_id || `Environment ${idx + 1}`,
         type: environment.type || 'non_prod',
-        is_enabled: environment.is_enabled !== false
+        lifecycle_state: environment.lifecycle_state || (environment.is_enabled === false ? 'disabled' : 'active'),
+        is_enabled:
+          environment.lifecycle_state === 'active'
+            ? true
+            : environment.lifecycle_state
+              ? false
+              : environment.is_enabled !== false
       }))
     }
     return groups.map((group, idx) => ({
@@ -326,6 +332,7 @@ const buildFetchMock = ({
       name: idx === 0 ? 'sandbox' : `${group.id || `group-${idx}`}-env`,
       type: 'non_prod',
       delivery_group_id: group.id || 'default',
+      lifecycle_state: 'active',
       is_enabled: true
     }))
   }
@@ -335,7 +342,7 @@ const buildFetchMock = ({
   }
   let adminEnvList =
     adminEnvironments || [
-      { environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }
+      { environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', lifecycle_state: 'active', is_enabled: true }
     ]
   const dgBindingsByGroup = new Map()
   const routesByService = new Map()
@@ -516,7 +523,8 @@ const buildFetchMock = ({
         environment_id: environmentId,
         display_name: body.display_name || environmentId,
         type: body.type,
-        is_enabled: body.is_enabled === true
+        lifecycle_state: body.lifecycle_state || (body.is_enabled === false ? 'disabled' : 'active'),
+        is_enabled: body.lifecycle_state ? body.lifecycle_state === 'active' : body.is_enabled === true
       }
       adminEnvList = [...adminEnvList, created]
       return ok({
@@ -524,6 +532,7 @@ const buildFetchMock = ({
         name: created.environment_id,
         display_name: created.display_name,
         type: created.type,
+        lifecycle_state: created.lifecycle_state,
         is_enabled: created.is_enabled
       })
     }
@@ -536,7 +545,11 @@ const buildFetchMock = ({
               ...item,
               display_name: body.display_name ?? item.display_name,
               type: body.type ?? item.type,
-              is_enabled: body.is_enabled ?? item.is_enabled
+              lifecycle_state: body.lifecycle_state ?? item.lifecycle_state ?? (item.is_enabled === false ? 'disabled' : 'active'),
+              is_enabled:
+                body.lifecycle_state != null
+                  ? body.lifecycle_state === 'active'
+                  : body.is_enabled ?? item.is_enabled
             }
           : item
       )
@@ -546,6 +559,7 @@ const buildFetchMock = ({
         name: updated.environment_id,
         display_name: updated.display_name,
         type: updated.type,
+        lifecycle_state: updated.lifecycle_state,
         is_enabled: updated.is_enabled
       })
     }
@@ -560,6 +574,7 @@ const buildFetchMock = ({
         name: row.environment_id,
         display_name: row.display_name,
         type: row.type,
+        lifecycle_state: row.lifecycle_state || (row.is_enabled === false ? 'disabled' : 'active'),
         is_enabled: row.is_enabled
       })
     }
@@ -2166,11 +2181,11 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
-    await view.findByText('Delivery group governance is being refit for the new workspace')
+    await view.findByText('Delivery-group policy remains the independent guardrail')
     assert.equal(view.queryByText('Sandbox'), null)
     fireEvent.click(view.getByRole('tab', { name: /Environments/i }))
     await view.findByText('Sandbox')
-    assert.equal(view.queryByText('Delivery group governance is being refit for the new workspace'), null)
+    assert.equal(view.queryByText('Delivery-group policy remains the independent guardrail'), null)
     assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 
@@ -2190,7 +2205,7 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin?tab=recipes')
 
-    await view.findByText('Recipe administration is being staged into this workspace')
+    await view.findByText('Recipe framing')
     const recipesTab = view.getByRole('tab', { name: /Recipes/i })
     assert.equal(recipesTab.getAttribute('aria-selected'), 'true')
     assert.equal(view.queryByText('Sandbox'), null)
@@ -2214,7 +2229,8 @@ export async function runAllTests() {
     const view = renderApp('/new/admin?tab=environments')
 
     await view.findByRole('heading', { name: 'Environments' })
-    await view.findByText('Sandbox')
+    const sandboxMatches = await view.findAllByText('Sandbox')
+    assert.ok(sandboxMatches.length >= 1)
     assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 
@@ -3208,20 +3224,15 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'Environments' }))
+    fireEvent.click(await view.findByRole('button', { name: 'Create environment' }))
     await view.findByText('Environment ID')
     const envIdInput = await view.findByTestId('admin-environment-id-input')
     assert.equal(envIdInput.getAttribute('placeholder'), 'dev, staging, prod')
-    assert.ok(view.getByRole('button', { name: 'Environment ID details' }))
-    assert.ok(
-      view.getByText(
-        'Stable identifier used internally and in APIs. Lowercase letters, numbers, and hyphens only. Cannot be changed later.'
-      )
-    )
     fireEvent.input(envIdInput, { target: { value: 'staging' } })
     fireEvent.input(view.getByLabelText('Display name'), { target: { value: 'Staging' } })
     fireEvent.click(view.getByTestId('admin-environment-save'))
     await view.findByText('Environment created.')
-    await view.findByText('staging')
+    await view.findByText('Staging')
   })
 
   await runTest('Admin can bind environment to delivery group', async () => {

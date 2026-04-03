@@ -111,7 +111,7 @@ Policy enforcement must occur in this order:
 
 Example:
 
-If recipe is not allowed by delivery group,
+If the resolved recipe is not allowed by delivery group,
 return 403 RECIPE_NOT_ALLOWED,
 not 400 RECIPE_INCOMPATIBLE.
 

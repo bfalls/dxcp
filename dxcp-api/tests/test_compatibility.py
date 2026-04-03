@@ -159,6 +159,17 @@ async def test_deploy_rejects_recipe_not_allowed_by_delivery_group(tmp_path: Pat
                 "updated_by": "system",
             }
         )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-a",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-b",
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-compat-1", **auth_header(["dxcp-platform-admins"])},
@@ -193,6 +204,17 @@ async def test_deploy_rejects_recipe_incompatible_with_service(tmp_path: Path, m
                 "delivery_group_id": "group-b",
                 "is_enabled": True,
                 "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-a",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-b",
                 "created_at": main.utc_now(),
                 "created_by": "system",
                 "updated_at": main.utc_now(),
@@ -239,6 +261,17 @@ async def test_validate_rejects_recipe_not_allowed_by_delivery_group(tmp_path: P
                 "updated_by": "system",
             }
         )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-a",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-b",
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments/validate",
             headers=auth_header(["dxcp-platform-admins"]),
@@ -273,6 +306,17 @@ async def test_validate_rejects_recipe_incompatible_with_service(tmp_path: Path,
                 "delivery_group_id": "group-d",
                 "is_enabled": True,
                 "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-a",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-b",
                 "created_at": main.utc_now(),
                 "created_by": "system",
                 "updated_at": main.utc_now(),

@@ -56,25 +56,6 @@ function summarizeGuardrails(group) {
   return items
 }
 
-function normalizeStrategy(recipe) {
-  return {
-    id: recipe?.id || '',
-    name: recipe?.name || recipe?.id || 'Unnamed strategy',
-    summary: recipe?.effective_behavior_summary || recipe?.description || 'No behavior summary is available for this strategy.',
-    status: String(recipe?.status || 'active').toLowerCase(),
-    revision: recipe?.recipe_revision ?? null,
-    isDeployable: String(recipe?.status || 'active').toLowerCase() !== 'deprecated'
-  }
-}
-
-function buildAllowedStrategies(group, recipes) {
-  const allowedIds = Array.isArray(group?.allowed_recipes) ? group.allowed_recipes : []
-  return (Array.isArray(recipes) ? recipes : [])
-    .filter((recipe) => allowedIds.includes(recipe?.id))
-    .map(normalizeStrategy)
-    .sort((left, right) => left.name.localeCompare(right.name))
-}
-
 function findActiveDeployment(deployments) {
   return (
     (Array.isArray(deployments) ? deployments : []).find((deployment) =>
@@ -85,12 +66,11 @@ function findActiveDeployment(deployments) {
 
 export async function loadDeployBaseData(api, applicationName, options = {}) {
   const requestOptions = { ...options }
-  const [servicesResult, groupsResult, environmentsResult, recipesResult, settingsResult, actionsResult, versionsResult] =
+  const [servicesResult, groupsResult, environmentsResult, settingsResult, actionsResult, versionsResult] =
     await Promise.allSettled([
       api.get('/services', requestOptions),
       api.get('/delivery-groups', requestOptions),
       api.get('/environments', requestOptions),
-      api.get('/recipes', requestOptions),
       api.get('/settings/public', requestOptions),
       api.get(`/services/${encodeURIComponent(applicationName)}/allowed-actions`, requestOptions),
       api.get(`/services/${encodeURIComponent(applicationName)}/versions`, requestOptions)
@@ -136,14 +116,6 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
     degradedReasons.push('Environment context could not be refreshed.')
   }
 
-  const recipes =
-    recipesResult.status === 'fulfilled' && Array.isArray(recipesResult.value)
-      ? recipesResult.value
-      : []
-  if (recipesResult.status === 'rejected' || (recipesResult.status === 'fulfilled' && !Array.isArray(recipesResult.value))) {
-    degradedReasons.push('Deployment Strategy data could not be refreshed.')
-  }
-
   const versions =
     versionsResult.status === 'fulfilled' && Array.isArray(versionsResult.value?.versions)
       ? versionsResult.value.versions
@@ -176,12 +148,13 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
     name: environment?.name || environment?.environment_id || '',
     label: environment?.display_name || environment?.name || environment?.environment_id || '',
     type: environment?.type || '',
+    lifecycleState: String(environment?.lifecycle_state || (environment?.is_enabled === false ? 'disabled' : 'active')).toLowerCase(),
     isEnabled: environment?.is_enabled !== false
   }))
-  const enabledEnvironments = sortedEnvironments.filter((environment) => environment.isEnabled)
-  const defaultEnvironment = pickDefaultEnvironment(enabledEnvironments)
-  const allowedStrategies = buildAllowedStrategies(deliveryGroup, recipes)
-  const deployableStrategies = allowedStrategies.filter((strategy) => strategy.isDeployable)
+  const selectableEnvironments = sortedEnvironments.filter(
+    (environment) => environment.lifecycleState !== 'retired' && environment.isEnabled
+  )
+  const defaultEnvironment = pickDefaultEnvironment(selectableEnvironments)
   const normalizedVersions = versions
     .map((item) => (typeof item === 'string' ? { version: item } : item))
     .filter((item) => item?.version)
@@ -200,12 +173,11 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
           'Deploy intent stays anchored to the application record rather than a generic engine workflow.'
       },
       deliveryGroup,
-      environments: enabledEnvironments,
-      unavailableEnvironments: sortedEnvironments.filter((environment) => !environment.isEnabled),
+      environments: selectableEnvironments,
+      unavailableEnvironments: sortedEnvironments.filter(
+        (environment) => !environment.isEnabled || environment.lifecycleState === 'retired'
+      ),
       defaultEnvironmentName: defaultEnvironment?.name || defaultEnvironment?.environment_id || '',
-      allowedStrategies,
-      deployableStrategies,
-      defaultStrategyId: deployableStrategies.length === 1 ? deployableStrategies[0].id : '',
       versions: normalizedVersions,
       defaultVersion: normalizedVersions.length === 1 ? String(normalizedVersions[0]?.version || '') : '',
       allowedActions,
@@ -217,7 +189,7 @@ export async function loadDeployBaseData(api, applicationName, options = {}) {
   }
 }
 
-export async function loadDeployEnvironmentContext(api, applicationName, environmentName, strategyId, options = {}) {
+export async function loadDeployEnvironmentContext(api, applicationName, environmentName, options = {}) {
   if (!applicationName || !environmentName) {
     return {
       kind: 'ready',
@@ -243,8 +215,7 @@ export async function loadDeployEnvironmentContext(api, applicationName, environ
     ),
     api.post('/policy/summary', {
       service: applicationName,
-      environment: environmentName,
-      recipeId: strategyId || null
+      environment: environmentName
     })
   ])
 
@@ -286,7 +257,7 @@ export async function loadDeployEnvironmentContext(api, applicationName, environ
 }
 
 export async function validateDeployIntent(api, payload) {
-  if (!payload?.service || !payload?.environment || !payload?.recipeId || !payload?.version || !payload?.changeSummary) {
+  if (!payload?.service || !payload?.environment || !payload?.version || !payload?.changeSummary) {
     return { kind: 'incomplete', result: null, errorMessage: '', diagnostics: null }
   }
 

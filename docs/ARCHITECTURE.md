@@ -72,7 +72,7 @@ Spinnaker owns:
 ## Adapter boundary (DXCP to Spinnaker)
 
 Inputs from DXCP to adapter:
-- DeploymentIntent with a specific Recipe
+- DeploymentIntent plus the Recipe resolved by DXCP service + environment routing
 - Idempotency key and requested action (deploy or rollback)
 
 Outputs from adapter to DXCP:
@@ -101,11 +101,11 @@ Engine selection is not supported in v1 and would require a deliberate contract 
 
 DXCP API boundary:
 - Allowlisted service only
-- Single environment only
+- Governed multi-environment context with authoritative service + environment routing
 - One active deployment at a time
 - Rate limits and daily quotas
 - Idempotency keys for deploy and rollback
-- Validation of recipe and version inputs
+- Validation of resolved recipe and version inputs
 
 Spinnaker adapter boundary:
 - Only approved pipelines are callable

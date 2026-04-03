@@ -50,6 +50,9 @@ def utc_now() -> str:
 
 
 DEFAULT_ENGINE_TYPE = "SPINNAKER"
+ACTIVE_ENVIRONMENT_LIFECYCLE = "active"
+DISABLED_ENVIRONMENT_LIFECYCLE = "disabled"
+RETIRED_ENVIRONMENT_LIFECYCLE = "retired"
 TERMINAL_DEPLOYMENT_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"}
 TERMINAL_DEPLOYMENT_OUTCOMES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK", "SUPERSEDED"}
 PROTECTED_DEPLOYMENT_FIELDS = (
@@ -94,6 +97,27 @@ def _json_loads_safe(value: Optional[str]) -> Optional[dict]:
         return json.loads(value)
     except Exception:
         return None
+
+
+def _normalize_environment_lifecycle_state(
+    lifecycle_state: Optional[str],
+    is_enabled: Optional[bool],
+) -> str:
+    value = str(lifecycle_state or "").strip().lower()
+    if value in {
+        ACTIVE_ENVIRONMENT_LIFECYCLE,
+        DISABLED_ENVIRONMENT_LIFECYCLE,
+        RETIRED_ENVIRONMENT_LIFECYCLE,
+    }:
+        return value
+    return ACTIVE_ENVIRONMENT_LIFECYCLE if is_enabled is not False else DISABLED_ENVIRONMENT_LIFECYCLE
+
+
+def _environment_is_enabled_for_lifecycle(lifecycle_state: Optional[str], is_enabled: Optional[bool]) -> bool:
+    normalized = _normalize_environment_lifecycle_state(lifecycle_state, is_enabled)
+    if normalized == ACTIVE_ENVIRONMENT_LIFECYCLE:
+        return True
+    return False
 
 
 class Storage:
@@ -275,6 +299,7 @@ class Storage:
         )
         self._ensure_column(cur, "environments", "display_name", "TEXT")
         self._ensure_column(cur, "environments", "promotion_order", "INTEGER")
+        self._ensure_column(cur, "environments", "lifecycle_state", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS recipes (
@@ -332,6 +357,7 @@ class Storage:
                 display_name TEXT NOT NULL,
                 type TEXT NOT NULL,
                 is_enabled INTEGER NOT NULL,
+                lifecycle_state TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -837,14 +863,19 @@ class Storage:
         return None
 
     def _row_to_environment(self, row: sqlite3.Row) -> dict:
+        lifecycle_state = _normalize_environment_lifecycle_state(
+            row["lifecycle_state"] if "lifecycle_state" in row.keys() else None,
+            bool(row["is_enabled"]),
+        )
         return {
             "id": row["id"],
             "name": row["name"],
             "display_name": row["display_name"],
             "type": row["type"],
+            "lifecycle_state": lifecycle_state,
             "promotion_order": row["promotion_order"],
             "delivery_group_id": row["delivery_group_id"],
-            "is_enabled": bool(row["is_enabled"]),
+            "is_enabled": _environment_is_enabled_for_lifecycle(lifecycle_state, bool(row["is_enabled"])),
             "guardrails": self._deserialize_json(row["guardrails"], None),
             "created_at": row["created_at"],
             "created_by": row["created_by"],
@@ -951,6 +982,9 @@ class Storage:
                 "environment_id": environment_id,
                 "display_name": environment.get("display_name") or existing.get("display_name") or environment_id,
                 "type": environment.get("type") or existing["type"],
+                "lifecycle_state": environment.get("lifecycle_state")
+                or existing.get("lifecycle_state")
+                or _normalize_environment_lifecycle_state(None, existing.get("is_enabled", True)),
                 "is_enabled": environment.get("is_enabled", existing.get("is_enabled", True)),
                 "created_at": environment.get("created_at") or existing.get("created_at"),
                 "updated_at": environment.get("updated_at") or utc_now(),
@@ -1110,12 +1144,37 @@ class Storage:
                 created = recipe
         return created
 
+    def ensure_default_service_environment_routing(self) -> List[dict]:
+        created = []
+        for service in self.list_services():
+            service_id = service.get("service_name")
+            if not service_id:
+                continue
+            for group in self.list_delivery_groups():
+                if service_id not in (group.get("services") or []):
+                    continue
+                for env in self.list_delivery_group_environment_policy(group.get("id")):
+                    environment_id = env.get("environment_id")
+                    if not environment_id:
+                        continue
+                    if self.get_service_environment_routing(service_id, environment_id):
+                        continue
+                    row = {
+                        "service_id": service_id,
+                        "environment_id": environment_id,
+                        "recipe_id": "default",
+                    }
+                    self.upsert_service_environment_routing(row)
+                    created.append(row)
+        return created
+
     def list_admin_environments(self) -> List[dict]:
         return [
             {
                 "environment_id": row["id"],
                 "display_name": row["display_name"],
                 "type": row["type"],
+                "lifecycle_state": row.get("lifecycle_state") or _normalize_environment_lifecycle_state(None, row["is_enabled"]),
                 "is_enabled": row["is_enabled"],
                 "created_at": row.get("created_at"),
                 "updated_at": row.get("updated_at"),
@@ -1131,6 +1190,7 @@ class Storage:
             "environment_id": row["id"],
             "display_name": row["display_name"],
             "type": row["type"],
+            "lifecycle_state": row.get("lifecycle_state") or _normalize_environment_lifecycle_state(None, row["is_enabled"]),
             "is_enabled": row["is_enabled"],
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
@@ -1142,18 +1202,25 @@ class Storage:
         cur.execute(
             """
             INSERT INTO environments (
-                id, name, display_name, type, promotion_order, delivery_group_id, is_enabled, guardrails,
+                id, name, display_name, type, lifecycle_state, promotion_order, delivery_group_id, is_enabled, guardrails,
                 created_at, created_by, updated_at, updated_by, last_change_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 environment["environment_id"],
                 environment["environment_id"],
                 environment["display_name"],
                 environment["type"],
+                environment.get("lifecycle_state") or _normalize_environment_lifecycle_state(
+                    None,
+                    environment.get("is_enabled", True),
+                ),
                 None,
                 "",
-                1 if environment.get("is_enabled", True) else 0,
+                1 if _environment_is_enabled_for_lifecycle(
+                    environment.get("lifecycle_state"),
+                    environment.get("is_enabled", True),
+                ) else 0,
                 None,
                 environment["created_at"],
                 None,
@@ -1172,14 +1239,21 @@ class Storage:
         cur.execute(
             """
             UPDATE environments
-            SET name = ?, display_name = ?, type = ?, is_enabled = ?, updated_at = ?
+            SET name = ?, display_name = ?, type = ?, lifecycle_state = ?, is_enabled = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 environment["environment_id"],
                 environment["display_name"],
                 environment["type"],
-                1 if environment.get("is_enabled", True) else 0,
+                environment.get("lifecycle_state") or _normalize_environment_lifecycle_state(
+                    None,
+                    environment.get("is_enabled", True),
+                ),
+                1 if _environment_is_enabled_for_lifecycle(
+                    environment.get("lifecycle_state"),
+                    environment.get("is_enabled", True),
+                ) else 0,
                 environment["updated_at"],
                 environment["environment_id"],
             ),
@@ -1212,6 +1286,10 @@ class Storage:
                 "order_index": row["order_index"],
                 "display_name": row["display_name"],
                 "type": row["type"],
+                "lifecycle_state": _normalize_environment_lifecycle_state(
+                    row["lifecycle_state"] if "lifecycle_state" in row.keys() else None,
+                    bool(row["is_enabled"]),
+                ),
             }
             for row in rows
         ]
@@ -1245,7 +1323,7 @@ class Storage:
         cur.execute(
             """
             SELECT r.service_id, r.environment_id, r.recipe_id,
-                   e.display_name, e.type
+                   e.display_name, e.type, e.lifecycle_state, e.is_enabled
             FROM service_environment_routing r
             LEFT JOIN environments e ON e.id = r.environment_id
             WHERE r.service_id = ?
@@ -1262,9 +1340,42 @@ class Storage:
                 "recipe_id": row["recipe_id"],
                 "display_name": row["display_name"],
                 "type": row["type"],
+                "lifecycle_state": _normalize_environment_lifecycle_state(
+                    row["lifecycle_state"] if "lifecycle_state" in row.keys() else None,
+                    bool(row["is_enabled"]) if row["is_enabled"] is not None else None,
+                ),
             }
             for row in rows
         ]
+
+    def get_service_environment_routing(self, service_id: str, environment_id: str) -> Optional[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT r.service_id, r.environment_id, r.recipe_id,
+                   e.display_name, e.type, e.lifecycle_state, e.is_enabled
+            FROM service_environment_routing r
+            LEFT JOIN environments e ON e.id = r.environment_id
+            WHERE r.service_id = ? AND r.environment_id = ?
+            """,
+            (service_id, environment_id),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "service_id": row["service_id"],
+            "environment_id": row["environment_id"],
+            "recipe_id": row["recipe_id"],
+            "display_name": row["display_name"],
+            "type": row["type"],
+            "lifecycle_state": _normalize_environment_lifecycle_state(
+                row["lifecycle_state"] if "lifecycle_state" in row.keys() else None,
+                bool(row["is_enabled"]) if row["is_enabled"] is not None else None,
+            ),
+        }
 
     def upsert_service_environment_routing(self, row: dict) -> dict:
         conn = self._connect()
@@ -1286,6 +1397,103 @@ class Storage:
         conn.commit()
         conn.close()
         return row
+
+    def list_service_environment_routing_for_environment(self, environment_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT service_id, environment_id, recipe_id
+            FROM service_environment_routing
+            WHERE environment_id = ?
+            ORDER BY service_id ASC
+            """,
+            (environment_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "service_id": row["service_id"],
+                "environment_id": row["environment_id"],
+                "recipe_id": row["recipe_id"],
+            }
+            for row in rows
+        ]
+
+    def list_delivery_group_environment_policy_for_environment(self, environment_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT delivery_group_id, environment_id, is_enabled, order_index
+            FROM delivery_group_environment_policy
+            WHERE environment_id = ?
+            ORDER BY delivery_group_id ASC
+            """,
+            (environment_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "delivery_group_id": row["delivery_group_id"],
+                "environment_id": row["environment_id"],
+                "is_enabled": bool(row["is_enabled"]),
+                "order_index": row["order_index"],
+            }
+            for row in rows
+        ]
+
+    def list_delivery_groups_by_allowed_environment(self, environment_id: str) -> List[dict]:
+        matches = []
+        for group in self.list_delivery_groups():
+            allowed = group.get("allowed_environments")
+            if isinstance(allowed, list) and environment_id in allowed:
+                matches.append(
+                    {
+                        "delivery_group_id": group.get("id"),
+                        "environment_id": environment_id,
+                    }
+                )
+        matches.sort(key=lambda row: str(row.get("delivery_group_id") or ""))
+        return matches
+
+    def list_deployments_for_environment(self, environment_id: str) -> List[dict]:
+        conn = self._connect()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, service, environment, rollback_of
+            FROM deployments
+            WHERE environment = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (environment_id,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "id": row["id"],
+                "service": row["service"],
+                "environment": row["environment"],
+                "rollback_of": row["rollback_of"],
+            }
+            for row in rows
+        ]
+
+    def environment_reference_summary(self, environment_id: str) -> dict:
+        deployments = self.list_deployments_for_environment(environment_id)
+        routing = self.list_service_environment_routing_for_environment(environment_id)
+        delivery_group_policy = self.list_delivery_group_environment_policy_for_environment(environment_id)
+        delivery_group_allowed = self.list_delivery_groups_by_allowed_environment(environment_id)
+        return {
+            "deployments": deployments,
+            "service_environment_routing": routing,
+            "delivery_group_environment_policy": delivery_group_policy,
+            "delivery_group_allowed_environments": delivery_group_allowed,
+        }
 
     def delete_environment(self, environment_id: str) -> bool:
         conn = self._connect()
@@ -1889,14 +2097,22 @@ class DynamoStorage:
         return response.get("Items", [])
 
     def _environment_from_item(self, item: dict) -> dict:
+        lifecycle_state = _normalize_environment_lifecycle_state(
+            item.get("lifecycle_state"),
+            bool(item.get("is_enabled", True)),
+        )
         return {
             "id": item.get("id") or item.get("sk"),
             "name": item.get("name") or item.get("sk"),
             "display_name": item.get("display_name"),
             "type": item.get("type"),
+            "lifecycle_state": lifecycle_state,
             "promotion_order": item.get("promotion_order"),
             "delivery_group_id": item.get("delivery_group_id"),
-            "is_enabled": bool(item.get("is_enabled", True)),
+            "is_enabled": _environment_is_enabled_for_lifecycle(
+                lifecycle_state,
+                bool(item.get("is_enabled", True)),
+            ),
             "guardrails": item.get("guardrails"),
             "created_at": item.get("created_at"),
             "created_by": item.get("created_by"),
@@ -1952,6 +2168,8 @@ class DynamoStorage:
                 "environment_id": environment_id,
                 "display_name": environment.get("display_name") or environment_id,
                 "type": environment["type"],
+                "lifecycle_state": environment.get("lifecycle_state")
+                or _normalize_environment_lifecycle_state(None, environment.get("is_enabled", True)),
                 "is_enabled": environment.get("is_enabled", True),
                 "created_at": now,
                 "updated_at": environment.get("updated_at") or now,
@@ -1975,6 +2193,8 @@ class DynamoStorage:
             "name": environment_id,
             "display_name": environment.get("display_name") or environment_id,
             "type": environment["type"],
+            "lifecycle_state": environment.get("lifecycle_state")
+            or _normalize_environment_lifecycle_state(None, environment.get("is_enabled", True)),
             "promotion_order": environment.get("promotion_order"),
             "is_enabled": environment.get("is_enabled", True),
             "guardrails": None,
@@ -1994,6 +2214,9 @@ class DynamoStorage:
                 "environment_id": environment_id,
                 "display_name": environment.get("display_name") or existing.get("display_name") or environment_id,
                 "type": environment.get("type") or existing["type"],
+                "lifecycle_state": environment.get("lifecycle_state")
+                or existing.get("lifecycle_state")
+                or _normalize_environment_lifecycle_state(None, existing.get("is_enabled", True)),
                 "is_enabled": environment.get("is_enabled", existing.get("is_enabled", True)),
                 "created_at": environment.get("created_at") or existing.get("created_at"),
                 "updated_at": environment.get("updated_at") or utc_now(),
@@ -2033,6 +2256,7 @@ class DynamoStorage:
                 "environment_id": row["id"],
                 "display_name": row["display_name"],
                 "type": row["type"],
+                "lifecycle_state": row.get("lifecycle_state") or _normalize_environment_lifecycle_state(None, row["is_enabled"]),
                 "is_enabled": row["is_enabled"],
                 "created_at": row.get("created_at"),
                 "updated_at": row.get("updated_at"),
@@ -2048,6 +2272,8 @@ class DynamoStorage:
             "environment_id": item.get("id"),
             "display_name": item.get("display_name"),
             "type": item.get("type"),
+            "lifecycle_state": item.get("lifecycle_state")
+            or _normalize_environment_lifecycle_state(None, item.get("is_enabled", True)),
             "is_enabled": bool(item.get("is_enabled", True)),
             "created_at": item.get("created_at"),
             "updated_at": item.get("updated_at"),
@@ -2061,7 +2287,12 @@ class DynamoStorage:
             "name": environment["environment_id"],
             "display_name": environment["display_name"],
             "type": environment["type"],
-            "is_enabled": environment.get("is_enabled", True),
+            "lifecycle_state": environment.get("lifecycle_state")
+            or _normalize_environment_lifecycle_state(None, environment.get("is_enabled", True)),
+            "is_enabled": _environment_is_enabled_for_lifecycle(
+                environment.get("lifecycle_state"),
+                environment.get("is_enabled", True),
+            ),
             "created_at": environment["created_at"],
             "updated_at": environment["updated_at"],
         }
@@ -2073,6 +2304,13 @@ class DynamoStorage:
 
     def update_admin_environment(self, environment: dict) -> dict:
         existing = self._get_environment_item(environment["environment_id"]) or {}
+        requested_is_enabled = environment.get("is_enabled")
+        if requested_is_enabled is None:
+            requested_is_enabled = existing.get("is_enabled", True)
+        lifecycle_state = _normalize_environment_lifecycle_state(
+            environment.get("lifecycle_state"),
+            requested_is_enabled,
+        )
         item = {
             **existing,
             "pk": "ENVIRONMENT",
@@ -2081,7 +2319,11 @@ class DynamoStorage:
             "name": existing.get("name") or environment["environment_id"],
             "display_name": environment["display_name"],
             "type": environment["type"],
-            "is_enabled": environment.get("is_enabled", True),
+            "lifecycle_state": lifecycle_state,
+            "is_enabled": _environment_is_enabled_for_lifecycle(
+                lifecycle_state,
+                requested_is_enabled,
+            ),
             "created_at": environment.get("created_at") or existing.get("created_at"),
             "updated_at": environment["updated_at"],
         }
@@ -2105,6 +2347,7 @@ class DynamoStorage:
                     "order_index": int(item.get("order_index", 0)),
                     "display_name": env.get("display_name") if env else None,
                     "type": env.get("type") if env else None,
+                    "lifecycle_state": env.get("lifecycle_state") if env else None,
                 }
             )
         rows.sort(key=lambda row: (row.get("order_index", 0), row.get("environment_id", "")))
@@ -2138,10 +2381,26 @@ class DynamoStorage:
                     "recipe_id": item.get("recipe_id"),
                     "display_name": env.get("display_name") if env else None,
                     "type": env.get("type") if env else None,
+                    "lifecycle_state": env.get("lifecycle_state") if env else None,
                 }
             )
         rows.sort(key=lambda row: row.get("environment_id", ""))
         return rows
+
+    def get_service_environment_routing(self, service_id: str, environment_id: str) -> Optional[dict]:
+        response = self.table.get_item(Key={"pk": "SERVICE_ENV_ROUTING", "sk": f"{service_id}#{environment_id}"})
+        item = response.get("Item")
+        if not item:
+            return None
+        env = self.get_admin_environment(environment_id)
+        return {
+            "service_id": item.get("service_id"),
+            "environment_id": item.get("environment_id"),
+            "recipe_id": item.get("recipe_id"),
+            "display_name": env.get("display_name") if env else None,
+            "type": env.get("type") if env else None,
+            "lifecycle_state": env.get("lifecycle_state") if env else None,
+        }
 
     def upsert_service_environment_routing(self, row: dict) -> dict:
         item = {
@@ -2153,6 +2412,78 @@ class DynamoStorage:
         }
         self.table.put_item(Item=item)
         return row
+
+    def list_service_environment_routing_for_environment(self, environment_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("SERVICE_ENV_ROUTING") & Attr("environment_id").eq(environment_id)
+        )
+        items = response.get("Items", [])
+        rows = [
+            {
+                "service_id": item.get("service_id"),
+                "environment_id": item.get("environment_id"),
+                "recipe_id": item.get("recipe_id"),
+            }
+            for item in items
+        ]
+        rows.sort(key=lambda row: str(row.get("service_id") or ""))
+        return rows
+
+    def list_delivery_group_environment_policy_for_environment(self, environment_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("DG_ENV_POLICY") & Attr("environment_id").eq(environment_id)
+        )
+        items = response.get("Items", [])
+        rows = [
+            {
+                "delivery_group_id": item.get("delivery_group_id"),
+                "environment_id": item.get("environment_id"),
+                "is_enabled": bool(item.get("is_enabled", True)),
+                "order_index": int(item.get("order_index", 0)),
+            }
+            for item in items
+        ]
+        rows.sort(key=lambda row: str(row.get("delivery_group_id") or ""))
+        return rows
+
+    def list_delivery_groups_by_allowed_environment(self, environment_id: str) -> List[dict]:
+        matches = []
+        for group in self.list_delivery_groups():
+            allowed = group.get("allowed_environments")
+            if isinstance(allowed, list) and environment_id in allowed:
+                matches.append(
+                    {
+                        "delivery_group_id": group.get("id"),
+                        "environment_id": environment_id,
+                    }
+                )
+        matches.sort(key=lambda row: str(row.get("delivery_group_id") or ""))
+        return matches
+
+    def list_deployments_for_environment(self, environment_id: str) -> List[dict]:
+        response = self.table.scan(
+            FilterExpression=Attr("pk").eq("DEPLOYMENT") & Attr("environment").eq(environment_id)
+        )
+        items = response.get("Items", [])
+        rows = [
+            {
+                "id": item.get("id"),
+                "service": item.get("service"),
+                "environment": item.get("environment"),
+                "rollback_of": item.get("rollbackOf"),
+            }
+            for item in items
+        ]
+        rows.sort(key=lambda row: str(row.get("id") or ""), reverse=True)
+        return rows
+
+    def environment_reference_summary(self, environment_id: str) -> dict:
+        return {
+            "deployments": self.list_deployments_for_environment(environment_id),
+            "service_environment_routing": self.list_service_environment_routing_for_environment(environment_id),
+            "delivery_group_environment_policy": self.list_delivery_group_environment_policy_for_environment(environment_id),
+            "delivery_group_allowed_environments": self.list_delivery_groups_by_allowed_environment(environment_id),
+        }
 
     def delete_environment(self, environment_id: str) -> bool:
         deleted = self.get_environment(environment_id) is not None
@@ -2599,6 +2930,30 @@ class DynamoStorage:
             self.insert_recipe(recipe)
             if created is None:
                 created = recipe
+        return created
+
+    def ensure_default_service_environment_routing(self) -> List[dict]:
+        created = []
+        for service in self.list_services():
+            service_id = service.get("service_name")
+            if not service_id:
+                continue
+            for group in self.list_delivery_groups():
+                if service_id not in (group.get("services") or []):
+                    continue
+                for env in self.list_delivery_group_environment_policy(group.get("id")):
+                    environment_id = env.get("environment_id")
+                    if not environment_id:
+                        continue
+                    if self.get_service_environment_routing(service_id, environment_id):
+                        continue
+                    row = {
+                        "service_id": service_id,
+                        "environment_id": environment_id,
+                        "recipe_id": "default",
+                    }
+                    self.upsert_service_environment_routing(row)
+                    created.append(row)
         return created
 
     def has_active_deployment(self) -> bool:

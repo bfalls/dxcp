@@ -25,13 +25,15 @@ function sortEnvironments(environments) {
 function buildEnvironmentOptions(environments) {
   return sortEnvironments(environments)
     .filter((environment) => environment?.name)
+    .filter((environment) => String(environment?.lifecycle_state || 'active').toLowerCase() !== 'retired')
     .filter((environment) => environment?.is_enabled !== false)
     .map((environment) => ({
       name: environment.name,
       label: environment.display_name || environment.name,
       display_name: environment.display_name || environment.name,
       promotion_order: environment.promotion_order,
-      type: environment.type
+      type: environment.type,
+      lifecycle_state: environment.lifecycle_state || 'active'
     }))
 }
 

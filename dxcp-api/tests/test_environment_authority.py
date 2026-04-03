@@ -67,6 +67,20 @@ def _insert_group_environment(main, group_id: str, name: str, enabled: bool = Tr
     )
 
 
+def _upsert_route(main, service_id: str, environment_id: str, recipe_id: str) -> None:
+    main.storage.upsert_service_environment_routing(
+        {
+            "service_id": service_id,
+            "environment_id": environment_id,
+            "recipe_id": recipe_id,
+            "created_at": main.utc_now(),
+            "created_by": "system",
+            "updated_at": main.utc_now(),
+            "updated_by": "system",
+        }
+    )
+
+
 @asynccontextmanager
 async def _client_and_state(tmp_path: Path, monkeypatch):
     main = _load_main(tmp_path)
@@ -119,6 +133,8 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
     )
     _insert_group_environment(main, "group-a", "sandbox", enabled=True)
     _insert_group_environment(main, "group-a", "staging", enabled=True)
+    _upsert_route(main, "payments", "sandbox", "recipe-a")
+    _upsert_route(main, "payments", "staging", "recipe-a")
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),

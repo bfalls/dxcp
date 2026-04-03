@@ -56,12 +56,18 @@ class EnvironmentType(str, Enum):
     PROD = "prod"
 
 
+class EnvironmentLifecycleState(str, Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+    RETIRED = "retired"
+
+
 class DeploymentIntent(BaseModel):
     service: str
     environment: str
     version: str
     changeSummary: str = Field(..., max_length=240)
-    recipeId: str
+    recipeId: Optional[str] = None
 
 
 class PromotionIntent(BaseModel):
@@ -157,6 +163,7 @@ class Environment(BaseModel):
     name: str
     display_name: Optional[str] = None
     type: EnvironmentType
+    lifecycle_state: EnvironmentLifecycleState = EnvironmentLifecycleState.ACTIVE
     promotion_order: Optional[int] = None
     delivery_group_id: Optional[str] = None
     is_enabled: bool

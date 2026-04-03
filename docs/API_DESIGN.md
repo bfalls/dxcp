@@ -105,10 +105,12 @@ Fields:
 - environment (string, canonical environment name)
 - version (string, validated format)
 - changeSummary (string, required, max 240 chars)
-- recipeId (string, required)
+- recipeId (string, optional)
 
 Notes:
-- Engine application and pipeline identifiers are mapped from the Recipe and not user-provided.
+- In the common deploy path, DXCP resolves the execution pattern from authoritative service + environment routing.
+- Engine application and pipeline identifiers are resolved from the routed Recipe and are not user-provided.
+- recipeId remains available only for explicit override flows when policy allows it.
 - Deploy rejects versions that are not registered for the service.
 
 ### DeploymentRecord
@@ -248,6 +250,8 @@ Fields:
 Notes:
 - Engine mapping fields (spinnaker_application, deploy_pipeline, rollback_pipeline)
   are admin-only diagnostics. Standard users never see engine identifiers.
+- Recipes are adapter-backed execution patterns owned by DXCP.
+- Spinnaker is the only execution engine in v1, but the public contract does not require operators to reason in Spinnaker-native terms.
 
 Notes:
 - Update requests may include change_reason (optional). The API stores the most recent value as last_change_reason.

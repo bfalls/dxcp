@@ -265,7 +265,7 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
                   <dd>{viewModel.version}</dd>
                   {viewModel.strategyName ? (
                     <>
-                      <dt>Deployment Strategy</dt>
+                      <dt>Resolved behavior</dt>
                       <dd>{viewModel.strategyName}</dd>
                     </>
                   ) : null}
@@ -421,12 +421,12 @@ export default function NewExperienceDeploymentDetailPage({ role = 'UNKNOWN', ap
 
           {viewModel?.strategyName || viewModel?.strategySummary ? (
             <SectionCard className="new-deployment-detail-card">
-              <h3>Deployment Strategy snapshot</h3>
-              <p className="helper">Strategy context is shown only when DXCP returned stable deployment-strategy information for this record.</p>
+              <h3>Resolved delivery behavior</h3>
+              <p className="helper">Behavior context is shown only when DXCP returned stable routed-behavior information for this record.</p>
               <dl className="new-application-support-grid">
                 {viewModel.strategyName ? (
                   <>
-                    <dt>Deployment Strategy</dt>
+                    <dt>Behavior source</dt>
                     <dd>{viewModel.strategyName}</dd>
                   </>
                 ) : null}

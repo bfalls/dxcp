@@ -157,17 +157,16 @@ User goal:
 
 Key data:
 - Application or service (allowlisted).
-- Recipe (required).
 - Environment (current selected environment context).
 - Version (auto-discovered or custom).
 - Change summary (required).
 
 Primary actions:
 - Deploy now.
-- Refresh services, recipes, and versions.
+- Refresh services and versions.
 
 Form behavior:
-- Recipe list is filtered by the selected service's DeliveryGroup allowlist.
+- DXCP resolves the execution pattern from the selected service and environment context.
 - Change summary is required before deploy is enabled.
 - Environment should be expressed as explicit page or route context, not hidden row metadata.
 
@@ -175,7 +174,7 @@ Policy side panel:
 - DeliveryGroup name and owner.
 - Guardrails (max concurrent deployments, daily deploy and rollback quotas).
 - Quota remaining for today (derived from deployment activity).
-- Selected recipe description.
+- Resolved execution pattern summary when available.
 
 Blocked-action UX:
 - Show normalized deploy-block reasons in the page context rail or near the affected action.

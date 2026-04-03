@@ -442,3 +442,183 @@ export function buildAdminViewModel(state, selectedGroupId, mode, draft, review,
 export function createAdminDraft(group) {
   return buildDraft(group)
 }
+
+function normalizeEnvironmentRow(environment) {
+  const lifecycleState = String(
+    environment?.lifecycle_state || (environment?.is_enabled === false ? 'disabled' : 'active')
+  ).toLowerCase()
+  return {
+    id: environment?.id || environment?.environment_id || environment?.name || '',
+    displayName: environment?.display_name || environment?.displayName || environment?.name || '',
+    type: environment?.type === 'prod' ? 'prod' : 'non_prod',
+    lifecycleState,
+    isEnabled: environment?.is_enabled !== false,
+    createdAt: environment?.created_at || '',
+    updatedAt: environment?.updated_at || ''
+  }
+}
+
+function normalizeRouteRow(route) {
+  return {
+    serviceId: route?.service_id || '',
+    environmentId: route?.environment_id || '',
+    displayName: route?.display_name || route?.environment_id || '',
+    type: route?.type === 'prod' ? 'prod' : 'non_prod',
+    lifecycleState: String(route?.lifecycle_state || 'active').toLowerCase(),
+    isEnabled: route?.is_enabled !== false,
+    recipeId: route?.recipe_id || ''
+  }
+}
+
+export async function loadAdminEnvironmentWorkspace(api, options = {}) {
+  const requestOptions = { ...options }
+  const [environmentsResult, servicesResult, recipesResult, groupsResult] = await Promise.allSettled([
+    api.get('/environments', requestOptions),
+    api.get('/services', requestOptions),
+    api.get('/recipes', requestOptions),
+    api.get('/delivery-groups', requestOptions)
+  ])
+
+  if (environmentsResult.status === 'rejected' || !Array.isArray(environmentsResult.value)) {
+    return {
+      kind: 'failure',
+      errorMessage: formatApiError(
+        environmentsResult.value,
+        'DXCP could not load environment administration data right now. Refresh to try again.'
+      ),
+      viewModel: null
+    }
+  }
+
+  const degradedReasons = []
+  const environments = environmentsResult.value
+    .map(normalizeEnvironmentRow)
+    .filter((environment) => environment.id)
+    .sort((left, right) => left.id.localeCompare(right.id))
+
+  const services =
+    servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value)
+      ? servicesResult.value
+          .map((service) => service?.service_name || service?.name || '')
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
+      : []
+  if (servicesResult.status === 'rejected' || (servicesResult.status === 'fulfilled' && !Array.isArray(servicesResult.value))) {
+    degradedReasons.push('Service routing context could not be refreshed.')
+  }
+
+  const recipes =
+    recipesResult.status === 'fulfilled' && Array.isArray(recipesResult.value)
+      ? recipesResult.value.map(normalizeRecipe).filter((recipe) => recipe.id)
+      : []
+  if (recipesResult.status === 'rejected' || (recipesResult.status === 'fulfilled' && !Array.isArray(recipesResult.value))) {
+    degradedReasons.push('Recipe context could not be refreshed.')
+  }
+
+  const deliveryGroups =
+    groupsResult.status === 'fulfilled' && Array.isArray(groupsResult.value)
+      ? groupsResult.value
+      : []
+  if (groupsResult.status === 'rejected' || (groupsResult.status === 'fulfilled' && !Array.isArray(groupsResult.value))) {
+    degradedReasons.push('Delivery-group policy context could not be refreshed.')
+  }
+
+  return {
+    kind: degradedReasons.length > 0 ? 'degraded' : 'ready',
+    errorMessage: '',
+    viewModel: {
+      environments,
+      services,
+      recipes,
+      deliveryGroups,
+      degradedReasons
+    }
+  }
+}
+
+export async function createAdminEnvironment(api, payload) {
+  try {
+    const result = await api.post('/environments', payload)
+    if (result?.code) {
+      return { ok: false, errorMessage: formatApiError(result, 'DXCP could not create this environment.') }
+    }
+    return { ok: true, environment: result }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not create this environment right now. Refresh to try again.' }
+  }
+}
+
+export async function updateAdminEnvironment(api, environmentId, payload) {
+  try {
+    const result = await api.patch(`/environments/${encodeURIComponent(environmentId)}`, payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not update this environment.'),
+        details: result?.details || null
+      }
+    }
+    return { ok: true, environment: result }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not update this environment right now. Refresh to try again.' }
+  }
+}
+
+export async function deleteAdminEnvironment(api, environmentId) {
+  try {
+    const result = await api.delete(`/environments/${encodeURIComponent(environmentId)}`)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not delete this environment.'),
+        details: result?.details || null,
+        code: result?.code || ''
+      }
+    }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not delete this environment right now. Refresh to try again.' }
+  }
+}
+
+export async function loadAdminServiceEnvironmentRouting(api, serviceId, options = {}) {
+  if (!serviceId) {
+    return { kind: 'empty', rows: [], errorMessage: '' }
+  }
+  try {
+    const result = await api.get(`/admin/services/${encodeURIComponent(serviceId)}/environments`, options)
+    if (!Array.isArray(result)) {
+      return {
+        kind: 'failure',
+        rows: [],
+        errorMessage: formatApiError(result, 'DXCP could not load service-environment routing.')
+      }
+    }
+    return {
+      kind: result.length > 0 ? 'ready' : 'empty',
+      rows: result.map(normalizeRouteRow),
+      errorMessage: ''
+    }
+  } catch (error) {
+    return { kind: 'failure', rows: [], errorMessage: 'DXCP could not load service-environment routing right now.' }
+  }
+}
+
+export async function saveAdminServiceEnvironmentRouting(api, serviceId, environmentId, recipeId) {
+  try {
+    const result = await api.put(
+      `/admin/services/${encodeURIComponent(serviceId)}/environments/${encodeURIComponent(environmentId)}`,
+      { recipe_id: recipeId }
+    )
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not save service-environment routing.'),
+        details: result?.details || null
+      }
+    }
+    return { ok: true, route: result }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not save service-environment routing right now.' }
+  }
+}

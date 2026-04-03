@@ -123,6 +123,20 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
             "updated_by": "system",
         }
     )
+    main.storage.upsert_service_environment_routing(
+        {
+            "service_id": "payments",
+            "environment_id": "sandbox",
+            "recipe_id": "standard",
+        }
+    )
+    main.storage.upsert_service_environment_routing(
+        {
+            "service_id": "billing",
+            "environment_id": "sandbox",
+            "recipe_id": "standard",
+        }
+    )
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app),
@@ -134,16 +148,18 @@ async def _client_and_state(tmp_path: Path, monkeypatch):
 def _deploy_payload(
     service: str = "payments",
     version: str = "1.2.3",
-    recipe_id: str = "standard",
+    recipe_id: str | None = "standard",
     change_summary: str = "deploy payments",
 ) -> dict:
-    return {
+    payload = {
         "service": service,
         "environment": "sandbox",
         "version": version,
         "changeSummary": change_summary,
-        "recipeId": recipe_id,
     }
+    if recipe_id is not None:
+        payload["recipeId"] = recipe_id
+    return payload
 
 
 def _assert_error_schema(payload: dict) -> None:
@@ -286,18 +302,29 @@ async def test_validate_engine_unavailable_returns_discriminator_and_sanitized_d
     assert "/" not in diagnostics.get("engine_host", "")
 
 
-async def test_validate_missing_recipe_id_returns_error_schema(tmp_path: Path, monkeypatch):
-    payload = _deploy_payload()
-    payload.pop("recipeId")
+async def test_validate_uses_routed_recipe_when_recipe_id_is_omitted(tmp_path: Path, monkeypatch):
+    payload = _deploy_payload(recipe_id=None)
     async with _client_and_state(tmp_path, monkeypatch) as (client, _):
         response = await client.post(
             "/v1/deployments/validate",
             headers=auth_header(["dxcp-platform-admins"]),
             json=payload,
         )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recipeId"] == "standard"
+
+
+async def test_validate_rejects_mismatched_transitional_recipe_id(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, _):
+        response = await client.post(
+            "/v1/deployments/validate",
+            headers=auth_header(["dxcp-platform-admins"]),
+            json=_deploy_payload(recipe_id="beta"),
+        )
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "RECIPE_ID_REQUIRED"
+    assert body["code"] == "RECIPE_ID_MISMATCH"
     assert body["failure_cause"] == "USER_ERROR"
     _assert_error_schema(body)
 

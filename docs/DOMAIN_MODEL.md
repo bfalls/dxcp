@@ -17,12 +17,14 @@ Fields (required unless noted):
 - version: registered build version
 - environment: canonical environment name (for example sandbox, staging, prod)
 - changeSummary: required change summary
-- recipeId: selects a Recipe by id
+- recipeId (optional): explicit execution-pattern override for advanced or admin-driven flows when allowed by policy
 
 Notes:
 - Intent is validated by guardrails before any engine call.
 - Intent does not include engine-specific fields.
 - Version must already be registered for the service.
+- In the common deploy path, operators provide service + environment and DXCP resolves the execution pattern through authoritative service-environment routing.
+- If provided, recipeId is validated as an override against the resolved routing and policy model rather than treated as a required baseline input.
 
 ## DeploymentRecord
 
@@ -108,7 +110,8 @@ Dedupe:
 - No dedupe beyond idempotency behavior; each unique intent produces one record.
 
 Correlation:
-- A DeploymentIntent always results in a DeploymentRecord with the same service, version, recipeId, and environment.
+- A DeploymentIntent always results in a DeploymentRecord with the same service, version, and environment.
+- DeploymentRecord.recipeId stores the resolved Recipe actually used for execution.
 - Idempotency-Key retries return the same DeploymentRecord.
 
 Supersession:
@@ -122,7 +125,7 @@ Supersession:
 
 ## Recipe
 
-Engine-mapped delivery patterns with a stable DXCP-facing contract.
+Adapter-backed execution patterns with a stable DXCP-facing contract.
 
 Fields:
 - id: unique identifier
@@ -144,7 +147,27 @@ Fields:
 Notes:
 - Only a small, approved set of recipes exist.
 - Recipes evolve centrally to preserve safety and consistency.
-- Engine mapping fields are admin-only diagnostics.
+- Recipes define governed execution behavior, not a required operator-facing choice in the common deploy flow.
+- In v1, every Recipe resolves through the Spinnaker adapter and therefore carries Spinnaker mapping fields.
+- The domain meaning of Recipe is broader than Spinnaker pipeline shape; engine mapping fields are adapter-specific admin diagnostics.
+
+## ServiceEnvironmentRouting
+
+Authoritative DXCP routing object that bridges governed environment context to execution behavior.
+
+Fields:
+- service: allowlisted service name
+- environment: canonical environment name
+- deliveryGroupId: governing delivery group
+- recipeId: Recipe selected for this service + environment context
+- engine_type: execution engine identity (informational; SPINNAKER in v1)
+- status: active or disabled
+
+Notes:
+- Service-environment routing is authoritative for execution selection in the common deploy path.
+- Routing is where DXCP connects governed environment context to the execution pattern that will be run.
+- Routing is owned by DXCP, not by the external engine.
+- In v1, routing resolves to a Spinnaker-backed Recipe, but environment remains a DXCP concept rather than an engine-native one.
 
 ## DeliveryGroup
 

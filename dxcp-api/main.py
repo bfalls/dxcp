@@ -55,6 +55,7 @@ from models import (
     DeliveryGroupUpsert,
     DeploymentIntent,
     Environment,
+    EnvironmentLifecycleState,
     EngineType,
     PolicySummaryRequest,
     PromotionIntent,
@@ -66,6 +67,7 @@ from models import (
 from policy import Guardrails, PolicyError
 from rate_limit import RateLimiter
 from delivery_state import base_outcome_from_state, normalize_deployment_kind, resolve_outcome
+from execution_plan import ServiceEnvironmentRoute, apply_execution_plan, execution_plan_from_recipe
 from storage import ImmutableDeploymentError, build_storage, utc_now
 from admin_system_routes import (
     register_admin_system_routes,
@@ -236,8 +238,6 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
     for error in exc.errors():
         loc = error.get("loc") or ()
         err_type = error.get("type")
-        if loc == ("body", "recipeId") and err_type in {"missing", "value_error.missing"}:
-            return error_response(400, "RECIPE_ID_REQUIRED", "recipeId is required")
         if loc and loc[0] == "body" and len(loc) >= 2:
             field_name = str(loc[1])
             if err_type in {"missing", "value_error.missing"}:
@@ -447,23 +447,92 @@ def resolve_recipe(recipe_id: Optional[str], actor: Optional[Actor] = None):
     return recipe, None
 
 
+def resolve_recipe_execution_plan(
+    recipe_id: Optional[str],
+    actor: Optional[Actor] = None,
+) -> tuple[Optional[dict], Optional[dict], Optional[JSONResponse]]:
+    recipe, recipe_error = resolve_recipe(recipe_id, actor)
+    if recipe_error:
+        return None, None, recipe_error
+    return recipe, execution_plan_from_recipe(recipe), None
+
+
+def resolve_service_environment_route(service: str, environment: str) -> Optional[dict]:
+    route = storage.get_service_environment_routing(service, environment)
+    if not route:
+        return None
+    typed_route = ServiceEnvironmentRoute(
+        service_id=route["service_id"],
+        environment_id=route["environment_id"],
+        recipe_id=route["recipe_id"],
+    )
+    return {
+        **route,
+        "service_id": typed_route.service_id,
+        "environment_id": typed_route.environment_id,
+        "recipe_id": typed_route.recipe_id,
+    }
+
+
+def resolve_routed_execution_plan_for_service_environment(
+    service: str,
+    environment: str,
+    actor: Optional[Actor] = None,
+) -> tuple[Optional[dict], Optional[dict], Optional[dict], Optional[JSONResponse]]:
+    route = resolve_service_environment_route(service, environment)
+    if not route:
+        return None, None, None, error_response(
+            400,
+            "SERVICE_ENVIRONMENT_NOT_ROUTED",
+            "No recipe is routed for the service and target environment",
+        )
+    recipe, execution_plan, recipe_error = resolve_recipe_execution_plan(route.get("recipe_id"), actor)
+    if recipe_error:
+        return None, route, None, recipe_error
+    return recipe, route, execution_plan, None
+
+
 def resolve_routed_recipe_for_service_environment(
     service: str,
     environment: str,
     actor: Optional[Actor] = None,
 ) -> tuple[Optional[dict], Optional[dict], Optional[JSONResponse]]:
-    routes = storage.list_service_environment_routing(service)
-    route = next((row for row in routes if row.get("environment_id") == environment), None)
-    if not route:
-        return None, None, error_response(
-            400,
-            "SERVICE_ENVIRONMENT_NOT_ROUTED",
-            "No recipe is routed for the service and target environment",
-        )
-    recipe, recipe_error = resolve_recipe(route.get("recipe_id"), actor)
+    recipe, route, _, recipe_error = resolve_routed_execution_plan_for_service_environment(service, environment, actor)
     if recipe_error:
         return None, route, recipe_error
     return recipe, route, None
+
+
+def _validate_transitional_recipe_id(
+    routed_recipe_id: str,
+    requested_recipe_id: Optional[str],
+) -> Optional[JSONResponse]:
+    if not requested_recipe_id:
+        return None
+    if requested_recipe_id == routed_recipe_id:
+        return None
+    return error_response(
+        400,
+        "RECIPE_ID_MISMATCH",
+        "recipeId does not match the routed recipe for the requested service and environment",
+    )
+
+
+def resolve_deployment_execution_selection(
+    service: str,
+    environment: str,
+    requested_recipe_id: Optional[str],
+    actor: Optional[Actor] = None,
+) -> tuple[Optional[dict], Optional[dict], Optional[dict], Optional[JSONResponse]]:
+    recipe, route, execution_plan, route_error = resolve_routed_execution_plan_for_service_environment(
+        service,
+        environment,
+        actor,
+    )
+    if route_error:
+        return None, None, None, route_error
+    _ = requested_recipe_id
+    return recipe, route, execution_plan, None
 
 
 def resolve_environment_for_group(
@@ -485,6 +554,16 @@ def resolve_environment_for_group(
         return None, _policy_denied(
             "ENVIRONMENT_NOT_ALLOWED",
             f"Environment {environment} not configured for delivery group {group.get('id')}",
+            actor,
+        )
+    lifecycle_state = _normalize_environment_lifecycle_state(
+        env_entry.get("lifecycle_state"),
+        env_entry.get("is_enabled", True),
+    )
+    if lifecycle_state == EnvironmentLifecycleState.RETIRED.value:
+        return None, _policy_denied(
+            "ENVIRONMENT_RETIRED",
+            f"Environment {environment} is retired for delivery group {group.get('id')}",
             actor,
         )
     if not env_entry.get("is_enabled", True):
@@ -619,6 +698,8 @@ def _group_environment_entries(group: dict, include_disabled: bool = True) -> li
                 "delivery_group_id": group_id,
                 "is_enabled": bool(canonical.get("is_enabled", True) and binding.get("is_enabled", True)),
             }
+            if merged.get("lifecycle_state") == EnvironmentLifecycleState.RETIRED.value:
+                merged["is_enabled"] = False
             if include_disabled or merged.get("is_enabled", True):
                 entries.append(merged)
         if entries:
@@ -633,6 +714,8 @@ def _group_environment_entries(group: dict, include_disabled: bool = True) -> li
         if not canonical:
             continue
         merged = {**canonical, "promotion_order": index, "delivery_group_id": group_id}
+        if merged.get("lifecycle_state") == EnvironmentLifecycleState.RETIRED.value:
+            merged["is_enabled"] = False
         if include_disabled or merged.get("is_enabled", True):
             entries.append(merged)
     return entries
@@ -668,6 +751,11 @@ def _accessible_environments_for_actor(actor: Actor, include_disabled: bool = Tr
             ):
                 deduped[env_id] = env
     environments = list(deduped.values())
+    environments = [
+        env
+        for env in environments
+        if env.get("lifecycle_state") != EnvironmentLifecycleState.RETIRED.value
+    ]
     environments.sort(key=_environment_sort_key)
     return environments
 
@@ -737,14 +825,14 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
             "PROMOTION_PATH_NOT_ALLOWED",
             "Promotion target is not the next configured environment",
         )
-    recipe, routing, recipe_error = resolve_routed_recipe_for_service_environment(
+    recipe, routing, execution_plan, recipe_error = resolve_routed_execution_plan_for_service_environment(
         intent.service,
         intent.target_environment,
         actor,
     )
     if recipe_error:
         return None, recipe_error
-    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    policy_recipe_error = _policy_check_recipe_allowed(group, execution_plan.recipe_id, actor)
     if policy_recipe_error:
         return None, policy_recipe_error
     try:
@@ -754,7 +842,7 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
         return None, _capability_error(exc.code, exc.message, actor)
-    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, execution_plan.recipe_id, actor)
     if recipe_capability_error:
         return None, recipe_capability_error
     build = storage.find_latest_build(intent.service, intent.version)
@@ -775,6 +863,7 @@ def _resolve_promotion_context(intent: PromotionIntent, actor: Actor) -> tuple[O
         "source_env": source_env,
         "target_env": target_env,
         "recipe": recipe,
+        "execution_plan": execution_plan,
         "routing": routing,
         "build": build,
     }, None
@@ -1246,6 +1335,9 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
     user_error_codes = {
         "INVALID_REQUEST",
         "RECIPE_ID_REQUIRED",
+        "RECIPE_ID_MISMATCH",
+        "ENVIRONMENT_TYPE_LOCKED",
+        "ENVIRONMENT_DELETE_BLOCKED_REFERENCED",
         "RECIPE_NAME_REQUIRED",
         "RECIPE_BEHAVIOR_REQUIRED",
         "ID_MISMATCH",
@@ -1273,8 +1365,9 @@ def classify_failure_cause(error_code: Optional[str]) -> str:
         "ENGINE_MISCONFIGURED",
         "SERVICE_NOT_ALLOWLISTED",
         "SERVICE_NOT_IN_DELIVERY_GROUP",
-        "ENVIRONMENT_NOT_ALLOWED",
-        "ENVIRONMENT_DISABLED",
+          "ENVIRONMENT_NOT_ALLOWED",
+          "ENVIRONMENT_DISABLED",
+          "ENVIRONMENT_RETIRED",
         "RECIPE_NOT_ALLOWED",
         "RECIPE_INCOMPATIBLE",
         "RECIPE_DEPRECATED",
@@ -1735,11 +1828,113 @@ def _validate_environment_type(value: Any) -> Optional[JSONResponse]:
     return None
 
 
+def _normalize_environment_lifecycle_state(
+    lifecycle_state: Optional[str],
+    is_enabled: Optional[bool],
+) -> str:
+    value = str(lifecycle_state or "").strip().lower()
+    if value in {
+        EnvironmentLifecycleState.ACTIVE.value,
+        EnvironmentLifecycleState.DISABLED.value,
+        EnvironmentLifecycleState.RETIRED.value,
+    }:
+        return value
+    return (
+        EnvironmentLifecycleState.ACTIVE.value
+        if is_enabled is not False
+        else EnvironmentLifecycleState.DISABLED.value
+    )
+
+
+def _lifecycle_state_from_payload(payload: dict, existing: Optional[dict] = None) -> tuple[Optional[str], Optional[JSONResponse]]:
+    requested_state = payload.get("lifecycle_state")
+    requested_enabled = payload.get("is_enabled")
+    if requested_state is not None:
+        normalized = str(requested_state).strip().lower()
+        if normalized not in {
+            EnvironmentLifecycleState.ACTIVE.value,
+            EnvironmentLifecycleState.DISABLED.value,
+            EnvironmentLifecycleState.RETIRED.value,
+        }:
+            return None, error_response(
+                400,
+                "INVALID_ENVIRONMENT_LIFECYCLE_STATE",
+                "lifecycle_state must be one of: active, disabled, retired",
+            )
+        return normalized, None
+    if "is_enabled" in payload:
+        if not isinstance(requested_enabled, bool):
+            return None, error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+        if requested_enabled:
+            return EnvironmentLifecycleState.ACTIVE.value, None
+        if existing and str(existing.get("lifecycle_state") or "").lower() == EnvironmentLifecycleState.RETIRED.value:
+            return EnvironmentLifecycleState.RETIRED.value, None
+        return EnvironmentLifecycleState.DISABLED.value, None
+    existing_state = _normalize_environment_lifecycle_state(
+        existing.get("lifecycle_state") if existing else None,
+        existing.get("is_enabled") if existing else True,
+    )
+    return existing_state, None
+
+
+def _environment_delete_blocked_response(environment_id: str, references: dict) -> JSONResponse:
+    detail_rows = []
+    deployment_references = references.get("deployments") or []
+    if deployment_references:
+        detail_rows.append(
+            {
+                "reference_type": "deployments",
+                "count": len(deployment_references),
+                "examples": deployment_references[:5],
+                "message": "Historical deployment records still reference this environment.",
+            }
+        )
+    routing_references = references.get("service_environment_routing") or []
+    if routing_references:
+        detail_rows.append(
+            {
+                "reference_type": "service_environment_routing",
+                "count": len(routing_references),
+                "examples": routing_references[:5],
+                "message": "Service-environment routing still targets this environment.",
+            }
+        )
+    binding_references = references.get("delivery_group_environment_policy") or []
+    if binding_references:
+        detail_rows.append(
+            {
+                "reference_type": "delivery_group_environment_policy",
+                "count": len(binding_references),
+                "examples": binding_references[:5],
+                "message": "Delivery-group environment policy still attaches this environment.",
+            }
+        )
+    allowlist_references = references.get("delivery_group_allowed_environments") or []
+    if allowlist_references:
+        detail_rows.append(
+            {
+                "reference_type": "delivery_group_allowed_environments",
+                "count": len(allowlist_references),
+                "examples": allowlist_references[:5],
+                "message": "Delivery-group policy still lists this environment as an allowed target.",
+            }
+        )
+    return error_response(
+        409,
+        "ENVIRONMENT_DELETE_BLOCKED_REFERENCED",
+        "Environment deletion is blocked because DXCP still has references to this environment. Retire it to remove it from new deploy use while preserving history and auditability.",
+        details={
+            "environment_id": environment_id,
+            "retire_instead": True,
+            "references": detail_rows,
+        },
+    )
+
+
 def _apply_recipe_mapping(payload: dict, recipe: dict) -> None:
-    if recipe.get("spinnaker_application"):
-        payload["spinnakerApplication"] = recipe.get("spinnaker_application")
-    if recipe.get("deploy_pipeline"):
-        payload["spinnakerPipeline"] = recipe.get("deploy_pipeline")
+    resolved = apply_execution_plan(payload, execution_plan_from_recipe(recipe), "deploy")
+    payload.clear()
+    payload.update(resolved)
 
 
 def _deployment_kind(deployment: dict) -> str:
@@ -2446,14 +2641,23 @@ def create_deployment(
     if env_error:
         _record_deploy_denied(actor, intent, _error_code_from_response(env_error), group.get("id"))
         return env_error
-    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
-    if recipe_error:
-        _record_deploy_denied(actor, intent, _error_code_from_response(recipe_error), group.get("id"))
-        return recipe_error
-    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    recipe, _, execution_plan, selection_error = resolve_deployment_execution_selection(
+        intent.service,
+        intent.environment,
+        intent.recipeId,
+        actor,
+    )
+    if selection_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(selection_error), group.get("id"))
+        return selection_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, execution_plan.recipe_id, actor)
     if policy_recipe_error:
         _record_deploy_denied(actor, intent, _error_code_from_response(policy_recipe_error), group.get("id"))
         return policy_recipe_error
+    recipe_id_error = _validate_transitional_recipe_id(execution_plan.recipe_id, intent.recipeId)
+    if recipe_id_error:
+        _record_deploy_denied(actor, intent, _error_code_from_response(recipe_id_error), group.get("id"))
+        return recipe_id_error
     try:
         service_entry = guardrails.validate_service(intent.service)
         guardrails.validate_environment(intent.environment, service_entry, group)
@@ -2468,7 +2672,7 @@ def create_deployment(
             "VERSION_NOT_FOUND",
             "Version is not registered in the build registry for this service",
         )
-    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, execution_plan.recipe_id, actor)
     if recipe_capability_error:
         return recipe_capability_error
     request_fingerprint = _deployment_request_fingerprint(intent)
@@ -2511,7 +2715,7 @@ def create_deployment(
 
     payload = intent.dict()
     payload.pop("recipeId", None)
-    _apply_recipe_mapping(payload, recipe)
+    payload = apply_execution_plan(payload, execution_plan, "deploy")
     if spinnaker.mode == "http":
         if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
             _record_deploy_denied(actor, intent, "INVALID_REQUEST", group.get("id"))
@@ -2540,9 +2744,9 @@ def create_deployment(
         "service": intent.service,
         "environment": intent.environment,
         "version": intent.version,
-        "recipeId": recipe.get("id"),
-        "recipeRevision": recipe.get("recipe_revision"),
-        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary"),
+        "recipeId": execution_plan.recipe_id,
+        "recipeRevision": execution_plan.recipe_revision,
+        "effectiveBehaviorSummary": execution_plan.effective_behavior_summary,
         "state": "IN_PROGRESS",
         "deploymentKind": "ROLL_FORWARD",
         "outcome": None,
@@ -2551,7 +2755,7 @@ def create_deployment(
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
-        "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
+        "engine_type": execution_plan.engine_type,
         "spinnakerExecutionId": execution_id,
         "spinnakerExecutionUrl": execution_url,
         "spinnakerApplication": payload.get("spinnakerApplication"),
@@ -2620,30 +2824,43 @@ def get_policy_summary(
     env_entry, env_error = resolve_environment_for_group(group, req.environment, actor)
     if env_error:
         return env_error
-    recipe = None
-    if req.recipeId:
-        recipe, recipe_error = resolve_recipe(req.recipeId, actor)
-        if recipe_error:
-            return recipe_error
-        policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
-        if policy_recipe_error:
-            return policy_recipe_error
+    recipe, routing, execution_plan, selection_error = resolve_deployment_execution_selection(
+        req.service,
+        req.environment,
+        req.recipeId,
+        actor,
+    )
+    if selection_error:
+        return selection_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, execution_plan.recipe_id, actor)
+    if policy_recipe_error:
+        return policy_recipe_error
+    recipe_id_error = _validate_transitional_recipe_id(execution_plan.recipe_id, req.recipeId)
+    if recipe_id_error:
+        return recipe_id_error
     try:
         service_entry = guardrails.validate_service(req.service)
         guardrails.validate_environment(req.environment, service_entry, group)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
-    if recipe:
-        recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
-        if recipe_capability_error:
-            return recipe_capability_error
+    recipe_capability_error = _capability_check_recipe_service(service_entry, execution_plan.recipe_id, actor)
+    if recipe_capability_error:
+        return recipe_capability_error
 
     policy_snapshot = _policy_snapshot_for_environment(group, env_entry)
     return {
         "service": req.service,
         "environment": req.environment,
-        "recipeId": recipe.get("id") if recipe else None,
+        "recipeId": execution_plan.recipe_id,
         "deliveryGroupId": group.get("id"),
+        "resolvedRecipe": {
+            "id": execution_plan.recipe_id,
+            "name": recipe.get("name"),
+            "status": recipe.get("status"),
+            "revision": execution_plan.recipe_revision,
+            "effectiveBehaviorSummary": execution_plan.effective_behavior_summary,
+            "routing": routing,
+        },
         "policy": policy_snapshot,
         "generatedAt": utc_now(),
     }
@@ -2671,19 +2888,27 @@ def validate_deployment(
     env_entry, env_error = resolve_environment_for_group(group, intent.environment, actor)
     if env_error:
         return env_error
-    recipe, recipe_error = resolve_recipe(intent.recipeId, actor)
-    if recipe_error:
-        return recipe_error
-    policy_recipe_error = _policy_check_recipe_allowed(group, recipe.get("id"), actor)
+    recipe, _, execution_plan, selection_error = resolve_deployment_execution_selection(
+        intent.service,
+        intent.environment,
+        intent.recipeId,
+        actor,
+    )
+    if selection_error:
+        return selection_error
+    policy_recipe_error = _policy_check_recipe_allowed(group, execution_plan.recipe_id, actor)
     if policy_recipe_error:
         return policy_recipe_error
+    recipe_id_error = _validate_transitional_recipe_id(execution_plan.recipe_id, intent.recipeId)
+    if recipe_id_error:
+        return recipe_id_error
     try:
         service_entry = guardrails.validate_service(intent.service)
         guardrails.validate_environment(intent.environment, service_entry, group)
         guardrails.validate_version(intent.version)
     except PolicyError as exc:
         return _capability_error(exc.code, exc.message, actor)
-    recipe_capability_error = _capability_check_recipe_service(service_entry, recipe.get("id"), actor)
+    recipe_capability_error = _capability_check_recipe_service(service_entry, execution_plan.recipe_id, actor)
     if recipe_capability_error:
         return recipe_capability_error
     build = storage.find_latest_build(intent.service, intent.version)
@@ -2714,7 +2939,7 @@ def validate_deployment(
         "service": intent.service,
         "environment": intent.environment,
         "version": intent.version,
-        "recipeId": recipe.get("id"),
+        "recipeId": execution_plan.recipe_id,
         "deliveryGroupId": group.get("id"),
         "versionRegistered": True,
         "policy": policy_snapshot,
@@ -2741,6 +2966,7 @@ def validate_promotion(
     group = context["group"]
     target_env = context["target_env"]
     recipe = context["recipe"]
+    execution_plan = context["execution_plan"]
     policy_snapshot = _policy_snapshot_for_environment(group, target_env)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
         return error_response(409, "CONCURRENCY_LIMIT_REACHED", "Delivery group has active deployments")
@@ -2787,6 +3013,7 @@ def create_promotion(
     group = context["group"]
     target_env = context["target_env"]
     recipe = context["recipe"]
+    execution_plan = context["execution_plan"]
     build = context["build"]
     policy_snapshot = _policy_snapshot_for_environment(group, target_env)
     if policy_snapshot["current_concurrent_deployments"] >= policy_snapshot["max_concurrent_deployments"]:
@@ -2830,7 +3057,7 @@ def create_promotion(
         "sourceEnvironment": intent.source_environment,
         "targetEnvironment": intent.target_environment,
     }
-    _apply_recipe_mapping(payload, recipe)
+    payload = apply_execution_plan(payload, execution_plan, "deploy")
     if spinnaker.mode == "http":
         if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
             _record_promotion_denied(actor, intent, "INVALID_REQUEST", group.get("id"))
@@ -2859,9 +3086,9 @@ def create_promotion(
         "environment": intent.target_environment,
         "sourceEnvironment": intent.source_environment,
         "version": intent.version,
-        "recipeId": recipe.get("id"),
-        "recipeRevision": recipe.get("recipe_revision"),
-        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary"),
+        "recipeId": execution_plan.recipe_id,
+        "recipeRevision": execution_plan.recipe_revision,
+        "effectiveBehaviorSummary": execution_plan.effective_behavior_summary,
         "state": "IN_PROGRESS",
         "deploymentKind": "PROMOTE",
         "outcome": None,
@@ -2870,7 +3097,7 @@ def create_promotion(
         "changeSummary": intent.changeSummary,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
-        "engine_type": recipe.get("engine_type") or EngineType.SPINNAKER.value,
+        "engine_type": execution_plan.engine_type,
         "spinnakerExecutionId": execution_id,
         "spinnakerExecutionUrl": execution_url,
         "spinnakerApplication": payload.get("spinnakerApplication"),
@@ -2994,16 +3221,17 @@ def create_environment(payload: dict, request: Request, authorization: Optional[
     type_error = _validate_environment_type(type_value)
     if type_error:
         return type_error
-    is_enabled = payload.get("is_enabled", True)
-    if not isinstance(is_enabled, bool):
-        return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+    lifecycle_state, lifecycle_error = _lifecycle_state_from_payload(payload)
+    if lifecycle_error:
+        return lifecycle_error
 
     now = utc_now()
     row = {
         "environment_id": environment_id,
         "display_name": display_name,
         "type": type_value,
-        "is_enabled": is_enabled,
+        "lifecycle_state": lifecycle_state,
+        "is_enabled": lifecycle_state == EnvironmentLifecycleState.ACTIVE.value,
         "created_at": now,
         "updated_at": now,
     }
@@ -3014,8 +3242,9 @@ def create_environment(payload: dict, request: Request, authorization: Optional[
         name=environment_id,
         display_name=display_name,
         type=type_value,
+        lifecycle_state=lifecycle_state,
         promotion_order=None,
-        is_enabled=is_enabled,
+        is_enabled=lifecycle_state == EnvironmentLifecycleState.ACTIVE.value,
         guardrails=None,
         created_at=now,
         updated_at=now,
@@ -3055,19 +3284,25 @@ def patch_environment(
         type_error = _validate_environment_type(next_type)
         if type_error:
             return type_error
+        references = storage.environment_reference_summary(environment_id)
+        if next_type != existing.get("type") and any(references.get(key) for key in references):
+            return error_response(
+                409,
+                "ENVIRONMENT_TYPE_LOCKED",
+                "Environment type cannot be changed after DXCP has historical or policy references for this environment.",
+            )
 
-    next_enabled = existing.get("is_enabled", True)
-    if "is_enabled" in payload:
-        next_enabled = payload.get("is_enabled")
-        if not isinstance(next_enabled, bool):
-            return error_response(400, "INVALID_REQUEST", "is_enabled must be a boolean")
+    next_lifecycle_state, lifecycle_error = _lifecycle_state_from_payload(payload, existing)
+    if lifecycle_error:
+        return lifecycle_error
 
     storage.update_admin_environment(
         {
             "environment_id": environment_id,
             "display_name": next_display_name,
             "type": next_type,
-            "is_enabled": next_enabled,
+            "lifecycle_state": next_lifecycle_state,
+            "is_enabled": next_lifecycle_state == EnvironmentLifecycleState.ACTIVE.value,
             "created_at": existing.get("created_at"),
             "updated_at": utc_now(),
         }
@@ -3088,6 +3323,11 @@ def delete_environment(environment_id: str, request: Request, authorization: Opt
     env_id_error = _validate_admin_environment_id(environment_id)
     if env_id_error:
         return env_id_error
+    if not storage.get_environment(environment_id):
+        return error_response(404, "NOT_FOUND", "Environment not found")
+    references = storage.environment_reference_summary(environment_id)
+    if any(references.get(key) for key in references):
+        return _environment_delete_blocked_response(environment_id, references)
     if not storage.delete_environment(environment_id):
         return error_response(404, "NOT_FOUND", "Environment not found")
     return Response(status_code=204)
@@ -3132,6 +3372,15 @@ def upsert_admin_delivery_group_environment_policy(
         return error_response(404, "NOT_FOUND", "Delivery group not found")
     if not storage.get_admin_environment(environment_id):
         return error_response(404, "NOT_FOUND", "Environment not found")
+    environment = storage.get_environment(environment_id)
+    if environment and environment.get("lifecycle_state") == EnvironmentLifecycleState.RETIRED.value:
+        requested_enabled = payload.get("is_enabled", True)
+        if requested_enabled:
+            return error_response(
+                409,
+                "ENVIRONMENT_RETIRED",
+                "Retired environments cannot be re-enabled in delivery-group policy. Change lifecycle state first if the environment should return to active use.",
+            )
 
     existing_rows = storage.list_delivery_group_environment_policy(dg)
     existing = next((row for row in existing_rows if row.get("environment_id") == environment_id), None)
@@ -3179,6 +3428,8 @@ def list_admin_service_environment_routing(
                 "environment_id": env_id,
                 "display_name": env.get("display_name"),
                 "type": env.get("type"),
+                "lifecycle_state": env.get("lifecycle_state"),
+                "is_enabled": env.get("is_enabled"),
                 "recipe_id": route.get("recipe_id") if route else None,
             }
         )
@@ -3208,6 +3459,13 @@ def upsert_admin_service_environment_routing(
         return error_response(404, "NOT_FOUND", "Service not found")
     if not storage.get_admin_environment(environment_id):
         return error_response(404, "NOT_FOUND", "Environment not found")
+    environment = storage.get_environment(environment_id)
+    if environment and environment.get("lifecycle_state") == EnvironmentLifecycleState.RETIRED.value:
+        return error_response(
+            409,
+            "ENVIRONMENT_RETIRED",
+            "Retired environments are preserved for history and diagnostics and cannot be configured as normal routing targets for new deploys.",
+        )
 
     recipe_id = (payload.get("recipe_id") or "").strip()
     if not recipe_id:
@@ -3975,7 +4233,10 @@ def rollback_deployment(
     env_entry, env_error = resolve_environment_for_group(group, deployment["environment"], actor)
     if env_error:
         return env_error
-    recipe_id = deployment.get("recipeId") or "default"
+    recipe, execution_plan, recipe_error = resolve_recipe_execution_plan(deployment.get("recipeId") or "default", actor)
+    if recipe_error:
+        return recipe_error
+    recipe_id = execution_plan.recipe_id
     policy_recipe_error = _policy_check_recipe_allowed(group, recipe_id, actor)
     if policy_recipe_error:
         return policy_recipe_error
@@ -4019,12 +4280,7 @@ def rollback_deployment(
         "spinnakerApplication": deployment.get("spinnakerApplication"),
         "spinnakerPipeline": deployment.get("spinnakerPipeline"),
     }
-    recipe = storage.get_recipe(deployment.get("recipeId") or "default")
-    if recipe:
-        if recipe.get("spinnaker_application"):
-            payload["spinnakerApplication"] = recipe.get("spinnaker_application")
-        if recipe.get("rollback_pipeline"):
-            payload["spinnakerPipeline"] = recipe.get("rollback_pipeline")
+    payload = apply_execution_plan(payload, execution_plan, "rollback")
     if not payload.get("spinnakerApplication") and not SETTINGS.spinnaker_application:
         return error_response(
             400,
@@ -4058,9 +4314,9 @@ def rollback_deployment(
         "service": deployment["service"],
         "environment": deployment["environment"],
         "version": prior["version"],
-        "recipeId": deployment.get("recipeId") or "default",
-        "recipeRevision": recipe.get("recipe_revision") if recipe else None,
-        "effectiveBehaviorSummary": recipe.get("effective_behavior_summary") if recipe else None,
+        "recipeId": execution_plan.recipe_id,
+        "recipeRevision": execution_plan.recipe_revision,
+        "effectiveBehaviorSummary": execution_plan.effective_behavior_summary,
         "state": "IN_PROGRESS",
         "deploymentKind": "ROLLBACK",
         "outcome": None,
@@ -4070,7 +4326,7 @@ def rollback_deployment(
         "rollbackOf": deployment_id,
         "createdAt": utc_now(),
         "updatedAt": utc_now(),
-        "engine_type": (recipe.get("engine_type") if recipe else None) or EngineType.SPINNAKER.value,
+        "engine_type": execution_plan.engine_type,
         "spinnakerExecutionId": execution_id,
         "spinnakerExecutionUrl": execution_url,
         "deliveryGroupId": group["id"],

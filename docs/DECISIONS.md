@@ -45,10 +45,11 @@ Only a small, approved set of deployment paths exists.
 
 We do:
 - Evolve recipes centrally
-- Enforce recipes via policy
+- Enforce recipes via policy and routing
 
 We do not:
 - Allow ad hoc pipeline composition
+- Require recipe selection as common operator-facing input
 
 Tradeoff:
 - Less customization
@@ -189,6 +190,44 @@ We do not:
 Tradeoff:
 - More explicit context handling in the UI and routing model
 - Correctness and clarity for running state, deployment history, rollback scope, and guardrail application
+
+---
+
+## Decision 10a: Service + environment routing is authoritative for execution selection
+
+DXCP resolves execution behavior from the service and governed environment context.
+
+We do:
+- Treat service + environment routing as the authoritative selector for execution behavior in the common deploy path.
+- Keep environment as a DXCP-governed operating context, not an engine-native selector.
+- Allow routing policy and diagnostics to explain which execution pattern was chosen.
+
+We do not:
+- Require callers to choose engine mappings directly.
+- Treat environment alone as an engine-routing primitive outside DXCP governance.
+
+Tradeoff:
+- Slightly more platform-owned configuration
+- Lower operator cognitive load and stronger consistency
+
+---
+
+## Decision 10b: Recipes remain, but as adapter-backed execution patterns
+
+Recipes continue to exist as governed execution patterns, but they are not required operator-facing input for the common deploy path.
+
+We do:
+- Preserve recipes for auditability, diagnostics, revisioning, and centrally managed behavior.
+- Resolve a recipe through DXCP routing and adapter logic.
+- Keep v1 single-engine, with Spinnaker as the only execution engine.
+
+We do not:
+- Remove recipes from the domain model or deployment records.
+- Promise user-selectable multi-engine execution.
+
+Tradeoff:
+- More implicit selection in the normal flow
+- Cleaner intent semantics without losing operational traceability
 
 ---
 

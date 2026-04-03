@@ -193,45 +193,77 @@ async def test_seeded_strategy_recipes_present(tmp_path: Path, monkeypatch):
         assert recipes[recipe_id]["effective_behavior_summary"]
 
 
-async def test_deploy_rejects_unknown_recipe(tmp_path: Path, monkeypatch):
+async def test_deploy_rejects_unknown_recipe_as_recipe_id_mismatch(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-unknown", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload("missing"),
         )
-    assert response.status_code == 404
-    assert response.json()["code"] == "RECIPE_NOT_FOUND"
+    assert response.status_code == 400
+    assert response.json()["code"] == "RECIPE_ID_MISMATCH"
 
 
-async def test_deploy_rejects_not_allowed_recipe(tmp_path: Path, monkeypatch):
-    async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
+async def test_deploy_rejects_routed_recipe_not_allowed(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "extra",
+            }
+        )
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-disallowed", **auth_header(["dxcp-platform-admins"])},
-            json=_deployment_payload("extra"),
+            json=_deployment_payload(),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "RECIPE_NOT_ALLOWED"
 
 
-async def test_deploy_requires_recipe_id(tmp_path: Path, monkeypatch):
+async def test_deploy_uses_routed_recipe_when_recipe_id_is_omitted(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-default", **auth_header(["dxcp-platform-admins"])},
             json=_deployment_payload(),
         )
-    assert response.status_code == 400
-    assert response.json()["code"] == "RECIPE_ID_REQUIRED"
+    assert response.status_code == 201
+    assert response.json()["recipeId"] == "default"
 
 
-async def test_deploy_rejects_deprecated_recipe(tmp_path: Path, monkeypatch):
+async def test_deploy_rejects_recipe_id_that_does_not_match_routing(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, _, _):
         response = await client.post(
             "/v1/deployments",
+            headers={"Idempotency-Key": "deploy-mismatch", **auth_header(["dxcp-platform-admins"])},
+            json=_deployment_payload("extra"),
+        )
+    assert response.status_code == 400
+    assert response.json()["code"] == "RECIPE_ID_MISMATCH"
+
+
+async def test_deploy_rejects_routed_deprecated_recipe(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main, _):
+        group = main.storage.get_delivery_group("default")
+        assert group is not None
+        group["allowed_recipes"] = ["default", "deprecated"]
+        if hasattr(main.storage, "update_delivery_group"):
+            main.storage.update_delivery_group(group)
+        else:
+            main.storage.insert_delivery_group(group)
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "deprecated",
+            }
+        )
+        response = await client.post(
+            "/v1/deployments",
             headers={"Idempotency-Key": "deploy-deprecated", **auth_header(["dxcp-platform-admins"])},
-            json=_deployment_payload("deprecated"),
+            json=_deployment_payload(),
         )
     assert response.status_code == 403
     assert response.json()["code"] == "RECIPE_DEPRECATED"
@@ -251,6 +283,49 @@ async def test_deploy_preflight_returns_policy_snapshot(tmp_path: Path, monkeypa
     assert body["versionRegistered"] is True
     assert body["policy"]["max_concurrent_deployments"] >= 1
     assert "deployments_remaining" in body["policy"]
+
+
+async def test_resolve_recipe_execution_plan_preserves_spinnaker_recipe_shape(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (_, main, _):
+        recipe, execution_plan, error = main.resolve_recipe_execution_plan("default")
+
+    assert error is None
+    assert recipe["id"] == "default"
+    assert execution_plan.recipe_id == "default"
+    assert execution_plan.engine_type == "SPINNAKER"
+    assert execution_plan.deploy_operation.target == "demo-deploy"
+    assert execution_plan.rollback_operation.target == "rollback-demo-service"
+    assert execution_plan.engine_config["spinnaker_application"] == "demo-app"
+
+
+async def test_service_environment_routing_is_explicit_and_separate_from_policy(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (_, main, _):
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "extra",
+            }
+        )
+
+        stored_route = main.storage.get_service_environment_routing("demo-service", "sandbox")
+        recipe, route, execution_plan, error = main.resolve_routed_execution_plan_for_service_environment(
+            "demo-service",
+            "sandbox",
+        )
+        group = main.storage.get_delivery_group("default")
+        policy_error = main._policy_check_recipe_allowed(group, execution_plan.recipe_id)
+
+    assert error is None
+    assert stored_route == route
+    assert route["service_id"] == "demo-service"
+    assert route["environment_id"] == "sandbox"
+    assert route["recipe_id"] == "extra"
+    assert recipe["id"] == "extra"
+    assert execution_plan.recipe_id == "extra"
+    assert policy_error is not None
+    assert policy_error.status_code == 403
+    assert json.loads(policy_error.body)["code"] == "RECIPE_NOT_ALLOWED"
 
 
 async def test_deploy_rejects_unregistered_version(tmp_path: Path, monkeypatch):
@@ -468,11 +543,23 @@ async def test_history_remains_readable_after_recipe_delete(tmp_path: Path, monk
         group = main.storage.get_delivery_group("default")
         assert group is not None
         original_allowed = list(group.get("allowed_recipes") or [])
+        original_route = main.storage.get_service_environment_routing("demo-service", "sandbox")
         group["allowed_recipes"] = sorted(set(original_allowed + ["extra"]))
         if hasattr(main.storage, "update_delivery_group"):
             main.storage.update_delivery_group(group)
         else:
             main.storage.insert_delivery_group(group)
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "demo-service",
+                "environment_id": "sandbox",
+                "recipe_id": "extra",
+                "created_at": original_route.get("created_at", main.utc_now()) if original_route else main.utc_now(),
+                "created_by": original_route.get("created_by", "system") if original_route else "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
 
         deploy = await client.post(
             "/v1/deployments",
@@ -487,6 +574,18 @@ async def test_history_remains_readable_after_recipe_delete(tmp_path: Path, monk
             main.storage.update_delivery_group(group)
         else:
             main.storage.insert_delivery_group(group)
+        if original_route is not None:
+            main.storage.upsert_service_environment_routing(
+                {
+                    "service_id": original_route["service_id"],
+                    "environment_id": original_route["environment_id"],
+                    "recipe_id": original_route["recipe_id"],
+                    "created_at": original_route.get("created_at", main.utc_now()),
+                    "created_by": original_route.get("created_by", "system"),
+                    "updated_at": main.utc_now(),
+                    "updated_by": "system",
+                }
+            )
 
         deleted = await client.delete(
             "/v1/admin/recipes/extra",

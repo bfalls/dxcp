@@ -211,6 +211,17 @@ async def test_permitted_and_compatible(tmp_path: Path, monkeypatch):
                 "updated_by": "system",
             }
         )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-a",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-a",
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
         response = await client.post(
             "/v1/deployments",
             headers={"Idempotency-Key": "deploy-3", **auth_header(["dxcp-platform-admins"])},
@@ -310,6 +321,17 @@ async def test_group_allows_recipe_but_service_incompatible(tmp_path: Path, monk
                 "delivery_group_id": "group-b",
                 "is_enabled": True,
                 "guardrails": None,
+                "created_at": main.utc_now(),
+                "created_by": "system",
+                "updated_at": main.utc_now(),
+                "updated_by": "system",
+            }
+        )
+        main.storage.upsert_service_environment_routing(
+            {
+                "service_id": "service-b",
+                "environment_id": "sandbox",
+                "recipe_id": "recipe-a",
                 "created_at": main.utc_now(),
                 "created_by": "system",
                 "updated_at": main.utc_now(),

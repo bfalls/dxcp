@@ -723,6 +723,8 @@ function ApplicationDetail({ role, api }) {
                 <dl className="new-application-support-grid">
                   <dt>Release path</dt>
                   <dd>Deploy through the current DXCP deploy workflow for this application.</dd>
+                  <dt>Delivery behavior</dt>
+                  <dd>DXCP resolves delivery behavior from service and environment routing, then records the resolved recipe on each deployment.</dd>
                   <dt>Delivery group</dt>
                   <dd>{viewModel?.summary.deploymentGroup || 'Not assigned'}</dd>
                   <dt>Guardrail posture</dt>
