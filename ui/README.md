@@ -71,6 +71,7 @@ New experience shared primitives in `ui/src/new-experience`:
 - `NewExperienceStatePrimitives.jsx`: shared explanation blocks and state blocks for loading/empty/failure/degraded states.
 - `NewExperienceAdminWorkspaceShell.jsx`: admin workspace shell and subsection strip.
 - `NewQuietIconButton.jsx`: reusable low-emphasis icon-only action button for lightweight page actions such as refresh.
+- `NewRefreshButton.jsx`: reusable standard refresh action for new-experience page and panel toolbars.
 - `NewSegmentedTabs.jsx`: reusable compact segmented tab control for rounded enterprise panels.
 
 Reuse guidance:

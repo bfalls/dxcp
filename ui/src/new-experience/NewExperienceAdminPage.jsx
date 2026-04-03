@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import OperationalDataList from '../components/OperationalDataList.jsx'
 import SectionCard from '../components/SectionCard.jsx'
-import NewQuietIconButton from './NewQuietIconButton.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import NewExperienceAdminWorkspaceShell, { NewExperienceAdminSectionStrip } from './NewExperienceAdminWorkspaceShell.jsx'
+import NewRefreshButton from './NewRefreshButton.jsx'
 import NewSegmentedTabs from './NewSegmentedTabs.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
 import { useNewExperienceAlertRail, useNewExperienceStickyRail } from './NewExperienceShell.jsx'
@@ -451,10 +451,9 @@ function EnvironmentsPanel({ api }) {
               <h3>Environments</h3>
             </div>
             <div className="new-admin-toolbar-actions">
-              <NewQuietIconButton
-                label="Refresh"
+              <NewRefreshButton
                 onClick={() => loadWorkspace({ bypassCache: true })}
-                className={workspaceState.kind === 'refreshing' ? 'is-busy' : ''}
+                busy={workspaceState.kind === 'refreshing'}
               />
               <button className="button" type="button" onClick={beginCreate}>
                 Create environment
