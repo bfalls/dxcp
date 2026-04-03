@@ -1137,6 +1137,60 @@ body {
   transform: translateY(0);
 }
 
+.new-quiet-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(183, 179, 166, 0.2);
+  border-radius: 999px;
+  background: rgba(13, 25, 25, 0.48);
+  color: var(--muted);
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.new-quiet-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.new-quiet-icon-button:hover,
+.new-quiet-icon-button:focus-visible {
+  color: var(--ink);
+  border-color: rgba(91, 209, 201, 0.34);
+  background: rgba(91, 209, 201, 0.08);
+}
+
+.new-quiet-icon-button:focus-visible {
+  outline: 2px solid rgba(91, 209, 201, 0.42);
+  outline-offset: 2px;
+}
+
+.new-quiet-icon-button.is-busy svg {
+  animation: new-quiet-icon-spin 0.9s linear infinite;
+}
+
+.new-quiet-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+@keyframes new-quiet-icon-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .new-application-chooser-card {
   border: 1px solid var(--border);
   border-radius: 14px;

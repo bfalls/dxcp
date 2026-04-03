@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import OperationalDataList from '../components/OperationalDataList.jsx'
 import SectionCard from '../components/SectionCard.jsx'
+import NewQuietIconButton from './NewQuietIconButton.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import NewExperienceAdminWorkspaceShell, { NewExperienceAdminSectionStrip } from './NewExperienceAdminWorkspaceShell.jsx'
 import NewSegmentedTabs from './NewSegmentedTabs.jsx'
@@ -450,9 +451,11 @@ function EnvironmentsPanel({ api }) {
               <h3>Environments</h3>
             </div>
             <div className="new-admin-toolbar-actions">
-              <button className="button secondary" type="button" onClick={() => loadWorkspace({ bypassCache: true })}>
-                {workspaceState.kind === 'refreshing' ? 'Refreshing...' : 'Refresh'}
-              </button>
+              <NewQuietIconButton
+                label="Refresh"
+                onClick={() => loadWorkspace({ bypassCache: true })}
+                className={workspaceState.kind === 'refreshing' ? 'is-busy' : ''}
+              />
               <button className="button" type="button" onClick={beginCreate}>
                 Create environment
               </button>
@@ -532,9 +535,6 @@ function EnvironmentsPanel({ api }) {
                   if (column.key === 'actions') {
                     return (
                       <div className="new-admin-inline-actions">
-                        <button className="button secondary" type="button" onClick={() => openDetail(row)}>
-                          View
-                        </button>
                         <button className="button secondary" type="button" onClick={() => deleteEnvironment(row)}>
                           Delete
                         </button>
