@@ -1,7 +1,9 @@
 import json
 import os
+import sqlite3
 import sys
 from contextlib import asynccontextmanager
+import importlib.util
 from pathlib import Path
 
 import httpx
@@ -40,6 +42,17 @@ def _load_main(tmp_path: Path):
     import importlib
 
     return importlib.import_module("main")
+
+
+def _run_migration(module_filename: str, storage) -> None:
+    dxcp_api_dir = Path(__file__).resolve().parents[1]
+    migration_path = dxcp_api_dir / "migrations" / module_filename
+    spec = importlib.util.spec_from_file_location(f"test_migration_{migration_path.stem}", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.run(storage)
 
 
 @asynccontextmanager
@@ -388,3 +401,204 @@ async def test_referenced_default_environments_are_not_hard_deleted(tmp_path: Pa
     assert "sandbox" in results
     assert results["sandbox"].status_code == 409
     assert results["sandbox"].json()["code"] == "ENVIRONMENT_DELETE_BLOCKED_REFERENCED"
+
+
+async def test_migration_normalizes_legacy_composite_environment_identity(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    main.storage = main.build_storage()
+    seed_defaults(main.storage)
+
+    db_path = tmp_path / "dxcp-test.db"
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM service_environment_routing")
+    cur.execute("DELETE FROM delivery_group_environment_policy")
+    cur.execute("DELETE FROM environments")
+    now = main.utc_now()
+    cur.execute(
+        """
+        INSERT INTO environments (
+            id, name, display_name, type, lifecycle_state, promotion_order, delivery_group_id, is_enabled, guardrails,
+            created_at, created_by, updated_at, updated_by, last_change_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "default:sandbox",
+            "sandbox",
+            "Sandbox",
+            "non_prod",
+            "active",
+            1,
+            "default",
+            1,
+            None,
+            now,
+            "system",
+            now,
+            "system",
+            None,
+        ),
+    )
+    cur.execute(
+        """
+        INSERT INTO delivery_group_environment_policy (
+            delivery_group_id, environment_id, is_enabled, order_index
+        ) VALUES (?, ?, ?, ?)
+        """,
+        ("default", "default:sandbox", 1, 1),
+    )
+    cur.execute(
+        """
+        INSERT INTO service_environment_routing (
+            service_id, environment_id, recipe_id
+        ) VALUES (?, ?, ?)
+        """,
+        ("demo-service", "default:sandbox", "default"),
+    )
+    cur.execute(
+        """
+        INSERT INTO deployments (
+            id, service, environment, version, recipe_id, recipe_revision, effective_behavior_summary, state,
+            deployment_kind, outcome, intent_correlation_id, superseded_by, change_summary, created_at, updated_at,
+            engine_type, spinnaker_execution_id, spinnaker_execution_url, spinnaker_application, spinnaker_pipeline,
+            rollback_of, source_environment, delivery_group_id, actor_identity_json, policy_snapshot_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "dep-1",
+            "demo-service",
+            "default:sandbox",
+            "1.0.0",
+            "default",
+            None,
+            None,
+            "SUCCEEDED",
+            "ROLL_FORWARD",
+            "SUCCEEDED",
+            None,
+            None,
+            "legacy env deploy",
+            now,
+            now,
+            "SPINNAKER",
+            "exec-1",
+            "http://spinnaker.local/pipelines/exec-1",
+            None,
+            None,
+            None,
+            "default:sandbox",
+            "default",
+            None,
+            None,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    main.storage = main.build_storage()
+    _run_migration("202604041000_normalize_legacy_environment_ids.py", main.storage)
+
+    assert main.storage.get_environment("default:sandbox") is None
+    normalized = main.storage.get_environment("sandbox")
+    assert normalized is not None
+    assert normalized["id"] == "sandbox"
+    assert normalized["name"] == "sandbox"
+    assert normalized["display_name"] == "Sandbox"
+    assert normalized["delivery_group_id"] == ""
+    assert main.storage.list_delivery_group_environment_policy_for_environment("sandbox") == [
+        {
+            "delivery_group_id": "default",
+            "environment_id": "sandbox",
+            "is_enabled": True,
+            "order_index": 1,
+        }
+    ]
+    assert main.storage.list_service_environment_routing_for_environment("sandbox") == [
+        {
+            "service_id": "demo-service",
+            "environment_id": "sandbox",
+            "recipe_id": "default",
+        }
+    ]
+    deployment = main.storage.get_deployment("dep-1")
+    assert deployment is not None
+    assert deployment["environment"] == "sandbox"
+    assert deployment["sourceEnvironment"] == "sandbox"
+
+
+async def test_admin_environment_and_routing_reads_surface_canonical_environment_ids_after_migration(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    main.idempotency = main.IdempotencyStore()
+    main.rate_limiter = main.RateLimiter()
+    main.storage = main.build_storage()
+    seed_defaults(main.storage)
+
+    db_path = tmp_path / "dxcp-test.db"
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM service_environment_routing")
+    cur.execute("DELETE FROM delivery_group_environment_policy")
+    cur.execute("DELETE FROM environments")
+    now = main.utc_now()
+    cur.execute(
+        """
+        INSERT INTO environments (
+            id, name, display_name, type, lifecycle_state, promotion_order, delivery_group_id, is_enabled, guardrails,
+            created_at, created_by, updated_at, updated_by, last_change_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "default:sandbox",
+            "sandbox",
+            "Sandbox",
+            "non_prod",
+            "active",
+            1,
+            "default",
+            1,
+            None,
+            now,
+            "system",
+            now,
+            "system",
+            None,
+        ),
+    )
+    cur.execute(
+        """
+        INSERT INTO service_environment_routing (
+            service_id, environment_id, recipe_id
+        ) VALUES (?, ?, ?)
+        """,
+        ("demo-service", "default:sandbox", "default"),
+    )
+    conn.commit()
+    conn.close()
+
+    main.storage = main.build_storage()
+    _run_migration("202604041000_normalize_legacy_environment_ids.py", main.storage)
+    main.guardrails = main.Guardrails(main.storage)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        environments = await client.get(
+            "/v1/environments",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+        routes = await client.get(
+            "/v1/admin/services/demo-service/environments",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert environments.status_code == 200
+    environment_ids = [row["id"] for row in environments.json()]
+    assert "sandbox" in environment_ids
+    assert "default:sandbox" not in environment_ids
+
+    assert routes.status_code == 200
+    route_ids = [row["environment_id"] for row in routes.json()]
+    assert "sandbox" in route_ids
+    assert all(":" not in env_id for env_id in route_ids)

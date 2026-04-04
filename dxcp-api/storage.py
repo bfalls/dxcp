@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -53,6 +54,10 @@ DEFAULT_ENGINE_TYPE = "SPINNAKER"
 ACTIVE_ENVIRONMENT_LIFECYCLE = "active"
 DISABLED_ENVIRONMENT_LIFECYCLE = "disabled"
 RETIRED_ENVIRONMENT_LIFECYCLE = "retired"
+CANONICAL_ENVIRONMENT_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+LEGACY_COMPOSITE_ENVIRONMENT_ID_RE = re.compile(
+    r"^(?P<delivery_group_id>[a-z0-9]+(?:-[a-z0-9]+)*):(?P<environment_id>[a-z0-9]+(?:-[a-z0-9]+)*)$"
+)
 TERMINAL_DEPLOYMENT_STATES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK"}
 TERMINAL_DEPLOYMENT_OUTCOMES = {"SUCCEEDED", "FAILED", "CANCELED", "ROLLED_BACK", "SUPERSEDED"}
 PROTECTED_DEPLOYMENT_FIELDS = (
@@ -118,6 +123,21 @@ def _environment_is_enabled_for_lifecycle(lifecycle_state: Optional[str], is_ena
     if normalized == ACTIVE_ENVIRONMENT_LIFECYCLE:
         return True
     return False
+
+
+def _legacy_environment_canonical_id(legacy_id: str, canonical_name: str) -> Optional[str]:
+    legacy_id = str(legacy_id or "").strip()
+    canonical_name = str(canonical_name or "").strip()
+    if not legacy_id or not canonical_name:
+        return None
+    legacy_match = LEGACY_COMPOSITE_ENVIRONMENT_ID_RE.fullmatch(legacy_id)
+    if not legacy_match:
+        return None
+    if not CANONICAL_ENVIRONMENT_ID_RE.fullmatch(canonical_name):
+        return None
+    if legacy_match.group("environment_id") != canonical_name:
+        return None
+    return canonical_name
 
 
 class Storage:
@@ -363,6 +383,7 @@ class Storage:
             )
             """
         )
+        self._ensure_column(cur, "admin_environments", "lifecycle_state", "TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS delivery_group_environment_policy (
@@ -401,6 +422,177 @@ class Storage:
         columns = {row["name"] for row in cur.fetchall()}
         if column not in columns:
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
+    def _normalize_admin_environment_alias(self, cur: sqlite3.Cursor, legacy_id: str, canonical_id: str) -> None:
+        cur.execute(
+            "SELECT display_name, type, is_enabled, lifecycle_state, created_at, updated_at FROM admin_environments WHERE environment_id = ?",
+            (legacy_id,),
+        )
+        legacy_row = cur.fetchone()
+        if not legacy_row:
+            return
+        cur.execute(
+            "SELECT display_name FROM admin_environments WHERE environment_id = ?",
+            (canonical_id,),
+        )
+        canonical_row = cur.fetchone()
+        if canonical_row:
+            if not canonical_row["display_name"] and legacy_row["display_name"]:
+                cur.execute(
+                    "UPDATE admin_environments SET display_name = ? WHERE environment_id = ?",
+                    (legacy_row["display_name"], canonical_id),
+                )
+            cur.execute("DELETE FROM admin_environments WHERE environment_id = ?", (legacy_id,))
+            return
+        cur.execute(
+            """
+            UPDATE admin_environments
+            SET environment_id = ?, display_name = ?, lifecycle_state = ?, updated_at = ?
+            WHERE environment_id = ?
+            """,
+            (
+                canonical_id,
+                legacy_row["display_name"] or canonical_id,
+                _normalize_environment_lifecycle_state(
+                    legacy_row["lifecycle_state"] if "lifecycle_state" in legacy_row.keys() else None,
+                    bool(legacy_row["is_enabled"]) if legacy_row["is_enabled"] is not None else None,
+                ),
+                legacy_row["updated_at"] or utc_now(),
+                legacy_id,
+            ),
+        )
+
+    def _normalize_legacy_environment_identity_rows(self, cur: sqlite3.Cursor) -> None:
+        cur.execute("SELECT * FROM environments WHERE instr(id, ':') > 0 ORDER BY id ASC")
+        legacy_rows = cur.fetchall()
+        for legacy_row in legacy_rows:
+            legacy_id = str(legacy_row["id"] or "").strip()
+            canonical_id = _legacy_environment_canonical_id(legacy_id, legacy_row["name"])
+            if not canonical_id or canonical_id == legacy_id:
+                continue
+
+            delivery_group_refs = cur.execute(
+                """
+                SELECT delivery_group_id
+                FROM delivery_group_environment_policy
+                WHERE environment_id = ?
+                ORDER BY delivery_group_id ASC
+                """,
+                (legacy_id,),
+            ).fetchall()
+            for ref in delivery_group_refs:
+                group_id = ref["delivery_group_id"]
+                existing = cur.execute(
+                    """
+                    SELECT 1
+                    FROM delivery_group_environment_policy
+                    WHERE delivery_group_id = ? AND environment_id = ?
+                    """,
+                    (group_id, canonical_id),
+                ).fetchone()
+                if existing:
+                    cur.execute(
+                        "DELETE FROM delivery_group_environment_policy WHERE delivery_group_id = ? AND environment_id = ?",
+                        (group_id, legacy_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE delivery_group_environment_policy
+                        SET environment_id = ?
+                        WHERE delivery_group_id = ? AND environment_id = ?
+                        """,
+                        (canonical_id, group_id, legacy_id),
+                    )
+
+            routing_refs = cur.execute(
+                """
+                SELECT service_id
+                FROM service_environment_routing
+                WHERE environment_id = ?
+                ORDER BY service_id ASC
+                """,
+                (legacy_id,),
+            ).fetchall()
+            for ref in routing_refs:
+                service_id = ref["service_id"]
+                existing = cur.execute(
+                    """
+                    SELECT 1
+                    FROM service_environment_routing
+                    WHERE service_id = ? AND environment_id = ?
+                    """,
+                    (service_id, canonical_id),
+                ).fetchone()
+                if existing:
+                    cur.execute(
+                        "DELETE FROM service_environment_routing WHERE service_id = ? AND environment_id = ?",
+                        (service_id, legacy_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE service_environment_routing
+                        SET environment_id = ?
+                        WHERE service_id = ? AND environment_id = ?
+                        """,
+                        (canonical_id, service_id, legacy_id),
+                    )
+
+            cur.execute(
+                "UPDATE deployments SET environment = ? WHERE environment = ?",
+                (canonical_id, legacy_id),
+            )
+            cur.execute(
+                "UPDATE deployments SET source_environment = ? WHERE source_environment = ?",
+                (canonical_id, legacy_id),
+            )
+            self._normalize_admin_environment_alias(cur, legacy_id, canonical_id)
+
+            canonical_row = cur.execute(
+                "SELECT display_name FROM environments WHERE id = ?",
+                (canonical_id,),
+            ).fetchone()
+            if canonical_row:
+                if not canonical_row["display_name"] and legacy_row["display_name"]:
+                    cur.execute(
+                        "UPDATE environments SET display_name = ? WHERE id = ?",
+                        (legacy_row["display_name"], canonical_id),
+                    )
+                cur.execute("DELETE FROM environments WHERE id = ?", (legacy_id,))
+                continue
+
+            lifecycle_state = _normalize_environment_lifecycle_state(
+                legacy_row["lifecycle_state"] if "lifecycle_state" in legacy_row.keys() else None,
+                bool(legacy_row["is_enabled"]) if legacy_row["is_enabled"] is not None else None,
+            )
+            cur.execute(
+                """
+                UPDATE environments
+                SET id = ?, name = ?, display_name = ?, lifecycle_state = ?, is_enabled = ?, delivery_group_id = ?, promotion_order = ?
+                WHERE id = ?
+                """,
+                (
+                    canonical_id,
+                    canonical_id,
+                    legacy_row["display_name"] or canonical_id,
+                    lifecycle_state,
+                    1 if _environment_is_enabled_for_lifecycle(lifecycle_state, bool(legacy_row["is_enabled"])) else 0,
+                    "",
+                    None,
+                    legacy_id,
+                ),
+            )
+
+    def normalize_legacy_environment_identities(self) -> int:
+        conn = self._connect()
+        cur = conn.cursor()
+        before = cur.execute("SELECT COUNT(1) FROM environments WHERE instr(id, ':') > 0").fetchone()[0]
+        self._normalize_legacy_environment_identity_rows(cur)
+        conn.commit()
+        after = cur.execute("SELECT COUNT(1) FROM environments WHERE instr(id, ':') > 0").fetchone()[0]
+        conn.close()
+        return int(before - after)
 
     def _read_registry(self) -> List[dict]:
         try:
@@ -2484,6 +2676,97 @@ class DynamoStorage:
             "delivery_group_environment_policy": self.list_delivery_group_environment_policy_for_environment(environment_id),
             "delivery_group_allowed_environments": self.list_delivery_groups_by_allowed_environment(environment_id),
         }
+
+    def normalize_legacy_environment_identities(self) -> int:
+        repaired = 0
+        for item in list(self._scan_environments()):
+            legacy_id = item.get("id") or item.get("sk")
+            canonical_id = _legacy_environment_canonical_id(legacy_id, item.get("name"))
+            if not canonical_id or canonical_id == legacy_id:
+                continue
+
+            canonical_item = self._get_environment_item(canonical_id)
+            if canonical_item:
+                if not canonical_item.get("display_name") and item.get("display_name"):
+                    canonical_item["display_name"] = item.get("display_name")
+                    self.table.put_item(Item=canonical_item)
+                self.table.delete_item(Key={"pk": "ENVIRONMENT", "sk": legacy_id})
+            else:
+                updated_item = {
+                    **item,
+                    "pk": "ENVIRONMENT",
+                    "sk": canonical_id,
+                    "id": canonical_id,
+                    "name": canonical_id,
+                    "display_name": item.get("display_name") or canonical_id,
+                    "lifecycle_state": _normalize_environment_lifecycle_state(
+                        item.get("lifecycle_state"),
+                        item.get("is_enabled", True),
+                    ),
+                    "is_enabled": _environment_is_enabled_for_lifecycle(
+                        item.get("lifecycle_state"),
+                        item.get("is_enabled", True),
+                    ),
+                }
+                updated_item.pop("delivery_group_id", None)
+                updated_item.pop("promotion_order", None)
+                self.table.put_item(Item=updated_item)
+                self.table.delete_item(Key={"pk": "ENVIRONMENT", "sk": legacy_id})
+
+            for binding in list(self.list_delivery_group_environment_policy_for_environment(legacy_id)):
+                group_id = binding.get("delivery_group_id")
+                if not group_id:
+                    continue
+                self.table.delete_item(Key={"pk": "DG_ENV_POLICY", "sk": f"{group_id}#{legacy_id}"})
+                existing_binding = next(
+                    (
+                        row
+                        for row in self.list_delivery_group_environment_policy(group_id)
+                        if row.get("environment_id") == canonical_id
+                    ),
+                    None,
+                )
+                if existing_binding:
+                    continue
+                self.upsert_delivery_group_environment_policy(
+                    {
+                        "delivery_group_id": group_id,
+                        "environment_id": canonical_id,
+                        "is_enabled": binding.get("is_enabled", True),
+                        "order_index": binding.get("order_index", 0),
+                    }
+                )
+
+            for route in list(self.list_service_environment_routing_for_environment(legacy_id)):
+                service_id = route.get("service_id")
+                if not service_id:
+                    continue
+                self.table.delete_item(Key={"pk": "SERVICE_ENV_ROUTING", "sk": f"{service_id}#{legacy_id}"})
+                existing_route = self.get_service_environment_routing(service_id, canonical_id)
+                if existing_route:
+                    continue
+                self.upsert_service_environment_routing(
+                    {
+                        "service_id": service_id,
+                        "environment_id": canonical_id,
+                        "recipe_id": route.get("recipe_id"),
+                    }
+                )
+
+            deployment_items = self.table.scan(
+                FilterExpression=Attr("pk").eq("DEPLOYMENT")
+                & (Attr("environment").eq(legacy_id) | Attr("sourceEnvironment").eq(legacy_id))
+            ).get("Items", [])
+            for deployment in deployment_items:
+                updated = dict(deployment)
+                if updated.get("environment") == legacy_id:
+                    updated["environment"] = canonical_id
+                if updated.get("sourceEnvironment") == legacy_id:
+                    updated["sourceEnvironment"] = canonical_id
+                self.table.put_item(Item=updated)
+
+            repaired += 1
+        return repaired
 
     def delete_environment(self, environment_id: str) -> bool:
         deleted = self.get_environment(environment_id) is not None
