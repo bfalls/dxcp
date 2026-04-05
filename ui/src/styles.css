@@ -647,6 +647,23 @@ body {
   margin: 0;
 }
 
+.new-section-divider {
+  border-top: 1px solid rgba(183, 179, 166, 0.12);
+  margin: 4px 0 6px;
+}
+
+.new-engine-adapter-connection-sections .new-section-header {
+  margin-top: 6px;
+}
+
+.new-engine-adapter-connection-sections .new-section-header:first-of-type {
+  margin-top: 0;
+}
+
+.new-engine-adapter-connection-grid-secondary {
+  grid-column: 2;
+}
+
 .new-explanation-stack {
   display: grid;
   gap: 12px;
@@ -854,36 +871,53 @@ body {
 }
 
 .loading-text {
+  display: inline-flex;
+  align-items: baseline;
+  white-space: pre;
+  color: var(--ink);
+}
+
+.loading-text-char {
   display: inline-block;
-  color: var(--muted);
-  background-image: linear-gradient(
-    110deg,
-    rgba(183, 179, 166, 0.45) 0%,
-    rgba(244, 241, 230, 0.92) 45%,
-    rgba(183, 179, 166, 0.45) 100%
-  );
-  background-size: 220% 100%;
-  background-position: 100% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: loading-text-wave 1.4s linear infinite;
+  opacity: 0.3;
+  animation: loading-text-wave calc(var(--loading-char-count, 10) * 140ms + 1000ms) linear infinite;
+  animation-delay: calc((var(--loading-char-count, 10) - var(--loading-char-index, 0) - 1) * 140ms * -1);
 }
 
 @keyframes loading-text-wave {
   0% {
-    background-position: 100% 0;
+    opacity: 0.5;
   }
 
+  10.526% {
+    opacity: 0.75;
+  }
+
+  21.053% {
+    opacity: 1;
+  }
+
+  31.579% {
+    opacity: 0.75;
+  }
+
+  42.105% {
+    opacity: 0.5;
+  }
+
+  52.632%,
   100% {
-    background-position: -100% 0;
+    opacity: 0.3;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .loading-text {
+  }
+
+  .loading-text-char {
     animation: none;
-    background-position: 50% 0;
+    opacity: 0.7;
   }
 }
 
@@ -2250,6 +2284,10 @@ body {
   gap: 12px;
 }
 
+.new-admin-stack > section:not(:last-child) {
+  margin-bottom: 6px;
+}
+
 .new-admin-diagnostics {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2296,6 +2334,24 @@ body {
 .new-field span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.new-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.new-label-with-help-tooltip .info-tooltip-button {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+}
+
+.new-section-heading-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .new-field input,
@@ -2464,6 +2520,10 @@ body {
 
   .new-intent-entry-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-engine-adapter-connection-grid-secondary {
+    grid-column: auto;
   }
 
   .new-failure-narrative-grid {

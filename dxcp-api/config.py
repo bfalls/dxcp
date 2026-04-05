@@ -36,7 +36,7 @@ class Settings:
         content_types = self._get("allowed_content_types", "DXCP_ALLOWED_CONTENT_TYPES", "application/zip,application/gzip", str)
         self.allowed_content_types = [c.strip() for c in content_types.split(",") if c.strip()]
 
-        self.spinnaker_mode = os.getenv("DXCP_SPINNAKER_MODE", "http")
+        self.spinnaker_mode = self._get("spinnaker/mode", "DXCP_SPINNAKER_MODE", "http", str)
         self.spinnaker_base_url = self._get("spinnaker/gate_url", "DXCP_SPINNAKER_GATE_URL", "", str)
         self.spinnaker_application = self._get(
             "spinnaker_application",

@@ -1,4 +1,4 @@
-import { render, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { MemoryRouter } from 'react-router-dom'
@@ -288,7 +288,8 @@ const buildFetchMock = ({
   failEnvironments,
   failServiceStatusFor,
   failDeploymentsFor,
-  mutationsDisabled
+  mutationsDisabled,
+  engineAdapter
 }) => {
   let groups = deliveryGroups || [
     {
@@ -344,6 +345,35 @@ const buildFetchMock = ({
     adminEnvironments || [
       { environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', lifecycle_state: 'active', is_enabled: true }
     ]
+  let engineAdapterState =
+    engineAdapter || {
+      adapter_id: 'main',
+      label: 'Primary deployment engine',
+      engine_type: 'SPINNAKER',
+      engine_options: [
+        { id: 'SPINNAKER', label: 'Spinnaker', availability: 'active' },
+        { id: 'ARGO_CD', label: 'Argo CD', availability: 'planned' }
+      ],
+      config: {
+        mode: 'http',
+        gate_url: 'https://gate.example.test',
+        gate_header_name: 'X-Gate-Token',
+        gate_header_value_configured: true,
+        auth0_domain: 'tenant.example.test',
+        auth0_client_id: 'client-123',
+        auth0_client_secret_configured: true,
+        auth0_audience: 'https://gate.example.test/api',
+        auth0_scope: 'openid profile',
+        auth0_refresh_skew_seconds: 60,
+        mtls_cert_path: '',
+        mtls_key_path: '',
+        mtls_ca_path: '',
+        mtls_server_name: '',
+        engine_lambda_url: 'https://lambda.example.test',
+        engine_lambda_token_configured: true
+      },
+      source: 'runtime'
+    }
   const dgBindingsByGroup = new Map()
   const routesByService = new Map()
   return async (url, options = {}) => {
@@ -505,6 +535,65 @@ const buildFetchMock = ({
         default_refresh_interval_seconds: 300,
         min_refresh_interval_seconds: 60,
         max_refresh_interval_seconds: 3600
+      })
+    }
+    if (pathname === '/v1/admin/system/engine-adapters/main' && (!options.method || options.method === 'GET')) {
+      return ok(engineAdapterState)
+    }
+    if (pathname === '/v1/admin/system/engine-adapters/main' && options.method === 'PUT') {
+      const body = JSON.parse(options.body || '{}')
+      const config = body?.config || {}
+      engineAdapterState = {
+        ...engineAdapterState,
+        engine_type: body?.engine_type || 'SPINNAKER',
+        config: {
+          ...engineAdapterState.config,
+          mode: config.mode || engineAdapterState.config.mode,
+          gate_url: config.gate_url ?? engineAdapterState.config.gate_url,
+          gate_header_name: config.gate_header_name ?? engineAdapterState.config.gate_header_name,
+          gate_header_value_configured:
+            typeof config.gate_header_value === 'string' && config.gate_header_value.length > 0
+              ? true
+              : engineAdapterState.config.gate_header_value_configured,
+          auth0_domain: config.auth0_domain ?? engineAdapterState.config.auth0_domain,
+          auth0_client_id: config.auth0_client_id ?? engineAdapterState.config.auth0_client_id,
+          auth0_client_secret_configured:
+            typeof config.auth0_client_secret === 'string' && config.auth0_client_secret.length > 0
+              ? true
+              : engineAdapterState.config.auth0_client_secret_configured,
+          auth0_audience: config.auth0_audience ?? engineAdapterState.config.auth0_audience,
+          auth0_scope: config.auth0_scope ?? engineAdapterState.config.auth0_scope,
+          auth0_refresh_skew_seconds:
+            config.auth0_refresh_skew_seconds ?? engineAdapterState.config.auth0_refresh_skew_seconds,
+          mtls_cert_path: config.mtls_cert_path ?? engineAdapterState.config.mtls_cert_path,
+          mtls_key_path: config.mtls_key_path ?? engineAdapterState.config.mtls_key_path,
+          mtls_ca_path: config.mtls_ca_path ?? engineAdapterState.config.mtls_ca_path,
+          mtls_server_name: config.mtls_server_name ?? engineAdapterState.config.mtls_server_name,
+          engine_lambda_url: config.engine_lambda_url ?? engineAdapterState.config.engine_lambda_url,
+          engine_lambda_token_configured:
+            typeof config.engine_lambda_token === 'string' && config.engine_lambda_token.length > 0
+              ? true
+              : engineAdapterState.config.engine_lambda_token_configured
+        }
+      }
+      return ok(engineAdapterState)
+    }
+    if (pathname === '/v1/admin/system/engine-adapters/main/validate' && options.method === 'POST') {
+      const body = JSON.parse(options.body || '{}')
+      const config = body?.config || {}
+      if (config.mode === 'mtls' && (!config.mtls_cert_path || !config.mtls_key_path)) {
+        return ok({
+          status: 'INVALID',
+          summary: 'Engine adapter settings are incomplete or inconsistent.',
+          errors: [{ field: 'mtls_cert_path', message: 'mTLS mode requires both client certificate and client key paths.' }],
+          warnings: []
+        })
+      }
+      return ok({
+        status: 'VALID',
+        summary: 'DXCP reached the configured Spinnaker Gate endpoint.',
+        errors: [],
+        warnings: []
       })
     }
     if (pathname === '/v1/environments' && (!options.method || options.method === 'GET')) {
@@ -2148,19 +2237,21 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
-    await view.findByRole('tablist', { name: 'Admin sub-tabs' })
+    const adminTablist = await view.findByRole('tablist', { name: 'Admin sub-tabs' })
     assert.equal(view.queryByRole('heading', { name: 'Admin' }), null)
-    const tabs = await view.findAllByRole('tab')
-    assert.equal(tabs.length, 4)
+    const tabs = within(adminTablist).getAllByRole('tab')
+    assert.equal(tabs.length, 5)
     const deliveryGroupsTab = view.getByRole('tab', { name: /Delivery Groups/i })
+    const engineAdaptersTab = view.getByRole('tab', { name: /Engine/i })
     const recipesTab = view.getByRole('tab', { name: /Recipes/i })
     const environmentsTab = view.getByRole('tab', { name: /Environments/i })
     const systemSettingsTab = view.getByRole('tab', { name: /System Settings/i })
-    assert.equal(deliveryGroupsTab.getAttribute('aria-selected'), 'true')
+    assert.equal(engineAdaptersTab.getAttribute('aria-selected'), 'true')
+    assert.equal(deliveryGroupsTab.getAttribute('aria-selected'), 'false')
     assert.equal(recipesTab.getAttribute('aria-selected'), 'false')
     assert.equal(environmentsTab.getAttribute('aria-selected'), 'false')
     assert.equal(systemSettingsTab.getAttribute('aria-selected'), 'false')
-    await view.findByRole('heading', { name: 'Delivery Groups' })
+    await view.findByRole('heading', { name: 'Deployment Engine' })
     assert.equal(view.queryByText('Focused governance workspace'), null)
   })
 
@@ -2181,6 +2272,9 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin')
 
+    await view.findByRole('heading', { name: 'Deployment Engine' })
+    assert.equal(view.queryByText('Sandbox'), null)
+    fireEvent.click(view.getByRole('tab', { name: /Delivery Groups/i }))
     await view.findByText('Delivery-group policy remains the independent guardrail')
     assert.equal(view.queryByText('Sandbox'), null)
     fireEvent.click(view.getByRole('tab', { name: /Environments/i }))
@@ -2232,6 +2326,72 @@ export async function runAllTests() {
     const sandboxMatches = await view.findAllByText('Sandbox')
     assert.ok(sandboxMatches.length >= 1)
     assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
+  })
+
+  await runTest('New experience admin route supports ?tab=engine-adapters and shows the DXCP-owned adapter workspace', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const view = renderApp('/new/admin?tab=engine-adapters')
+
+    await view.findByRole('heading', { name: 'Deployment Engine' })
+    await view.findByRole('heading', { name: 'Configured Engine' })
+    await view.findAllByText('Spinnaker')
+    await view.findAllByText('HTTP')
+    await view.findByDisplayValue('Runtime')
+    assert.equal(view.getByRole('tab', { name: /^Engine$/i }).getAttribute('aria-selected'), 'true')
+  })
+
+  await runTest('New experience admin environments use readable lifecycle and type labels', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const view = renderApp('/new/admin?tab=environments')
+
+    await view.findByText('Non-production')
+    await view.findAllByText('Active')
+  })
+
+  await runTest('New experience admin recipes use readable labels for status and engine type', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true
+    })
+    const view = renderApp('/new/admin?tab=recipes')
+
+    await view.findAllByText('Active')
+    fireEvent.click(await view.findByRole('button', { name: 'Open Default Deploy' }))
+    fireEvent.click(await view.findByRole('tab', { name: 'Engine binding' }))
+    await view.findByDisplayValue('Spinnaker')
   })
 
   await runTest('New experience admin route blocks non-admin access without rendering a partial Admin shell', async () => {

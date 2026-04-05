@@ -2439,6 +2439,416 @@ def _ui_refresh_settings() -> dict:
     }
 
 
+ENGINE_ADAPTER_MODES = {"http", "mtls", "stub"}
+
+
+def _engine_adapter_source_label() -> str:
+    return "ssm" if (SETTINGS.ssm_prefix or "").strip() else "runtime"
+
+
+def _engine_config_from_settings() -> dict:
+    return {
+        "mode": str(SETTINGS.spinnaker_mode or "http").strip().lower() or "http",
+        "gate_url": SETTINGS.spinnaker_base_url or "",
+        "gate_header_name": SETTINGS.spinnaker_header_name or "",
+        "gate_header_value_configured": bool(SETTINGS.spinnaker_header_value),
+        "auth0_domain": SETTINGS.spinnaker_auth0_domain or "",
+        "auth0_client_id": SETTINGS.spinnaker_auth0_client_id or "",
+        "auth0_client_secret_configured": bool(SETTINGS.spinnaker_auth0_client_secret),
+        "auth0_audience": SETTINGS.spinnaker_auth0_audience or "",
+        "auth0_scope": SETTINGS.spinnaker_auth0_scope or "",
+        "auth0_refresh_skew_seconds": int(SETTINGS.spinnaker_auth0_refresh_skew_seconds or 0),
+        "mtls_cert_path": SETTINGS.spinnaker_mtls_cert_path or "",
+        "mtls_key_path": SETTINGS.spinnaker_mtls_key_path or "",
+        "mtls_ca_path": SETTINGS.spinnaker_mtls_ca_path or "",
+        "mtls_server_name": SETTINGS.spinnaker_mtls_server_name or "",
+        "engine_lambda_url": SETTINGS.engine_lambda_url or "",
+        "engine_lambda_token_configured": bool(SETTINGS.engine_lambda_token),
+    }
+
+
+def _read_engine_config_from_ssm() -> Optional[dict]:
+    prefix = (SETTINGS.ssm_prefix or "").strip().rstrip("/")
+    if not prefix or boto3 is None:
+        return None
+    if BotoConfig is not None:
+        cfg = BotoConfig(connect_timeout=1, read_timeout=1, retries={"max_attempts": 1, "mode": "standard"})
+        try:
+            client = boto3.client("ssm", config=cfg)
+        except TypeError:
+            client = boto3.client("ssm")
+    else:
+        client = boto3.client("ssm")
+
+    def _get_value(name: str) -> Optional[str]:
+        try:
+            response = client.get_parameter(Name=f"{prefix}/{name}", WithDecryption=True)
+        except Exception:
+            return None
+        value = response.get("Parameter", {}).get("Value")
+        if value is None:
+            return None
+        return str(value)
+
+    refresh_skew_raw = _get_value("spinnaker/auth0_refresh_skew_seconds")
+    try:
+        refresh_skew = int(refresh_skew_raw) if refresh_skew_raw not in (None, "") else int(SETTINGS.spinnaker_auth0_refresh_skew_seconds or 0)
+    except Exception:
+        refresh_skew = int(SETTINGS.spinnaker_auth0_refresh_skew_seconds or 0)
+
+    return {
+        "mode": (_get_value("spinnaker/mode") or str(SETTINGS.spinnaker_mode or "http")).strip().lower() or "http",
+        "gate_url": _get_value("spinnaker/gate_url") or "",
+        "gate_header_name": _get_value("spinnaker/gate_header_name") or "",
+        "gate_header_value_configured": _get_value("spinnaker/gate_header_value") not in (None, ""),
+        "auth0_domain": _get_value("spinnaker/auth0_domain") or "",
+        "auth0_client_id": _get_value("spinnaker/auth0_client_id") or "",
+        "auth0_client_secret_configured": _get_value("spinnaker/auth0_client_secret") not in (None, ""),
+        "auth0_audience": _get_value("spinnaker/auth0_audience") or "",
+        "auth0_scope": _get_value("spinnaker/auth0_scope") or "",
+        "auth0_refresh_skew_seconds": refresh_skew,
+        "mtls_cert_path": _get_value("spinnaker/mtls_cert_path") or "",
+        "mtls_key_path": _get_value("spinnaker/mtls_key_path") or "",
+        "mtls_ca_path": _get_value("spinnaker/mtls_ca_path") or "",
+        "mtls_server_name": _get_value("spinnaker/mtls_server_name") or "",
+        "engine_lambda_url": _get_value("engine/lambda/url") or "",
+        "engine_lambda_token_configured": _get_value("engine/lambda/token") not in (None, ""),
+    }
+
+
+def _current_engine_adapter_config() -> dict:
+    source = _engine_adapter_source_label()
+    config = _read_engine_config_from_ssm() if source == "ssm" else None
+    if config is None:
+        config = _engine_config_from_settings()
+    return {
+        "adapter_id": "main",
+        "label": "Primary deployment engine",
+        "engine_type": EngineType.SPINNAKER.value,
+        "engine_options": [
+            {"id": EngineType.SPINNAKER.value, "label": "Spinnaker", "availability": "active"},
+            {"id": "ARGO_CD", "label": "Argo CD", "availability": "planned"},
+            {"id": "FLUX", "label": "Flux", "availability": "planned"},
+            {"id": "OCTOPUS", "label": "Octopus", "availability": "planned"},
+            {"id": "HARNESS", "label": "Harness", "availability": "planned"},
+        ],
+        "config": config,
+        "source": source,
+    }
+
+
+def _normalize_optional_string(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _engine_adapter_mode_feedback_fields(mode: str) -> set[str]:
+    shared = {
+        "payload",
+        "engine_type",
+        "mode",
+        "gate_url",
+        "gate_header_name",
+        "gate_header_value",
+        "engine_lambda_url",
+        "engine_lambda_token",
+        "auth0_refresh_skew_seconds",
+    }
+    if mode == "mtls":
+        return shared | {"mtls_cert_path", "mtls_key_path", "mtls_ca_path", "mtls_server_name"}
+    if mode == "http":
+        return shared | {"auth0_domain", "auth0_client_id", "auth0_client_secret", "auth0_audience", "auth0_scope"}
+    return shared
+
+
+def _filter_engine_adapter_feedback(mode: str, items: list[dict]) -> list[dict]:
+    allowed_fields = _engine_adapter_mode_feedback_fields(mode)
+    return [item for item in items if item.get("field") in allowed_fields]
+
+
+def _validate_engine_adapter_normalized(config: dict) -> tuple[list[dict], list[dict]]:
+    errors: list[dict] = []
+    warnings: list[dict] = []
+    mode = config["mode"]
+
+    if config["gate_header_name"] and not config["gate_header_value"]:
+        warnings.append({"field": "gate_header_value", "message": "Header value was not provided in this request. DXCP will keep the existing value if one is already configured."})
+    if config["gate_header_value"] and not config["gate_header_name"]:
+        errors.append({"field": "gate_header_name", "message": "Header name is required when a header value is provided."})
+
+    if mode in {"http", "mtls"}:
+        if not config["gate_url"]:
+            errors.append({"field": "gate_url", "message": "Gate URL is required for live Spinnaker connectivity."})
+        else:
+            parsed = urlparse(config["gate_url"])
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                errors.append({"field": "gate_url", "message": "Gate URL must be a valid http or https URL."})
+            if mode == "mtls" and parsed.scheme != "https":
+                errors.append({"field": "gate_url", "message": "mTLS mode requires an https Gate URL."})
+
+    auth0_fields = [
+        config["auth0_domain"],
+        config["auth0_client_id"],
+        config["auth0_client_secret"],
+        config["auth0_audience"],
+    ]
+    has_any_auth0 = any(auth0_fields)
+    has_all_auth0 = all(auth0_fields)
+    if has_any_auth0 and not has_all_auth0:
+        errors.append({"field": "auth0_client_secret", "message": "Auth0 domain, client ID, client secret, and audience must all be set together."})
+
+    has_any_mtls = any(
+        [
+            config["mtls_cert_path"],
+            config["mtls_key_path"],
+            config["mtls_ca_path"],
+            config["mtls_server_name"],
+        ]
+    )
+    if mode == "mtls" and (not config["mtls_cert_path"] or not config["mtls_key_path"]):
+        errors.append({"field": "mtls_cert_path", "message": "mTLS mode requires both client certificate and client key paths."})
+    elif mode not in {"mtls", "stub"} and has_any_mtls:
+        warnings.append({"field": "mtls_cert_path", "message": "mTLS settings are only used when mode is mtls."})
+
+    if config["engine_lambda_token"] and not config["engine_lambda_url"]:
+        warnings.append({"field": "engine_lambda_token", "message": "Engine lambda token is configured without an engine lambda URL."})
+
+    return _filter_engine_adapter_feedback(mode, errors), _filter_engine_adapter_feedback(mode, warnings)
+
+
+def _parse_engine_adapter_payload(payload: object) -> tuple[Optional[dict], list[dict]]:
+    errors: list[dict] = []
+    if not isinstance(payload, dict):
+        return None, [{"field": "payload", "message": "Payload must be an object."}]
+
+    config_payload = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    engine_type = _normalize_optional_string(payload.get("engine_type") or payload.get("engineType") or EngineType.SPINNAKER.value)
+    if engine_type != EngineType.SPINNAKER.value:
+        errors.append({"field": "engine_type", "message": "Only Spinnaker is supported for the primary deployment engine today."})
+
+    mode = _normalize_optional_string(config_payload.get("mode")).lower() or str(SETTINGS.spinnaker_mode or "http").strip().lower() or "http"
+    if mode not in ENGINE_ADAPTER_MODES:
+        errors.append({"field": "mode", "message": "Mode must be one of http, mtls, or stub."})
+
+    normalized = {
+        "engine_type": EngineType.SPINNAKER.value,
+        "mode": mode,
+        "gate_url": _normalize_optional_string(config_payload.get("gate_url") or config_payload.get("gateUrl")),
+        "gate_header_name": _normalize_optional_string(
+            config_payload.get("gate_header_name") or config_payload.get("gateHeaderName")
+        ),
+        "gate_header_value": _normalize_optional_string(
+            config_payload.get("gate_header_value") or config_payload.get("gateHeaderValue")
+        ),
+        "auth0_domain": _normalize_optional_string(config_payload.get("auth0_domain") or config_payload.get("auth0Domain")),
+        "auth0_client_id": _normalize_optional_string(
+            config_payload.get("auth0_client_id") or config_payload.get("auth0ClientId")
+        ),
+        "auth0_client_secret": _normalize_optional_string(
+            config_payload.get("auth0_client_secret") or config_payload.get("auth0ClientSecret")
+        ),
+        "auth0_audience": _normalize_optional_string(
+            config_payload.get("auth0_audience") or config_payload.get("auth0Audience")
+        ),
+        "auth0_scope": _normalize_optional_string(config_payload.get("auth0_scope") or config_payload.get("auth0Scope")),
+        "mtls_cert_path": _normalize_optional_string(
+            config_payload.get("mtls_cert_path") or config_payload.get("mtlsCertPath")
+        ),
+        "mtls_key_path": _normalize_optional_string(config_payload.get("mtls_key_path") or config_payload.get("mtlsKeyPath")),
+        "mtls_ca_path": _normalize_optional_string(config_payload.get("mtls_ca_path") or config_payload.get("mtlsCaPath")),
+        "mtls_server_name": _normalize_optional_string(
+            config_payload.get("mtls_server_name") or config_payload.get("mtlsServerName")
+        ),
+        "engine_lambda_url": _normalize_optional_string(
+            config_payload.get("engine_lambda_url") or config_payload.get("engineLambdaUrl")
+        ),
+        "engine_lambda_token": _normalize_optional_string(
+            config_payload.get("engine_lambda_token") or config_payload.get("engineLambdaToken")
+        ),
+    }
+    refresh_skew = config_payload.get("auth0_refresh_skew_seconds")
+    if refresh_skew is None:
+        refresh_skew = config_payload.get("auth0RefreshSkewSeconds")
+    if refresh_skew in (None, ""):
+        normalized["auth0_refresh_skew_seconds"] = int(SETTINGS.spinnaker_auth0_refresh_skew_seconds or 0)
+    else:
+        try:
+            normalized["auth0_refresh_skew_seconds"] = max(0, int(refresh_skew))
+        except Exception:
+            errors.append({"field": "auth0_refresh_skew_seconds", "message": "Refresh skew seconds must be a non-negative integer."})
+            normalized["auth0_refresh_skew_seconds"] = int(SETTINGS.spinnaker_auth0_refresh_skew_seconds or 0)
+
+    return normalized, errors
+
+
+def _normalize_engine_adapter_payload(payload: object) -> tuple[Optional[dict], list[dict], list[dict]]:
+    normalized, errors = _parse_engine_adapter_payload(payload)
+    if normalized is None:
+        return None, errors, []
+    validation_errors, validation_warnings = _validate_engine_adapter_normalized(normalized)
+    return normalized, [*errors, *validation_errors], validation_warnings
+
+
+def _spinnaker_from_normalized_engine_config(config: dict) -> SpinnakerAdapter:
+    mode = config.get("mode", "http")
+    use_auth0 = mode == "http"
+    use_mtls = mode == "mtls"
+    return SpinnakerAdapter(
+        config.get("gate_url", ""),
+        mode,
+        config.get("engine_lambda_url", ""),
+        config.get("engine_lambda_token", ""),
+        application=SETTINGS.spinnaker_application,
+        header_name=config.get("gate_header_name", ""),
+        header_value=config.get("gate_header_value", ""),
+        auth0_domain=config.get("auth0_domain", "") if use_auth0 else "",
+        auth0_client_id=config.get("auth0_client_id", "") if use_auth0 else "",
+        auth0_client_secret=config.get("auth0_client_secret", "") if use_auth0 else "",
+        auth0_audience=config.get("auth0_audience", "") if use_auth0 else "",
+        auth0_scope=config.get("auth0_scope", "") if use_auth0 else "",
+        auth0_refresh_skew_seconds=config.get("auth0_refresh_skew_seconds", 60),
+        mtls_cert_path=config.get("mtls_cert_path", "") if use_mtls else "",
+        mtls_key_path=config.get("mtls_key_path", "") if use_mtls else "",
+        mtls_ca_path=config.get("mtls_ca_path", "") if use_mtls else "",
+        mtls_server_name=config.get("mtls_server_name", "") if use_mtls else "",
+        request_id_provider=get_request_id,
+    )
+
+
+def _apply_runtime_engine_config(config: dict) -> None:
+    global spinnaker
+    SETTINGS.spinnaker_mode = config["mode"]
+    SETTINGS.spinnaker_base_url = config["gate_url"]
+    SETTINGS.spinnaker_header_name = config["gate_header_name"]
+    SETTINGS.spinnaker_header_value = config["gate_header_value"]
+    SETTINGS.spinnaker_auth0_domain = config["auth0_domain"]
+    SETTINGS.spinnaker_auth0_client_id = config["auth0_client_id"]
+    SETTINGS.spinnaker_auth0_client_secret = config["auth0_client_secret"]
+    SETTINGS.spinnaker_auth0_audience = config["auth0_audience"]
+    SETTINGS.spinnaker_auth0_scope = config["auth0_scope"]
+    SETTINGS.spinnaker_auth0_refresh_skew_seconds = config["auth0_refresh_skew_seconds"]
+    SETTINGS.spinnaker_mtls_cert_path = config["mtls_cert_path"]
+    SETTINGS.spinnaker_mtls_key_path = config["mtls_key_path"]
+    SETTINGS.spinnaker_mtls_ca_path = config["mtls_ca_path"]
+    SETTINGS.spinnaker_mtls_server_name = config["mtls_server_name"]
+    SETTINGS.engine_lambda_url = config["engine_lambda_url"]
+    SETTINGS.engine_lambda_token = config["engine_lambda_token"]
+    spinnaker = _spinnaker_from_normalized_engine_config(config)
+
+
+def _engine_adapter_validation_candidate(normalized: dict) -> dict:
+    candidate = dict(normalized)
+    if candidate.get("gate_header_name") and not candidate.get("gate_header_value"):
+        candidate["gate_header_value"] = SETTINGS.spinnaker_header_value or ""
+    if (
+        any(
+            [
+                candidate.get("auth0_domain"),
+                candidate.get("auth0_client_id"),
+                candidate.get("auth0_audience"),
+                candidate.get("auth0_scope"),
+            ]
+        )
+        and not candidate.get("auth0_client_secret")
+    ):
+        candidate["auth0_client_secret"] = SETTINGS.spinnaker_auth0_client_secret or ""
+    if candidate.get("engine_lambda_url") and not candidate.get("engine_lambda_token"):
+        candidate["engine_lambda_token"] = SETTINGS.engine_lambda_token or ""
+    return candidate
+
+
+def _engine_config_ssm_items(config: dict) -> dict[str, str]:
+    return {
+        "spinnaker/mode": config["mode"],
+        "spinnaker/gate_url": config["gate_url"],
+        "spinnaker/gate_header_name": config["gate_header_name"],
+        "spinnaker/auth0_domain": config["auth0_domain"],
+        "spinnaker/auth0_client_id": config["auth0_client_id"],
+        "spinnaker/auth0_audience": config["auth0_audience"],
+        "spinnaker/auth0_scope": config["auth0_scope"],
+        "spinnaker/auth0_refresh_skew_seconds": str(config["auth0_refresh_skew_seconds"]),
+        "spinnaker/mtls_cert_path": config["mtls_cert_path"],
+        "spinnaker/mtls_key_path": config["mtls_key_path"],
+        "spinnaker/mtls_ca_path": config["mtls_ca_path"],
+        "spinnaker/mtls_server_name": config["mtls_server_name"],
+        "engine/lambda/url": config["engine_lambda_url"],
+    }
+
+
+def _persist_engine_config_to_ssm(config: dict) -> None:
+    prefix = (SETTINGS.ssm_prefix or "").strip().rstrip("/")
+    if not prefix:
+        return
+    if boto3 is None:
+        raise RuntimeError("boto3 is required for SSM operations")
+    if BotoConfig is not None:
+        cfg = BotoConfig(connect_timeout=1, read_timeout=1, retries={"max_attempts": 1, "mode": "standard"})
+        try:
+            client = boto3.client("ssm", config=cfg)
+        except TypeError:
+            client = boto3.client("ssm")
+    else:
+        client = boto3.client("ssm")
+    for key, value in _engine_config_ssm_items(config).items():
+        name = f"{prefix}/{key}"
+        if value is None or value == "":
+            try:
+                client.delete_parameter(Name=name)
+            except Exception:
+                pass
+            continue
+        client.put_parameter(Name=name, Value=value, Type="String", Overwrite=True)
+    secure_items = {
+        "spinnaker/gate_header_value": config.get("gate_header_value"),
+        "spinnaker/auth0_client_secret": config.get("auth0_client_secret"),
+        "engine/lambda/token": config.get("engine_lambda_token"),
+    }
+    for key, value in secure_items.items():
+        name = f"{prefix}/{key}"
+        if value is None or value == "":
+            try:
+                client.delete_parameter(Name=name)
+            except Exception:
+                pass
+            continue
+        client.put_parameter(Name=name, Value=value, Type="SecureString", Overwrite=True)
+
+
+def _audit_engine_adapter_changes(actor: Actor, claims: dict, request: Request, changes: dict[str, tuple[object, object]]) -> None:
+    request_id = get_request_id() or request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).isoformat()
+    actor_sub = claims.get("sub")
+    actor_email = claims.get("email") or claims.get("https://dxcp.example/claims/email") or actor.email
+    actor_azp = claims.get("azp")
+    for setting_key, (old_value, new_value) in changes.items():
+        detail = {
+            "request_id": request_id,
+            "timestamp": timestamp,
+            "setting_key": setting_key,
+            "old_value": old_value,
+            "new_value": new_value,
+            "actor_id": actor.actor_id,
+            "actor_sub": actor_sub,
+            "actor_email": actor_email,
+            "actor_azp": actor_azp,
+            "actor_role": actor.role.value,
+        }
+        storage.insert_audit_event(
+            {
+                "event_id": str(uuid.uuid4()),
+                "event_type": "ADMIN_CONFIG_CHANGE",
+                "actor_id": actor.actor_id,
+                "actor_role": actor.role.value,
+                "target_type": "AdminSetting",
+                "target_id": setting_key,
+                "timestamp": timestamp,
+                "outcome": "SUCCESS",
+                "summary": json.dumps(detail, sort_keys=True),
+            }
+        )
+
+
 def _validate_optional_http_url(field_name: str, value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -3977,6 +4387,223 @@ def get_admin_settings(request: Request, authorization: Optional[str] = Header(N
     payload["daily_deploy_quota"] = SETTINGS.daily_quota_deploy
     payload["daily_rollback_quota"] = SETTINGS.daily_quota_rollback
     return payload
+
+
+@app.get("/v1/admin/system/engine-adapters/main")
+def get_engine_adapter_settings(request: Request, authorization: Optional[str] = Header(None)):
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view engine adapter settings")
+    if role_error:
+        return role_error
+    return _current_engine_adapter_config()
+
+
+@app.put("/v1/admin/system/engine-adapters/main")
+def update_engine_adapter_settings(
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor, claims = get_actor_and_claims(authorization)
+    rate_limiter.check_mutate(actor.actor_id, "admin_system_engine_adapter_update")
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "update engine adapter settings")
+    if role_error:
+        return role_error
+    try:
+        guardrails.require_mutations_enabled()
+    except PolicyError as exc:
+        return error_response(exc.status_code, exc.code, exc.message)
+
+    normalized, errors, _warnings = _normalize_engine_adapter_payload(payload)
+    if errors:
+        return error_response(400, "INVALID_REQUEST", "Engine adapter settings are invalid", details={"errors": errors})
+    assert normalized is not None
+
+    previous = _current_engine_adapter_config()
+    current_config = previous.get("config", {})
+    previous_runtime = {
+        "mode": current_config.get("mode", "http"),
+        "gate_url": current_config.get("gate_url", ""),
+        "gate_header_name": current_config.get("gate_header_name", ""),
+        "gate_header_value": SETTINGS.spinnaker_header_value or "",
+        "auth0_domain": current_config.get("auth0_domain", ""),
+        "auth0_client_id": current_config.get("auth0_client_id", ""),
+        "auth0_client_secret": SETTINGS.spinnaker_auth0_client_secret or "",
+        "auth0_audience": current_config.get("auth0_audience", ""),
+        "auth0_scope": current_config.get("auth0_scope", ""),
+        "auth0_refresh_skew_seconds": current_config.get("auth0_refresh_skew_seconds", 60),
+        "mtls_cert_path": current_config.get("mtls_cert_path", ""),
+        "mtls_key_path": current_config.get("mtls_key_path", ""),
+        "mtls_ca_path": current_config.get("mtls_ca_path", ""),
+        "mtls_server_name": current_config.get("mtls_server_name", ""),
+        "engine_lambda_url": current_config.get("engine_lambda_url", ""),
+        "engine_lambda_token": SETTINGS.engine_lambda_token or "",
+    }
+    merged = dict(previous_runtime)
+    merged.update(normalized)
+    if not merged.get("gate_header_value"):
+        merged["gate_header_value"] = ""
+    if not normalized.get("auth0_client_secret"):
+        merged["auth0_client_secret"] = previous_runtime["auth0_client_secret"]
+    if not normalized.get("engine_lambda_token"):
+        merged["engine_lambda_token"] = previous_runtime["engine_lambda_token"]
+    if not normalized.get("gate_header_value") and normalized.get("gate_header_name"):
+        merged["gate_header_value"] = previous_runtime["gate_header_value"]
+
+    try:
+        if _engine_adapter_source_label() == "ssm":
+            _persist_engine_config_to_ssm(merged)
+        runtime_apply_warning = None
+        try:
+            _apply_runtime_engine_config(merged)
+        except Exception as exc:
+            runtime_apply_warning = redact_text(str(exc)) or "Runtime adapter could not be fully reloaded."
+        current = _current_engine_adapter_config()
+        previous_config = previous.get("config", {})
+        current_config = current.get("config", {})
+        _audit_engine_adapter_changes(
+            actor,
+            claims,
+            request,
+            {
+                "engine_adapter.engine_type": (previous.get("engine_type"), current.get("engine_type")),
+                "engine_adapter.spinnaker.mode": (previous_config.get("mode"), current_config.get("mode")),
+                "engine_adapter.spinnaker.gate_url": (previous_config.get("gate_url"), current_config.get("gate_url")),
+                "engine_adapter.spinnaker.gate_header_name": (
+                    previous_config.get("gate_header_name"),
+                    current_config.get("gate_header_name"),
+                ),
+                "engine_adapter.spinnaker.gate_header_value_configured": (
+                    previous_config.get("gate_header_value_configured"),
+                    current_config.get("gate_header_value_configured"),
+                ),
+                "engine_adapter.spinnaker.auth0_domain": (
+                    previous_config.get("auth0_domain"),
+                    current_config.get("auth0_domain"),
+                ),
+                "engine_adapter.spinnaker.auth0_client_id": (
+                    previous_config.get("auth0_client_id"),
+                    current_config.get("auth0_client_id"),
+                ),
+                "engine_adapter.spinnaker.auth0_client_secret_configured": (
+                    previous_config.get("auth0_client_secret_configured"),
+                    current_config.get("auth0_client_secret_configured"),
+                ),
+                "engine_adapter.spinnaker.auth0_audience": (
+                    previous_config.get("auth0_audience"),
+                    current_config.get("auth0_audience"),
+                ),
+                "engine_adapter.spinnaker.auth0_scope": (
+                    previous_config.get("auth0_scope"),
+                    current_config.get("auth0_scope"),
+                ),
+                "engine_adapter.spinnaker.auth0_refresh_skew_seconds": (
+                    previous_config.get("auth0_refresh_skew_seconds"),
+                    current_config.get("auth0_refresh_skew_seconds"),
+                ),
+                "engine_adapter.spinnaker.mtls_cert_path": (
+                    previous_config.get("mtls_cert_path"),
+                    current_config.get("mtls_cert_path"),
+                ),
+                "engine_adapter.spinnaker.mtls_key_path": (
+                    previous_config.get("mtls_key_path"),
+                    current_config.get("mtls_key_path"),
+                ),
+                "engine_adapter.spinnaker.mtls_ca_path": (
+                    previous_config.get("mtls_ca_path"),
+                    current_config.get("mtls_ca_path"),
+                ),
+                "engine_adapter.spinnaker.mtls_server_name": (
+                    previous_config.get("mtls_server_name"),
+                    current_config.get("mtls_server_name"),
+                ),
+                "engine_adapter.runtime.engine_lambda_url": (
+                    previous_config.get("engine_lambda_url"),
+                    current_config.get("engine_lambda_url"),
+                ),
+                "engine_adapter.runtime.engine_lambda_token_configured": (
+                    previous_config.get("engine_lambda_token_configured"),
+                    current_config.get("engine_lambda_token_configured"),
+                ),
+            },
+        )
+        if runtime_apply_warning:
+            current["runtime_apply_warning"] = runtime_apply_warning
+        return current
+    except Exception as exc:
+        return error_response(500, "INTERNAL_ERROR", redact_text(str(exc)) or "Unable to update engine adapter settings")
+
+
+@app.post("/v1/admin/system/engine-adapters/main/validate")
+def validate_engine_adapter_settings(
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    actor, claims = get_actor_and_claims(authorization)
+    user_bearer_token = _extract_bearer_token(authorization)
+    user_principal = _derive_gate_user_from_claims(claims)
+    rate_limiter.check_read(actor.actor_id)
+    role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "validate engine adapter settings")
+    if role_error:
+        return role_error
+
+    normalized, errors = _parse_engine_adapter_payload(payload)
+    if errors:
+        return {
+            "status": "INVALID",
+            "summary": "Engine adapter settings are incomplete or inconsistent.",
+            "errors": errors,
+            "warnings": [],
+        }
+    assert normalized is not None
+    candidate = _engine_adapter_validation_candidate(normalized)
+    candidate_errors, candidate_warnings = _validate_engine_adapter_normalized(candidate)
+    if candidate_errors:
+        return {
+            "status": "INVALID",
+            "summary": "Engine adapter settings are incomplete or inconsistent.",
+            "errors": candidate_errors,
+            "warnings": candidate_warnings,
+        }
+    if normalized["mode"] != "stub" and not user_principal:
+        return error_response(401, "UNAUTHORIZED", "Authenticated principal claim is required")
+    if normalized["mode"] == "stub":
+        return {
+            "status": "WARNING",
+            "summary": "Stub mode preserves local development behavior but does not perform a live Spinnaker connection check.",
+            "errors": [],
+            "warnings": candidate_warnings,
+        }
+
+    try:
+        adapter = _spinnaker_from_normalized_engine_config(candidate)
+        health = adapter.check_health(
+            timeout_seconds=5,
+            user_bearer_token=user_bearer_token,
+            user_principal=user_principal,
+        )
+        if health.get("status") == "UP":
+            return {
+                "status": "VALID" if not candidate_warnings else "WARNING",
+                "summary": "DXCP reached the configured Spinnaker Gate endpoint.",
+                "errors": [],
+                "warnings": candidate_warnings,
+            }
+        return {
+            "status": "INVALID",
+            "summary": "DXCP could not confirm the configured Spinnaker Gate endpoint.",
+            "errors": [{"field": "gate_url", "message": "Gate health did not return an operational status."}],
+            "warnings": candidate_warnings,
+        }
+    except Exception as exc:
+        return {
+            "status": "INVALID",
+            "summary": "DXCP could not validate the configured Spinnaker connection.",
+            "errors": [{"field": "gate_url", "message": redact_text(str(exc)) or "Connection attempt failed."}],
+            "warnings": candidate_warnings,
+        }
 
 
 @app.get("/v1/audit/events")

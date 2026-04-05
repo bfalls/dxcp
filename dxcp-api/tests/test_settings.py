@@ -3,6 +3,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+import importlib
 
 import httpx
 import pytest
@@ -78,3 +79,22 @@ async def test_admin_settings_denied_for_non_admin(tmp_path: Path, monkeypatch):
         response = await client.get("/v1/settings/admin", headers=auth_header(["dxcp-observers"]))
     assert response.status_code == 403
     assert response.json()["code"] == "ROLE_FORBIDDEN"
+
+
+def test_spinnaker_mode_can_load_from_ssm_prefix(monkeypatch):
+    dxcp_api_dir = Path(__file__).resolve().parents[1]
+    if str(dxcp_api_dir) not in sys.path:
+        sys.path.insert(0, str(dxcp_api_dir))
+
+    monkeypatch.delenv("DXCP_SPINNAKER_MODE", raising=False)
+    monkeypatch.setenv("DXCP_SSM_PREFIX", "/dxcp/config")
+    config = importlib.import_module("config")
+    monkeypatch.setattr(
+        config.Settings,
+        "_read_ssm",
+        lambda self, name: "mtls" if name == "/dxcp/config/spinnaker/mode" else None,
+    )
+
+    settings = config.Settings()
+
+    assert settings.spinnaker_mode == "mtls"

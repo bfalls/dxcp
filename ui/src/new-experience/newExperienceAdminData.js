@@ -56,6 +56,44 @@ function normalizeRecipe(recipe) {
   }
 }
 
+function normalizeEngineAdapter(adapter) {
+  const config = adapter?.config || {}
+  const engineOptions = Array.isArray(adapter?.engine_options)
+    ? adapter.engine_options.map((option) => ({
+        id: option?.id || '',
+        label: option?.label || option?.id || '',
+        availability: option?.availability || 'planned'
+      }))
+    : []
+  return {
+    adapterId: adapter?.adapter_id || 'main',
+    label: adapter?.label || 'Primary deployment engine',
+    engineType: adapter?.engine_type || 'SPINNAKER',
+    engineOptions,
+    source: adapter?.source || 'runtime',
+    config: {
+      mode: config?.mode || 'http',
+      gateUrl: config?.gate_url || '',
+      gateHeaderName: config?.gate_header_name || '',
+      gateHeaderValueConfigured: config?.gate_header_value_configured === true,
+      auth0Domain: config?.auth0_domain || '',
+      auth0ClientId: config?.auth0_client_id || '',
+      auth0ClientSecretConfigured: config?.auth0_client_secret_configured === true,
+      auth0Audience: config?.auth0_audience || '',
+      auth0Scope: config?.auth0_scope || '',
+      auth0RefreshSkewSeconds: Number.isFinite(Number(config?.auth0_refresh_skew_seconds))
+        ? Number(config.auth0_refresh_skew_seconds)
+        : 60,
+      mtlsCertPath: config?.mtls_cert_path || '',
+      mtlsKeyPath: config?.mtls_key_path || '',
+      mtlsCaPath: config?.mtls_ca_path || '',
+      mtlsServerName: config?.mtls_server_name || '',
+      engineLambdaUrl: config?.engine_lambda_url || '',
+      engineLambdaTokenConfigured: config?.engine_lambda_token_configured === true
+    }
+  }
+}
+
 function buildDraft(group) {
   return {
     id: group.id,
@@ -842,5 +880,77 @@ export async function saveAdminServiceEnvironmentRouting(api, serviceId, environ
     return { ok: true, route: result }
   } catch (error) {
     return { ok: false, errorMessage: 'DXCP could not save service-environment routing right now.' }
+  }
+}
+
+export async function loadAdminEngineAdapterWorkspace(api, options = {}) {
+  try {
+    const result = await api.get('/admin/system/engine-adapters/main', options)
+    if (result?.code) {
+      return {
+        kind: 'failure',
+        errorMessage: formatApiError(result, 'DXCP could not load engine adapter settings right now.'),
+        viewModel: null
+      }
+    }
+    return {
+      kind: 'ready',
+      errorMessage: '',
+      viewModel: {
+        adapter: normalizeEngineAdapter(result)
+      }
+    }
+  } catch (error) {
+    return {
+      kind: 'failure',
+      errorMessage: 'DXCP could not load engine adapter settings right now. Refresh to try again.',
+      viewModel: null
+    }
+  }
+}
+
+export async function saveAdminEngineAdapter(api, payload) {
+  try {
+    const result = await api.put('/admin/system/engine-adapters/main', payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not save engine adapter settings.'),
+        details: result?.details || null
+      }
+    }
+    return { ok: true, adapter: normalizeEngineAdapter(result) }
+  } catch (error) {
+    return {
+      ok: false,
+      errorMessage: 'DXCP could not save engine adapter settings right now. Refresh to try again.'
+    }
+  }
+}
+
+export async function validateAdminEngineAdapter(api, payload) {
+  try {
+    const result = await api.post('/admin/system/engine-adapters/main/validate', payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not validate the engine adapter configuration.'),
+        details: result?.details || null
+      }
+    }
+    return {
+      ok: true,
+      result: {
+        status: result?.status || 'INVALID',
+        summary: result?.summary || '',
+        warnings: Array.isArray(result?.warnings) ? result.warnings : [],
+        errors: Array.isArray(result?.errors) ? result.errors : []
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      errorMessage: 'DXCP could not validate the engine adapter configuration right now.'
+    }
   }
 }

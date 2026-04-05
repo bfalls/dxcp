@@ -1,27 +1,46 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import InfoTooltip from '../components/InfoTooltip.jsx'
+import LoadingText from '../components/LoadingText.jsx'
 import OperationalDataList from '../components/OperationalDataList.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import NewExperienceAdminWorkspaceShell, { NewExperienceAdminSectionStrip } from './NewExperienceAdminWorkspaceShell.jsx'
 import NewRefreshButton from './NewRefreshButton.jsx'
+import NewSectionDivider from './NewSectionDivider.jsx'
 import NewSegmentedTabs from './NewSegmentedTabs.jsx'
 import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.jsx'
+import {
+  displayConfigSource,
+  displayConnectionMode,
+  displayEngineType,
+  displayEnvironmentType,
+  displayLifecycleStatus,
+  displayValidationStatus
+} from './newExperienceDisplayLabels.js'
 import { useNewExperienceAlertRail, useNewExperienceStickyRail } from './NewExperienceShell.jsx'
 import {
   createAdminEnvironment,
+  loadAdminEngineAdapterWorkspace,
   createAdminRecipe,
   deleteAdminEnvironment,
   deleteAdminRecipe,
   loadAdminRecipeWorkspace,
   loadAdminEnvironmentWorkspace,
   loadAdminServiceEnvironmentRouting,
+  saveAdminEngineAdapter,
   saveAdminServiceEnvironmentRouting,
   updateAdminEnvironment,
-  updateAdminRecipe
+  updateAdminRecipe,
+  validateAdminEngineAdapter
 } from './newExperienceAdminData.js'
 
 const ADMIN_TABS = [
+  {
+    id: 'engine-adapters',
+    label: 'Engine',
+    description: 'Configure the deployment engine connection DXCP uses for governed delivery execution.'
+  },
   {
     id: 'delivery-groups',
     label: 'Delivery Groups',
@@ -44,7 +63,7 @@ const ADMIN_TABS = [
   }
 ]
 
-const DEFAULT_TAB = 'delivery-groups'
+const DEFAULT_TAB = 'engine-adapters'
 
 function BlockedAdminState({ role }) {
   useNewExperienceAlertRail([
@@ -86,20 +105,10 @@ function BlockedAdminState({ role }) {
   )
 }
 
-function lifecycleBadgeLabel(state) {
-  if (state === 'retired') return 'Retired'
-  if (state === 'disabled') return 'Disabled'
-  return 'Active'
-}
-
 function lifecycleBadgeClass(state) {
   if (state === 'retired') return 'new-admin-status-pill'
   if (state === 'disabled') return 'new-admin-status-pill is-disabled'
   return 'new-admin-status-pill is-enabled'
-}
-
-function environmentTypeLabel(type) {
-  return type === 'prod' ? 'Production' : 'Non-production'
 }
 
 function environmentLifecycleSummary(state) {
@@ -197,7 +206,7 @@ function EnvironmentsPanel({ api }) {
     const normalizedSearchTerm = searchTerm.trim().toLowerCase()
     if (!normalizedSearchTerm) return rows
     return rows.filter((row) =>
-      [row.id, row.displayName, environmentTypeLabel(row.type), lifecycleBadgeLabel(row.lifecycleState)]
+      [row.id, row.displayName, displayEnvironmentType(row.type), displayLifecycleStatus(row.lifecycleState)]
         .join(' ')
         .toLowerCase()
         .includes(normalizedSearchTerm)
@@ -420,8 +429,9 @@ function EnvironmentsPanel({ api }) {
   if (workspaceState.kind === 'loading') {
     return (
       <SectionCard className="new-admin-card">
-        <div className="new-card-loading" aria-label="Loading environments">
-          <div className="new-card-loading-lines">
+        <div className="new-card-loading" aria-label="Loading environments" aria-live="polite" aria-busy="true">
+          <LoadingText>Loading...</LoadingText>
+          <div className="new-card-loading-lines" aria-hidden="true">
             <div className="new-card-loading-line new-card-loading-line-1" />
             <div className="new-card-loading-line new-card-loading-line-2" />
             <div className="new-card-loading-line new-card-loading-line-3" />
@@ -464,7 +474,6 @@ function EnvironmentsPanel({ api }) {
               </button>
             </div>
           </div>
-
           <EnvironmentSummary rows={rows} />
           {degradedReasons.length > 0 ? (
             <NewExplanation title="Supporting admin reads are degraded" tone="warning">
@@ -528,13 +537,13 @@ function EnvironmentsPanel({ api }) {
                     return (
                       <div className="new-application-name-cell">
                         <span className="new-application-name">{row.displayName || row.id}</span>
-                        <span className="new-operational-text">{`${environmentTypeLabel(row.type)} environment`}</span>
+                        <span className="new-operational-text">{`${displayEnvironmentType(row.type)} environment`}</span>
                       </div>
                     )
                   }
                   if (column.key === 'id') return <span className="new-operational-text">{row.id}</span>
-                  if (column.key === 'type') return <span className="new-operational-text">{environmentTypeLabel(row.type)}</span>
-                  if (column.key === 'lifecycle') return <span className={lifecycleBadgeClass(row.lifecycleState)}>{lifecycleBadgeLabel(row.lifecycleState)}</span>
+                  if (column.key === 'type') return <span className="new-operational-text">{displayEnvironmentType(row.type)}</span>
+                  if (column.key === 'lifecycle') return <span className={lifecycleBadgeClass(row.lifecycleState)}>{displayLifecycleStatus(row.lifecycleState)}</span>
                   if (column.key === 'actions') {
                     return (
                       <div className="new-admin-inline-actions">
@@ -588,9 +597,9 @@ function EnvironmentsPanel({ api }) {
           <dt>Display name</dt>
           <dd>{draft.displayName || 'Not set'}</dd>
           <dt>Type</dt>
-          <dd>{environmentTypeLabel(draft.type)}</dd>
+          <dd>{displayEnvironmentType(draft.type)}</dd>
           <dt>Lifecycle</dt>
-          <dd>{lifecycleBadgeLabel(draft.lifecycleState)}</dd>
+          <dd>{displayLifecycleStatus(draft.lifecycleState)}</dd>
         </dl>
       </SectionCard>
 
@@ -710,6 +719,344 @@ function RecipesPanel({ api }) {
   return <RecipesWorkspace api={api} />
 }
 
+function createEngineAdapterDraft(adapter) {
+  const config = adapter?.config || {}
+  return {
+    engineType: adapter?.engineType || 'SPINNAKER',
+    mode: config.mode || 'http',
+    gateUrl: config.gateUrl || '',
+    gateHeaderName: config.gateHeaderName || '',
+    gateHeaderValue: '',
+    gateHeaderValueConfigured: config.gateHeaderValueConfigured === true,
+    auth0Domain: config.auth0Domain || '',
+    auth0ClientId: config.auth0ClientId || '',
+    auth0ClientSecret: '',
+    auth0ClientSecretConfigured: config.auth0ClientSecretConfigured === true,
+    auth0Audience: config.auth0Audience || '',
+    auth0Scope: config.auth0Scope || '',
+    auth0RefreshSkewSeconds: String(config.auth0RefreshSkewSeconds ?? 60),
+    mtlsCertPath: config.mtlsCertPath || '',
+    mtlsKeyPath: config.mtlsKeyPath || '',
+    mtlsCaPath: config.mtlsCaPath || '',
+    mtlsServerName: config.mtlsServerName || '',
+    engineLambdaUrl: config.engineLambdaUrl || '',
+    engineLambdaToken: '',
+    engineLambdaTokenConfigured: config.engineLambdaTokenConfigured === true
+  }
+}
+
+function buildEngineAdapterPayload(draft) {
+  const refreshSkew = Number(draft.auth0RefreshSkewSeconds)
+  return {
+    engine_type: draft.engineType,
+    config: {
+      mode: draft.mode,
+      gate_url: draft.gateUrl.trim(),
+      gate_header_name: draft.gateHeaderName.trim(),
+      ...(draft.gateHeaderValue.trim() ? { gate_header_value: draft.gateHeaderValue } : {}),
+      auth0_domain: draft.auth0Domain.trim(),
+      auth0_client_id: draft.auth0ClientId.trim(),
+      ...(draft.auth0ClientSecret.trim() ? { auth0_client_secret: draft.auth0ClientSecret } : {}),
+      auth0_audience: draft.auth0Audience.trim(),
+      auth0_scope: draft.auth0Scope.trim(),
+      auth0_refresh_skew_seconds: Number.isFinite(refreshSkew) ? refreshSkew : draft.auth0RefreshSkewSeconds,
+      mtls_cert_path: draft.mtlsCertPath.trim(),
+      mtls_key_path: draft.mtlsKeyPath.trim(),
+      mtls_ca_path: draft.mtlsCaPath.trim(),
+      mtls_server_name: draft.mtlsServerName.trim(),
+      engine_lambda_url: draft.engineLambdaUrl.trim(),
+      ...(draft.engineLambdaToken.trim() ? { engine_lambda_token: draft.engineLambdaToken } : {})
+    }
+  }
+}
+
+function engineAdapterConfigSummary(adapter, validationState) {
+  const config = adapter?.config || {}
+  return {
+    mode: displayConnectionMode(config.mode || 'http'),
+    gateUrl: config.gateUrl || 'Not configured',
+    validation: displayValidationStatus(validationState?.result?.status || 'Not checked')
+  }
+}
+
+function renderValidationItems(items) {
+  return Array.isArray(items) && items.length > 0
+    ? items.map((item, index) => (
+        <p key={`${item.field || 'item'}-${index}`} className="new-operational-text">
+          {item.message || item.text || String(item)}
+        </p>
+      ))
+    : null
+}
+
+function EngineAdaptersPanel({ api }) {
+  const [workspaceState, setWorkspaceState] = useState({ kind: 'loading', viewModel: null, errorMessage: '' })
+  const [draft, setDraft] = useState(() => createEngineAdapterDraft())
+  const [detailTab, setDetailTab] = useState('details')
+  const [message, setMessage] = useState({ tone: '', title: '', body: '' })
+  const [validationState, setValidationState] = useState({ busy: false, result: null, errorMessage: '' })
+
+  const loadWorkspace = useCallback(async (options = {}) => {
+    setWorkspaceState((current) => ({
+      kind: current.kind === 'ready' ? 'refreshing' : 'loading',
+      viewModel: current.viewModel,
+      errorMessage: ''
+    }))
+    const result = await loadAdminEngineAdapterWorkspace(api, options)
+    setWorkspaceState(result)
+    if (result.kind === 'ready') {
+      setDraft(createEngineAdapterDraft(result.viewModel?.adapter))
+    }
+  }, [api])
+
+  useEffect(() => {
+    loadWorkspace()
+  }, [loadWorkspace])
+
+  const adapter = workspaceState.viewModel?.adapter || null
+  const summary = engineAdapterConfigSummary(adapter, validationState)
+  const isMtlSMode = draft.mode === 'mtls'
+  const isStubMode = draft.mode === 'stub'
+  const hasChanges = useMemo(() => {
+    if (!adapter) return false
+    const base = createEngineAdapterDraft(adapter)
+    return JSON.stringify(buildEngineAdapterPayload(draft)) !== JSON.stringify(buildEngineAdapterPayload(base))
+  }, [adapter, draft])
+
+  const runValidation = async () => {
+    setValidationState({ busy: true, result: null, errorMessage: '' })
+    const result = await validateAdminEngineAdapter(api, buildEngineAdapterPayload(draft))
+    if (!result.ok) {
+      setValidationState({ busy: false, result: null, errorMessage: result.errorMessage })
+      return
+    }
+    setValidationState({ busy: false, result: result.result, errorMessage: '' })
+  }
+
+  const saveAdapter = async () => {
+    const result = await saveAdminEngineAdapter(api, buildEngineAdapterPayload(draft))
+    if (!result.ok) {
+      const errors = Array.isArray(result.details?.errors) ? result.details.errors.map((item) => item.message).join(' ') : ''
+      setMessage({
+        tone: 'danger',
+        title: 'Engine adapter settings could not be saved.',
+        body: [result.errorMessage, errors].filter(Boolean).join(' ')
+      })
+      return
+    }
+    setMessage({
+      tone: 'neutral',
+      title: 'Engine adapter settings saved.',
+      body: 'DXCP updated the primary deployment engine profile and applied the runtime adapter configuration.'
+    })
+    setValidationState((current) => ({ ...current, result: null, errorMessage: '' }))
+    await loadWorkspace({ bypassCache: true })
+  }
+
+  if (workspaceState.kind === 'loading') {
+    return (
+      <SectionCard className="new-admin-card">
+        <div className="new-card-loading" aria-label="Loading engine adapters" aria-live="polite" aria-busy="true">
+          <LoadingText>Loading...</LoadingText>
+          <div className="new-card-loading-lines" aria-hidden="true">
+            <div className="new-card-loading-line new-card-loading-line-1" />
+            <div className="new-card-loading-line new-card-loading-line-2" />
+            <div className="new-card-loading-line new-card-loading-line-3" />
+          </div>
+        </div>
+      </SectionCard>
+    )
+  }
+
+  if (workspaceState.kind === 'failure' || !adapter) {
+    return (
+      <SectionCard className="new-admin-card">
+        <NewStateBlock
+          eyebrow="Failure"
+          title="Engine adapter settings could not be loaded"
+          tone="danger"
+          actions={[{ label: 'Retry', onClick: () => loadWorkspace({ bypassCache: true }) }]}
+        >
+          {workspaceState.errorMessage || 'DXCP could not load engine adapter settings right now.'}
+        </NewStateBlock>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <div className="new-admin-stack">
+      <SectionCard className="new-admin-card">
+        <div className="new-admin-panel-header">
+          <div>
+            <h3>Deployment Engine</h3>
+            <p>Configure the active deployment engine connection DXCP uses for governed execution.</p>
+          </div>
+          <div className="new-admin-toolbar-actions">
+            <NewRefreshButton onClick={() => loadWorkspace({ bypassCache: true })} busy={workspaceState.kind === 'refreshing'} />
+            <button className="button" type="button" onClick={runValidation} disabled={validationState.busy}>
+              {validationState.busy ? 'Validating...' : 'Validate connection'}
+            </button>
+            <button className="button" type="button" onClick={saveAdapter} disabled={!hasChanges}>
+              Save changes
+            </button>
+          </div>
+        </div>
+        {message.title ? <NewExplanation title={message.title} tone={message.tone || 'neutral'}>{message.body}</NewExplanation> : null}
+        {validationState.errorMessage ? (
+          <NewExplanation title="Validation could not run" tone="danger">{validationState.errorMessage}</NewExplanation>
+        ) : null}
+        {validationState.result ? (
+          <NewExplanation
+            title={
+              validationState.result.status === 'VALID'
+                ? 'Connection validated'
+                : validationState.result.status === 'WARNING'
+                  ? 'Validation returned warnings'
+                  : 'Connection is invalid'
+            }
+            tone={
+              validationState.result.status === 'VALID'
+                ? 'neutral'
+                : validationState.result.status === 'WARNING'
+                  ? 'warning'
+                  : 'danger'
+            }
+          >
+            <>
+              <p>{validationState.result.summary}</p>
+              {renderValidationItems(validationState.result.errors)}
+              {renderValidationItems(validationState.result.warnings)}
+            </>
+          </NewExplanation>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard className="new-admin-surface-card">
+        <div className="new-section-header"><div><h3>Summary</h3></div></div>
+        <dl className="new-object-summary-grid">
+          <dt>Engine type</dt><dd>{displayEngineType(adapter.engineType)}</dd>
+          <dt>Gate</dt><dd>{summary.gateUrl}</dd>
+          <dt>Connection mode</dt><dd>{summary.mode}</dd>
+          <dt>Validation</dt><dd>{summary.validation}</dd>
+        </dl>
+      </SectionCard>
+
+      <NewSegmentedTabs
+        ariaLabel="Engine adapter detail tabs"
+        activeTab={detailTab}
+        onChange={setDetailTab}
+        tabs={[
+          { id: 'details', label: 'Details' },
+          { id: 'connection', label: 'Connection' },
+          { id: 'review', label: 'Review' }
+        ]}
+      />
+
+      <SectionCard className="new-admin-surface-card">
+        {detailTab === 'details' ? (
+          <>
+            <div className="new-section-header"><div><h3>Configured Engine</h3></div></div>
+            <div className="new-intent-entry-grid">
+              <label className="new-field" htmlFor="admin-engine-type">
+                <span>Engine type</span>
+                <select id="admin-engine-type" value={draft.engineType} onChange={(event) => setDraft((current) => ({ ...current, engineType: event.target.value }))}>
+                  {adapter.engineOptions.map((option) => (
+                    <option key={option.id} value={option.id} disabled={option.availability !== 'active'}>
+                      {option.label || displayEngineType(option.id)}{option.availability !== 'active' ? ' (Not yet supported)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="new-field" htmlFor="admin-engine-source">
+                <span>Config source</span>
+                <input id="admin-engine-source" value={displayConfigSource(adapter.source)} disabled />
+              </label>
+              <label className="new-field" htmlFor="admin-engine-mode">
+                <span>Mode</span>
+                <select id="admin-engine-mode" value={draft.mode} onChange={(event) => setDraft((current) => ({ ...current, mode: event.target.value }))}>
+                  <option value="http">HTTP</option>
+                  <option value="mtls">mTLS</option>
+                  <option value="stub">Stub (local only)</option>
+                </select>
+              </label>
+            </div>
+          </>
+        ) : detailTab === 'connection' ? (
+          <div className="new-admin-stack new-engine-adapter-connection-sections">
+            <div className="new-section-header"><div><h3>Connection</h3></div></div>
+            <div className="new-intent-entry-grid new-engine-adapter-connection-grid">
+              <label className="new-field" htmlFor="admin-engine-gate-url"><span>Gate URL</span><input id="admin-engine-gate-url" value={draft.gateUrl} onChange={(event) => setDraft((current) => ({ ...current, gateUrl: event.target.value }))} placeholder="https://gate.example.com" disabled={isStubMode} /></label>
+              <label className="new-field" htmlFor="admin-engine-header-name"><span>Optional request header name</span><input id="admin-engine-header-name" value={draft.gateHeaderName} onChange={(event) => setDraft((current) => ({ ...current, gateHeaderName: event.target.value }))} placeholder="Authorization, X-Gate-Token" disabled={isStubMode} /></label>
+              <label className="new-field new-engine-adapter-connection-grid-secondary" htmlFor="admin-engine-header-value"><span>Optional request header value</span><input id="admin-engine-header-value" type="password" value={draft.gateHeaderValue} onChange={(event) => setDraft((current) => ({ ...current, gateHeaderValue: event.target.value, gateHeaderValueConfigured: current.gateHeaderValueConfigured || event.target.value.trim().length > 0 }))} placeholder={draft.gateHeaderValueConfigured ? 'Configured. Enter a new value to replace it.' : 'Not configured'} disabled={isStubMode} /></label>
+            </div>
+
+            {!isMtlSMode && !isStubMode ? (
+              <>
+                <NewSectionDivider />
+                <div className="new-section-header"><div><h3>Auth0 token acquisition</h3></div></div>
+                <div className="new-intent-entry-grid">
+                  <label className="new-field" htmlFor="admin-engine-auth0-domain"><span>Auth0 domain</span><input id="admin-engine-auth0-domain" value={draft.auth0Domain} onChange={(event) => setDraft((current) => ({ ...current, auth0Domain: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-auth0-client-id"><span>Client ID</span><input id="admin-engine-auth0-client-id" value={draft.auth0ClientId} onChange={(event) => setDraft((current) => ({ ...current, auth0ClientId: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-auth0-client-secret"><span>Client secret</span><input id="admin-engine-auth0-client-secret" type="password" value={draft.auth0ClientSecret} onChange={(event) => setDraft((current) => ({ ...current, auth0ClientSecret: event.target.value, auth0ClientSecretConfigured: current.auth0ClientSecretConfigured || event.target.value.trim().length > 0 }))} placeholder={draft.auth0ClientSecretConfigured ? 'Configured. Enter a new value to replace it.' : 'Not configured'} /></label>
+                  <label className="new-field" htmlFor="admin-engine-auth0-audience"><span>Audience</span><input id="admin-engine-auth0-audience" value={draft.auth0Audience} onChange={(event) => setDraft((current) => ({ ...current, auth0Audience: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-auth0-scope"><span>Scope</span><input id="admin-engine-auth0-scope" value={draft.auth0Scope} onChange={(event) => setDraft((current) => ({ ...current, auth0Scope: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-auth0-refresh-skew"><span>Refresh skew seconds</span><input id="admin-engine-auth0-refresh-skew" value={draft.auth0RefreshSkewSeconds} onChange={(event) => setDraft((current) => ({ ...current, auth0RefreshSkewSeconds: event.target.value }))} /></label>
+                </div>
+              </>
+            ) : null}
+
+            {isMtlSMode ? (
+              <>
+                <NewSectionDivider />
+                <div className="new-section-header">
+                  <div>
+                    <h3 className="new-section-heading-with-help">
+                      <span>mTLS</span>
+                      <InfoTooltip label="mTLS details" className="new-label-with-help-tooltip">
+                        <span className="info-tooltip-title">mTLS runtime settings</span>
+                        <span>These values are used by the deployed DXCP API runtime when it opens a machine-to-machine TLS connection to Spinnaker Gate. File paths refer to files on the runtime host.</span>
+                      </InfoTooltip>
+                    </h3>
+                  </div>
+                </div>
+                <div className="new-intent-entry-grid">
+                  <label className="new-field" htmlFor="admin-engine-mtls-cert"><NewLabelWithHelp label="Client cert path" tooltipLabel="Client cert path details" title="Client certificate path" body="Path on the deployed DXCP API runtime filesystem to the client certificate DXCP presents to the Gate mTLS endpoint." /><input id="admin-engine-mtls-cert" value={draft.mtlsCertPath} onChange={(event) => setDraft((current) => ({ ...current, mtlsCertPath: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-mtls-key"><NewLabelWithHelp label="Client key path" tooltipLabel="Client key path details" title="Client private key path" body="Path on the deployed DXCP API runtime filesystem to the private key paired with the client certificate used for Gate mTLS." /><input id="admin-engine-mtls-key" value={draft.mtlsKeyPath} onChange={(event) => setDraft((current) => ({ ...current, mtlsKeyPath: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-mtls-ca"><NewLabelWithHelp label="CA path" tooltipLabel="CA path details" title="Certificate authority path" body="Optional path on the deployed DXCP API runtime filesystem to the CA bundle or root certificate DXCP should trust when verifying the Gate server certificate." /><input id="admin-engine-mtls-ca" value={draft.mtlsCaPath} onChange={(event) => setDraft((current) => ({ ...current, mtlsCaPath: event.target.value }))} /></label>
+                  <label className="new-field" htmlFor="admin-engine-mtls-server-name"><NewLabelWithHelp label="Server name" tooltipLabel="Server name details" title="TLS server name" body="Optional TLS server name used for SNI and certificate hostname validation when the Gate endpoint expects a specific internal name instead of the external URL host." /><input id="admin-engine-mtls-server-name" value={draft.mtlsServerName} onChange={(event) => setDraft((current) => ({ ...current, mtlsServerName: event.target.value }))} /></label>
+                </div>
+              </>
+            ) : null}
+
+            <NewSectionDivider />
+            <div className="new-section-header"><div><h3>Advanced runtime invoke</h3></div></div>
+            <div className="new-intent-entry-grid">
+              <label className="new-field" htmlFor="admin-engine-lambda-url"><span>Engine lambda URL</span><input id="admin-engine-lambda-url" value={draft.engineLambdaUrl} onChange={(event) => setDraft((current) => ({ ...current, engineLambdaUrl: event.target.value }))} /></label>
+              <label className="new-field" htmlFor="admin-engine-lambda-token"><span>Engine lambda token</span><input id="admin-engine-lambda-token" type="password" value={draft.engineLambdaToken} onChange={(event) => setDraft((current) => ({ ...current, engineLambdaToken: event.target.value, engineLambdaTokenConfigured: current.engineLambdaTokenConfigured || event.target.value.trim().length > 0 }))} placeholder={draft.engineLambdaTokenConfigured ? 'Configured. Enter a new value to replace it.' : 'Not configured'} /></label>
+            </div>
+          </div>
+        ) : (
+          <div className="new-admin-stack">
+            <div className="new-admin-editor-note">
+              <strong>Review before save</strong>
+              <p>Engine adapter changes affect the control-plane connection path DXCP uses for governed deployments. Review mode, reachability, token posture, and runtime invoke settings before saving.</p>
+            </div>
+            <dl className="new-object-summary-grid">
+              <dt>Engine type</dt><dd>{displayEngineType(draft.engineType)}</dd>
+              <dt>Connection mode</dt><dd>{displayConnectionMode(draft.mode)}</dd>
+              <dt>Gate URL</dt><dd>{draft.gateUrl || 'Not configured'}</dd>
+              <dt>Request header</dt><dd>{draft.gateHeaderName ? `${draft.gateHeaderName}${draft.gateHeaderValueConfigured || draft.gateHeaderValue ? ' (configured)' : ' (value missing)'}` : 'Not configured'}</dd>
+              <dt>Auth0</dt><dd>{draft.auth0Domain || draft.auth0ClientId || draft.auth0Audience ? 'Configured' : 'Not configured'}</dd>
+              <dt>mTLS</dt><dd>{draft.mode === 'mtls' ? (draft.mtlsCertPath && draft.mtlsKeyPath ? 'Configured' : 'Incomplete') : 'Not used'}</dd>
+              <dt>Engine lambda</dt><dd>{draft.engineLambdaUrl ? 'Configured' : 'Not configured'}</dd>
+            </dl>
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  )
+}
+
 function createEmptyRecipeDraft() {
   return {
     id: '',
@@ -726,7 +1073,7 @@ function createEmptyRecipeDraft() {
 }
 
 function recipeStatusLabel(status) {
-  return status === 'deprecated' ? 'Deprecated' : 'Active'
+  return displayLifecycleStatus(status)
 }
 
 function recipeUsageSummary(recipe) {
@@ -735,6 +1082,18 @@ function recipeUsageSummary(recipe) {
   if (usage.routedReferenceCount) parts.push(`${usage.routedReferenceCount} routed`)
   if (usage.deliveryGroupReferenceCount) parts.push(`${usage.deliveryGroupReferenceCount} allowed`)
   return parts.length > 0 ? parts.join(' / ') : 'Unreferenced'
+}
+
+function NewLabelWithHelp({ label, tooltipLabel, title, body }) {
+  return (
+    <span className="new-label-with-help">
+      <span>{label}</span>
+      <InfoTooltip label={tooltipLabel} className="new-label-with-help-tooltip">
+        <span className="info-tooltip-title">{title}</span>
+        <span>{body}</span>
+      </InfoTooltip>
+    </span>
+  )
 }
 
 function recipeDraftValidationMessage(draft) {
@@ -1004,8 +1363,9 @@ function RecipesWorkspace({ api }) {
   if (workspaceState.kind === 'loading') {
     return (
       <SectionCard className="new-admin-card">
-        <div className="new-card-loading" aria-label="Loading recipes">
-          <div className="new-card-loading-lines">
+        <div className="new-card-loading" aria-label="Loading recipes" aria-live="polite" aria-busy="true">
+          <LoadingText>Loading...</LoadingText>
+          <div className="new-card-loading-lines" aria-hidden="true">
             <div className="new-card-loading-line new-card-loading-line-1" />
             <div className="new-card-loading-line new-card-loading-line-2" />
             <div className="new-card-loading-line new-card-loading-line-3" />
@@ -1158,7 +1518,7 @@ function RecipesWorkspace({ api }) {
             <div className="new-section-header"><div><h3>Engine binding</h3></div></div>
             <div className="new-admin-editor-note"><strong>Engine details remain admin-only</strong><p>Recipes define delivery behavior and engine binding. Normal deploy does not expose this mapping as an operator choice.</p></div>
             <div className="new-intent-entry-grid">
-              <label className="new-field" htmlFor="admin-recipe-engine-type"><span>Engine type</span><input id="admin-recipe-engine-type" value={draft.engineType} disabled /></label>
+              <label className="new-field" htmlFor="admin-recipe-engine-type"><span>Engine type</span><input id="admin-recipe-engine-type" value={displayEngineType(draft.engineType)} disabled /></label>
               <label className="new-field" htmlFor="admin-recipe-app"><span>Spinnaker application</span><input id="admin-recipe-app" value={draft.spinnakerApplication} onChange={(event) => setDraft((current) => ({ ...current, spinnakerApplication: event.target.value }))} /></label>
               <label className="new-field" htmlFor="admin-recipe-deploy-pipeline"><span>Deploy pipeline</span><input id="admin-recipe-deploy-pipeline" value={draft.deployPipeline} onChange={(event) => setDraft((current) => ({ ...current, deployPipeline: event.target.value }))} /></label>
               <label className="new-field" htmlFor="admin-recipe-rollback-pipeline"><span>Rollback pipeline</span><input id="admin-recipe-rollback-pipeline" value={draft.rollbackPipeline} onChange={(event) => setDraft((current) => ({ ...current, rollbackPipeline: event.target.value }))} /></label>
@@ -1266,6 +1626,8 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
     )
   } else if (activeTab === 'recipes') {
     panel = <RecipesPanel api={api} />
+  } else if (activeTab === 'engine-adapters') {
+    panel = <EngineAdaptersPanel api={api} />
   } else if (activeTab === 'environments') {
     panel = <EnvironmentsPanel api={api} />
   } else if (activeTab === 'system-settings') {

@@ -590,12 +590,16 @@ export default function NewExperienceDeployPage({ role = 'UNKNOWN', api }) {
   const handleDeploy = async () => {
     if (posture.primaryActionState !== 'available') return
     setSubmitState({ kind: 'submitting', deploymentId: '', errorMessage: '' })
+    const key =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `deploy-${Date.now()}`
     const result = await api.post('/deployments', {
       service: applicationName,
       environment: environmentName,
       version,
       changeSummary: changeSummary.trim()
-    })
+    }, key)
     if (result && result.code) {
       setSubmitState({
         kind: 'error',
