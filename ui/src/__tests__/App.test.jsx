@@ -2205,7 +2205,7 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin?tab=recipes')
 
-    await view.findByText('Recipe framing')
+    await view.findByText('Recipe list')
     const recipesTab = view.getByRole('tab', { name: /Recipes/i })
     assert.equal(recipesTab.getAttribute('aria-selected'), 'true')
     assert.equal(view.queryByText('Sandbox'), null)

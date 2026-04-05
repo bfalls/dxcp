@@ -10,11 +10,15 @@ import { NewExplanation, NewStateBlock } from './NewExperienceStatePrimitives.js
 import { useNewExperienceAlertRail, useNewExperienceStickyRail } from './NewExperienceShell.jsx'
 import {
   createAdminEnvironment,
+  createAdminRecipe,
   deleteAdminEnvironment,
+  deleteAdminRecipe,
+  loadAdminRecipeWorkspace,
   loadAdminEnvironmentWorkspace,
   loadAdminServiceEnvironmentRouting,
   saveAdminServiceEnvironmentRouting,
-  updateAdminEnvironment
+  updateAdminEnvironment,
+  updateAdminRecipe
 } from './newExperienceAdminData.js'
 
 const ADMIN_TABS = [
@@ -703,23 +707,301 @@ function EnvironmentsPanel({ api }) {
 }
 
 function RecipesPanel({ api }) {
-  const [state, setState] = useState({ kind: 'loading', viewModel: null, errorMessage: '' })
+  return <RecipesWorkspace api={api} />
+}
 
-  const load = useCallback(async (options = {}) => {
-    setState((current) => ({
+function createEmptyRecipeDraft() {
+  return {
+    id: '',
+    name: '',
+    description: '',
+    effectiveBehaviorSummary: '',
+    status: 'active',
+    engineType: 'SPINNAKER',
+    spinnakerApplication: '',
+    deployPipeline: '',
+    rollbackPipeline: '',
+    changeReason: ''
+  }
+}
+
+function recipeStatusLabel(status) {
+  return status === 'deprecated' ? 'Deprecated' : 'Active'
+}
+
+function recipeUsageSummary(recipe) {
+  const usage = recipe?.usage || {}
+  const parts = []
+  if (usage.routedReferenceCount) parts.push(`${usage.routedReferenceCount} routed`)
+  if (usage.deliveryGroupReferenceCount) parts.push(`${usage.deliveryGroupReferenceCount} allowed`)
+  return parts.length > 0 ? parts.join(' / ') : 'Unreferenced'
+}
+
+function recipeDraftValidationMessage(draft) {
+  if (!draft.id.trim()) return 'Recipe ID is required before DXCP can save this recipe.'
+  if (!draft.name.trim()) return 'Recipe name is required before DXCP can save this recipe.'
+  if (!draft.effectiveBehaviorSummary.trim()) return 'Effective behavior summary is required before DXCP can save this recipe.'
+  if (!draft.deployPipeline.trim()) return 'Deploy pipeline is required before DXCP can save this recipe.'
+  if (!draft.spinnakerApplication.trim()) return 'Spinnaker application is required when engine binding is configured.'
+  return ''
+}
+
+function RecipeSummaryStrip({ recipes }) {
+  const activeCount = recipes.filter((recipe) => recipe.status !== 'deprecated').length
+  const deprecatedCount = recipes.filter((recipe) => recipe.status === 'deprecated').length
+  const referencedCount = recipes.filter((recipe) => (recipe.usage?.totalReferences || 0) > 0).length
+
+  return (
+    <div className="new-admin-inline-summary" aria-label="Recipe summary">
+      <div className="new-admin-inline-summary-item">
+        <span>Configured</span>
+        <strong>{recipes.length}</strong>
+      </div>
+      <div className="new-admin-inline-summary-item">
+        <span>Active</span>
+        <strong>{activeCount}</strong>
+      </div>
+      <div className="new-admin-inline-summary-item">
+        <span>Deprecated</span>
+        <strong>{deprecatedCount}</strong>
+      </div>
+      <div className="new-admin-inline-summary-item">
+        <span>Referenced</span>
+        <strong>{referencedCount}</strong>
+      </div>
+    </div>
+  )
+}
+
+const RECIPE_COLUMNS = [
+  { key: 'recipe', label: 'Recipe', width: 'minmax(260px, 2fr)' },
+  { key: 'id', label: 'ID', width: 'minmax(160px, 1fr)' },
+  { key: 'summary', label: 'Behavior', width: 'minmax(280px, 2.4fr)' },
+  { key: 'usage', label: 'Usage', width: 'minmax(140px, 0.9fr)' },
+  { key: 'status', label: 'Status', width: 'minmax(120px, 0.8fr)', cellClassName: 'operational-list-cell-status' }
+]
+
+const RECIPE_USAGE_ROUTE_COLUMNS = [
+  { key: 'service', label: 'Service', width: 'minmax(220px, 1.2fr)' },
+  { key: 'environment', label: 'Environment', width: 'minmax(220px, 1fr)' }
+]
+
+const RECIPE_USAGE_GROUP_COLUMNS = [
+  { key: 'group', label: 'Delivery group', width: 'minmax(240px, 1.2fr)' },
+  { key: 'id', label: 'ID', width: 'minmax(180px, 1fr)' }
+]
+
+function RecipesWorkspace({ api }) {
+  const [workspaceState, setWorkspaceState] = useState({ kind: 'loading', viewModel: null, errorMessage: '' })
+  const [draft, setDraft] = useState(createEmptyRecipeDraft)
+  const [editingId, setEditingId] = useState('')
+  const [viewMode, setViewMode] = useState('list')
+  const [detailTab, setDetailTab] = useState('details')
+  const [message, setMessage] = useState({ tone: '', title: '', body: '' })
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const loadWorkspace = useCallback(async (options = {}) => {
+    setWorkspaceState((current) => ({
       kind: current.kind === 'ready' || current.kind === 'degraded' ? 'refreshing' : 'loading',
       viewModel: current.viewModel,
       errorMessage: ''
     }))
-    const result = await loadAdminEnvironmentWorkspace(api, options)
-    setState(result)
+    const result = await loadAdminRecipeWorkspace(api, options)
+    setWorkspaceState(result)
   }, [api])
 
   useEffect(() => {
-    load()
-  }, [load])
+    loadWorkspace()
+  }, [loadWorkspace])
 
-  if (state.kind === 'loading') {
+  const recipes = useMemo(() => workspaceState.viewModel?.recipes || [], [workspaceState.viewModel?.recipes])
+  const degradedReasons = useMemo(
+    () => workspaceState.viewModel?.degradedReasons || [],
+    [workspaceState.viewModel?.degradedReasons]
+  )
+  const selectedRecipe = useMemo(() => recipes.find((recipe) => recipe.id === editingId) || null, [editingId, recipes])
+  const visibleRecipes = useMemo(() => {
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase()
+    if (!normalizedSearchTerm) return recipes
+    return recipes.filter((recipe) =>
+      [
+        recipe.name,
+        recipe.id,
+        recipe.summary,
+        recipe.status,
+        recipe.spinnakerApplication,
+        recipe.deployPipeline,
+        recipe.rollbackPipeline
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearchTerm)
+    )
+  }, [recipes, searchTerm])
+
+  const isCreating = viewMode === 'create'
+  const currentUsage = selectedRecipe?.usage || { routes: [], deliveryGroups: [], totalReferences: 0 }
+  const hasNoSearchResults = recipes.length > 0 && visibleRecipes.length === 0
+  const deprecatingRoutedRecipe =
+    selectedRecipe &&
+    selectedRecipe.status !== 'deprecated' &&
+    draft.status === 'deprecated' &&
+    (currentUsage.routedReferenceCount || 0) > 0
+
+  useEffect(() => {
+    if (viewMode !== 'detail') return
+    if (selectedRecipe) return
+    setViewMode('list')
+    setEditingId('')
+    setDraft(createEmptyRecipeDraft())
+  }, [selectedRecipe, viewMode])
+
+  const openListView = () => {
+    setViewMode('list')
+    setEditingId('')
+    setDraft(createEmptyRecipeDraft())
+    setDetailTab('details')
+  }
+
+  const beginCreate = () => {
+    setViewMode('create')
+    setEditingId('')
+    setDraft(createEmptyRecipeDraft())
+    setDetailTab('details')
+    setMessage({ tone: '', title: '', body: '' })
+  }
+
+  const openDetail = (recipe) => {
+    setViewMode('detail')
+    setEditingId(recipe.id)
+    setDetailTab('details')
+    setDraft({
+      id: recipe.id,
+      name: recipe.name || '',
+      description: recipe.description || '',
+      effectiveBehaviorSummary: recipe.summary || '',
+      status: recipe.status || 'active',
+      engineType: recipe.engineType || 'SPINNAKER',
+      spinnakerApplication: recipe.spinnakerApplication || '',
+      deployPipeline: recipe.deployPipeline || '',
+      rollbackPipeline: recipe.rollbackPipeline || '',
+      changeReason: ''
+    })
+    setMessage({ tone: '', title: '', body: '' })
+  }
+
+  const hasDetailChanges = useMemo(() => {
+    if (isCreating) {
+      return (
+        draft.id.trim().length > 0 ||
+        draft.name.trim().length > 0 ||
+        draft.description.trim().length > 0 ||
+        draft.effectiveBehaviorSummary.trim().length > 0 ||
+        draft.status !== 'active' ||
+        draft.spinnakerApplication.trim().length > 0 ||
+        draft.deployPipeline.trim().length > 0 ||
+        draft.rollbackPipeline.trim().length > 0 ||
+        draft.changeReason.trim().length > 0
+      )
+    }
+    if (!selectedRecipe) return false
+    return (
+      draft.name.trim() !== (selectedRecipe.name || '').trim() ||
+      draft.description.trim() !== (selectedRecipe.description || '').trim() ||
+      draft.effectiveBehaviorSummary.trim() !== (selectedRecipe.summary || '').trim() ||
+      draft.status !== (selectedRecipe.status || 'active') ||
+      draft.spinnakerApplication.trim() !== (selectedRecipe.spinnakerApplication || '').trim() ||
+      draft.deployPipeline.trim() !== (selectedRecipe.deployPipeline || '').trim() ||
+      draft.rollbackPipeline.trim() !== (selectedRecipe.rollbackPipeline || '').trim() ||
+      draft.changeReason.trim().length > 0
+    )
+  }, [draft, isCreating, selectedRecipe])
+
+  const saveRecipe = async () => {
+    const validationMessage = recipeDraftValidationMessage(draft)
+    if (validationMessage) {
+      setMessage({ tone: 'danger', title: 'Recipe details are incomplete.', body: validationMessage })
+      return
+    }
+
+    const payload = {
+      id: draft.id.trim(),
+      name: draft.name.trim(),
+      description: draft.description.trim() || null,
+      effective_behavior_summary: draft.effectiveBehaviorSummary.trim(),
+      status: draft.status === 'deprecated' ? 'deprecated' : 'active',
+      spinnaker_application: draft.spinnakerApplication.trim(),
+      deploy_pipeline: draft.deployPipeline.trim(),
+      rollback_pipeline: draft.rollbackPipeline.trim() || null
+    }
+    if (draft.changeReason.trim()) payload.change_reason = draft.changeReason.trim()
+
+    const result = isCreating
+      ? await createAdminRecipe(api, payload)
+      : await updateAdminRecipe(api, editingId, payload)
+
+    if (!result.ok) {
+      setMessage({
+        tone: 'danger',
+        title: isCreating ? 'Recipe could not be created.' : 'Recipe could not be saved.',
+        body: result.errorMessage
+      })
+      return
+    }
+
+    await loadWorkspace({ bypassCache: true })
+    setDraft((current) => ({ ...current, changeReason: '' }))
+    if (isCreating) {
+      setEditingId(payload.id)
+      setViewMode('detail')
+      setMessage({
+        tone: 'neutral',
+        title: 'Recipe created.',
+        body: 'DXCP saved the recipe as an admin-owned execution pattern. Normal deploy still reaches it only through routing and delivery-group authorization.'
+      })
+      return
+    }
+    setMessage({
+      tone: deprecatingRoutedRecipe ? 'warning' : 'neutral',
+      title: deprecatingRoutedRecipe ? 'Recipe updated with active routing references.' : 'Recipe updated.',
+      body: deprecatingRoutedRecipe
+        ? 'DXCP saved the deprecation. Future deploys through those routes will now be blocked until routing is updated.'
+        : 'DXCP saved the recipe changes.'
+    })
+  }
+
+  const handleDeleteRecipe = async (recipe) => {
+    if (!recipe?.id) return
+    const result = await deleteAdminRecipe(api, recipe.id)
+    if (!result.ok) {
+      const references = Array.isArray(result.details?.references) ? result.details.references : []
+      const blockedByRouting = result.details?.reference_type === 'service_environment_routing'
+      const detailText = blockedByRouting
+        ? references.map((reference) => `${reference.service_id} / ${reference.environment_id}`).filter(Boolean).join(', ')
+        : references.map((reference) => reference.delivery_group_id).filter(Boolean).join(', ')
+      setMessage({
+        tone: result.code === 'RECIPE_IN_USE' ? 'warning' : 'danger',
+        title: result.code === 'RECIPE_IN_USE' ? 'Delete blocked.' : 'Recipe could not be deleted.',
+        body:
+          result.code === 'RECIPE_IN_USE'
+            ? blockedByRouting
+              ? `DXCP blocked delete because this recipe is still selected by service-environment routing. Remove or replace those routes first${detailText ? `: ${detailText}.` : '.'}`
+              : `DXCP blocked delete because this recipe is still authorized by delivery-group allowed_recipes. Remove that authorization first${detailText ? `: ${detailText}.` : '.'}`
+            : result.errorMessage
+      })
+      openDetail(recipe)
+      return
+    }
+    if (editingId === recipe.id) openListView()
+    setMessage({
+      tone: 'neutral',
+      title: 'Recipe deleted.',
+      body: 'DXCP removed the recipe because no current routing or delivery-group authorization still depended on it.'
+    })
+    await loadWorkspace({ bypassCache: true })
+  }
+
+  if (workspaceState.kind === 'loading') {
     return (
       <SectionCard className="new-admin-card">
         <div className="new-card-loading" aria-label="Loading recipes">
@@ -733,60 +1015,181 @@ function RecipesPanel({ api }) {
     )
   }
 
-  if (state.kind === 'failure') {
+  if (workspaceState.kind === 'failure') {
     return (
       <SectionCard className="new-admin-card">
-        <NewStateBlock eyebrow="Failure" title="Recipes could not be loaded" tone="danger">
-          {state.errorMessage || 'DXCP could not load recipes right now.'}
+        <NewStateBlock
+          eyebrow="Failure"
+          title="Recipe administration could not be loaded"
+          tone="danger"
+          actions={[{ label: 'Retry', onClick: () => loadWorkspace({ bypassCache: true }) }]}
+        >
+          {workspaceState.errorMessage || 'DXCP could not load recipe administration data right now.'}
         </NewStateBlock>
       </SectionCard>
     )
   }
 
-  const recipes = state.viewModel?.recipes || []
+  if (viewMode === 'list') {
+    return (
+      <div className="new-admin-stack">
+        <SectionCard className="new-admin-card">
+          <div className="new-admin-panel-header">
+            <div><h3>Recipes</h3></div>
+            <div className="new-admin-toolbar-actions">
+              <NewRefreshButton onClick={() => loadWorkspace({ bypassCache: true })} busy={workspaceState.kind === 'refreshing'} />
+              <button className="button" type="button" onClick={beginCreate}>Create recipe</button>
+            </div>
+          </div>
+          <RecipeSummaryStrip recipes={recipes} />
+          {degradedReasons.length > 0 ? (
+            <NewExplanation title="Supporting admin reads are degraded" tone="warning">{degradedReasons.join(' ')}</NewExplanation>
+          ) : null}
+          {message.title ? (
+            <NewExplanation title={message.title} tone={message.tone || 'neutral'}>{message.body}</NewExplanation>
+          ) : null}
+          <div className="new-admin-surface-card">
+            <div className="new-section-header new-collection-header"><div><h3>Recipe list</h3></div></div>
+            <div className="new-applications-chooser-toolbar">
+              <label className="new-applications-search" htmlFor="admin-recipe-search">
+                <span>Search</span>
+                <input
+                  id="admin-recipe-search"
+                  type="search"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Search recipes"
+                  aria-label="Search recipes"
+                />
+              </label>
+            </div>
+            {recipes.length === 0 ? (
+              <NewStateBlock eyebrow="Empty" title="No recipes configured" actions={[{ label: 'Create recipe', onClick: beginCreate }]}>
+                Create an admin-owned execution pattern to define delivery behavior and engine binding for governed routing.
+              </NewStateBlock>
+            ) : hasNoSearchResults ? (
+              <NewStateBlock eyebrow="No results" title="No recipes match this search" tone="warning" actions={[{ label: 'Clear search', onClick: () => setSearchTerm('') }]}>
+                Try a different recipe name, identifier, behavior summary, or engine binding value.
+              </NewStateBlock>
+            ) : (
+              <OperationalDataList
+                ariaLabel="Recipe collection"
+                columns={RECIPE_COLUMNS}
+                rows={visibleRecipes}
+                footerSummary={`${visibleRecipes.length} recipe${visibleRecipes.length === 1 ? '' : 's'}`}
+                getRowKey={(recipe) => recipe.id}
+                getRowAction={(recipe) => ({ label: `Open ${recipe.name || recipe.id}`, onClick: () => openDetail(recipe) })}
+                renderCell={(recipe, column) => {
+                  if (column.key === 'recipe') return <div className="new-application-name-cell"><span className="new-application-name">{recipe.name || recipe.id}</span><span className="new-operational-text">Admin-owned execution pattern</span></div>
+                  if (column.key === 'id') return <span className="new-operational-text">{recipe.id}</span>
+                  if (column.key === 'summary') return <span className="new-operational-text">{recipe.summary || 'No behavior summary provided.'}</span>
+                  if (column.key === 'usage') return <span className="new-operational-text">{recipeUsageSummary(recipe)}</span>
+                  if (column.key === 'status') return <span className={recipe.status === 'deprecated' ? 'new-admin-status-pill' : 'new-admin-status-pill is-enabled'}>{recipeStatusLabel(recipe.status)}</span>
+                  return null
+                }}
+                renderSecondaryRow={() => (
+                  <p className="operational-list-note">
+                    Normal deploy reaches this recipe through service-environment routing. Delivery-group allowed_recipes still authorizes it separately.
+                  </p>
+                )}
+              />
+            )}
+          </div>
+        </SectionCard>
+      </div>
+    )
+  }
 
   return (
-    <SectionCard className="new-admin-card">
-      <div className="new-admin-panel-header">
-        <div>
-          <span className="new-admin-panel-eyebrow">Execution patterns</span>
-          <h3>Recipes</h3>
-          <p>Recipes remain admin-owned delivery behavior definitions. Normal deploy uses them through routing and policy, not as a primary operator choice.</p>
-        </div>
-      </div>
-
-      <div className="new-explanation-stack">
-        <NewExplanation title="Recipe framing" tone="neutral">
-          Recipes still matter for diagnostics, revisions, records, and controlled admin work. Service-environment routing selects the candidate recipe, and delivery-group allowed_recipes still authorizes it separately.
-        </NewExplanation>
-      </div>
-
-      <div className="new-admin-environment-list" role="list" aria-label="Recipes">
-        {recipes.map((recipe) => (
-          <article key={recipe.id} className="new-admin-environment-item" role="listitem">
-            <div className="new-admin-environment-main">
-              <div className="new-admin-environment-name-row">
-                <strong>{recipe.name}</strong>
-                <span className={recipe.status === 'deprecated' ? 'new-admin-status-pill' : 'new-admin-status-pill is-enabled'}>
-                  {recipe.status === 'deprecated' ? 'Deprecated' : 'Active'}
-                </span>
-              </div>
-              <p>{recipe.summary || 'No behavior summary is available for this recipe.'}</p>
+    <div className="new-admin-stack">
+      <NewExperiencePageHeader
+        title={isCreating ? 'Create recipe' : 'Recipe'}
+        objectIdentity={!isCreating ? (draft.name || draft.id) : undefined}
+        backToCollection={{ label: 'Back to Recipes', onClick: openListView }}
+        primaryAction={{
+          label: isCreating ? 'Create recipe' : 'Save changes',
+          onClick: saveRecipe,
+          disabled: isCreating ? !draft.id.trim() || !draft.name.trim() : !hasDetailChanges
+        }}
+        secondaryActions={!isCreating ? [{ label: 'Delete', onClick: () => handleDeleteRecipe(selectedRecipe) }] : []}
+        role="PLATFORM_ADMIN"
+        showRoleNote={false}
+        showActionNote={false}
+      />
+      {message.title ? <NewExplanation title={message.title} tone={message.tone || 'neutral'}>{message.body}</NewExplanation> : null}
+      <SectionCard className="new-admin-surface-card">
+        <div className="new-section-header"><div><h3>Summary</h3></div></div>
+        <dl className="new-object-summary-grid">
+          <dt>Recipe ID</dt><dd>{isCreating ? 'Assigned on create' : draft.id}</dd>
+          <dt>Status</dt><dd>{recipeStatusLabel(draft.status)}</dd>
+          <dt>Revision</dt><dd>{selectedRecipe?.recipeRevision || (isCreating ? 'New' : '1')}</dd>
+          <dt>Usage</dt><dd>{selectedRecipe ? recipeUsageSummary(selectedRecipe) : 'Unreferenced until routed or authorized'}</dd>
+        </dl>
+      </SectionCard>
+      <NewSegmentedTabs
+        ariaLabel="Recipe detail tabs"
+        activeTab={detailTab}
+        onChange={setDetailTab}
+        tabs={[
+          { id: 'details', label: 'Details' },
+          { id: 'engine', label: 'Engine binding' },
+          { id: 'usage', label: 'Usage', disabled: isCreating },
+          { id: 'review', label: 'Review' }
+        ]}
+      />
+      <SectionCard className="new-admin-surface-card">
+        {detailTab === 'details' ? (
+          <>
+            <div className="new-section-header"><div><h3>{isCreating ? 'Definition and identity' : 'Recipe details'}</h3></div></div>
+            <div className="new-admin-editor-note">
+              <strong>{isCreating ? 'Choose a durable recipe ID' : 'Recipe ID is locked'}</strong>
+              <p>{isCreating ? 'Use a stable identifier for the governed execution pattern. DXCP records this value on deployments and uses it in routing and policy.' : 'DXCP preserves the recipe ID so routing, diagnostics, records, and delivery-group authorization keep a stable execution-pattern reference.'}</p>
             </div>
-            <dl className="new-admin-environment-meta">
-              <div>
-                <dt>ID</dt>
-                <dd>{recipe.id}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>{recipe.status}</dd>
-              </div>
+            <div className="new-intent-entry-grid">
+              <label className="new-field" htmlFor="admin-recipe-id"><span>Recipe ID</span><input id="admin-recipe-id" value={draft.id} disabled={!isCreating} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value }))} placeholder="progressive, canary, bluegreen" /></label>
+              <label className="new-field" htmlFor="admin-recipe-name"><span>Name</span><input id="admin-recipe-name" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label>
+              <label className="new-field" htmlFor="admin-recipe-status"><span>Status</span><select id="admin-recipe-status" value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}><option value="active">Active</option><option value="deprecated">Deprecated</option></select></label>
+              <label className="new-field" htmlFor="admin-recipe-description"><span>Description</span><input id="admin-recipe-description" value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+              <label className="new-field" htmlFor="admin-recipe-summary" style={{ gridColumn: '1 / -1' }}><span>Effective behavior summary</span><textarea id="admin-recipe-summary" rows={3} value={draft.effectiveBehaviorSummary} onChange={(event) => setDraft((current) => ({ ...current, effectiveBehaviorSummary: event.target.value }))} /></label>
+            </div>
+          </>
+        ) : detailTab === 'engine' ? (
+          <>
+            <div className="new-section-header"><div><h3>Engine binding</h3></div></div>
+            <div className="new-admin-editor-note"><strong>Engine details remain admin-only</strong><p>Recipes define delivery behavior and engine binding. Normal deploy does not expose this mapping as an operator choice.</p></div>
+            <div className="new-intent-entry-grid">
+              <label className="new-field" htmlFor="admin-recipe-engine-type"><span>Engine type</span><input id="admin-recipe-engine-type" value={draft.engineType} disabled /></label>
+              <label className="new-field" htmlFor="admin-recipe-app"><span>Spinnaker application</span><input id="admin-recipe-app" value={draft.spinnakerApplication} onChange={(event) => setDraft((current) => ({ ...current, spinnakerApplication: event.target.value }))} /></label>
+              <label className="new-field" htmlFor="admin-recipe-deploy-pipeline"><span>Deploy pipeline</span><input id="admin-recipe-deploy-pipeline" value={draft.deployPipeline} onChange={(event) => setDraft((current) => ({ ...current, deployPipeline: event.target.value }))} /></label>
+              <label className="new-field" htmlFor="admin-recipe-rollback-pipeline"><span>Rollback pipeline</span><input id="admin-recipe-rollback-pipeline" value={draft.rollbackPipeline} onChange={(event) => setDraft((current) => ({ ...current, rollbackPipeline: event.target.value }))} /></label>
+            </div>
+          </>
+        ) : detailTab === 'usage' ? (
+          <div className="new-admin-stack">
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>Service-environment routes</h3></div></div>
+              {currentUsage.routes.length === 0 ? <p className="new-operational-text">No service-environment routes currently select this recipe.</p> : <OperationalDataList ariaLabel="Recipe routing usage" columns={RECIPE_USAGE_ROUTE_COLUMNS} rows={currentUsage.routes} footerSummary={`${currentUsage.routes.length} routed reference${currentUsage.routes.length === 1 ? '' : 's'}`} getRowKey={(row) => `${row.serviceId}-${row.environmentId}`} renderCell={(row, column) => column.key === 'service' ? <span className="new-operational-text">{row.serviceId}</span> : <span className="new-operational-text">{row.environmentName || row.environmentId}</span>} />}
+            </SectionCard>
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>Delivery-group authorization</h3></div></div>
+              {currentUsage.deliveryGroups.length === 0 ? <p className="new-operational-text">No delivery groups currently authorize this recipe in allowed_recipes.</p> : <OperationalDataList ariaLabel="Recipe delivery-group usage" columns={RECIPE_USAGE_GROUP_COLUMNS} rows={currentUsage.deliveryGroups} footerSummary={`${currentUsage.deliveryGroups.length} delivery group${currentUsage.deliveryGroups.length === 1 ? '' : 's'}`} getRowKey={(row) => row.deliveryGroupId} renderCell={(row, column) => column.key === 'group' ? <span className="new-operational-text">{row.deliveryGroupName || row.deliveryGroupId}</span> : <span className="new-operational-text">{row.deliveryGroupId}</span>} />}
+            </SectionCard>
+          </div>
+        ) : (
+          <div className="new-admin-stack">
+            <div className="new-admin-editor-note"><strong>Review before save</strong><p>Recipe changes affect governed delivery behavior, routing outcomes, and delivery-group authorization posture. Review identity, behavior, and engine binding before saving.</p></div>
+            {deprecatingRoutedRecipe ? <NewExplanation title="Active routing still points at this recipe" tone="warning">Saving this deprecation will cause future deploys through those routes to fail until routing is updated.</NewExplanation> : null}
+            <dl className="new-object-summary-grid">
+              <dt>Name</dt><dd>{draft.name || 'Not set'}</dd>
+              <dt>Behavior summary</dt><dd>{draft.effectiveBehaviorSummary || 'Not set'}</dd>
+              <dt>Engine binding</dt><dd>{draft.spinnakerApplication && draft.deployPipeline ? `${draft.spinnakerApplication} / ${draft.deployPipeline}` : 'Incomplete'}</dd>
+              <dt>Rollback pipeline</dt><dd>{draft.rollbackPipeline || 'Not configured'}</dd>
             </dl>
-          </article>
-        ))}
-      </div>
-    </SectionCard>
+            <label className="new-field" htmlFor="admin-recipe-change-reason"><span>Change reason</span><textarea id="admin-recipe-change-reason" rows={3} value={draft.changeReason} onChange={(event) => setDraft((current) => ({ ...current, changeReason: event.target.value }))} placeholder="Optional review note for why this recipe changed" /></label>
+          </div>
+        )}
+      </SectionCard>
+    </div>
   )
 }
 

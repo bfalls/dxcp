@@ -41,7 +41,18 @@ function normalizeRecipe(recipe) {
     id: recipe?.id || '',
     name: recipe?.name || recipe?.id || 'Deployment Strategy',
     status: String(recipe?.status || 'active').toLowerCase(),
-    summary: recipe?.effective_behavior_summary || recipe?.description || ''
+    description: recipe?.description || '',
+    summary: recipe?.effective_behavior_summary || recipe?.description || '',
+    engineType: recipe?.engine_type || 'SPINNAKER',
+    spinnakerApplication: recipe?.spinnaker_application || '',
+    deployPipeline: recipe?.deploy_pipeline || '',
+    rollbackPipeline: recipe?.rollback_pipeline || '',
+    recipeRevision: Number.isFinite(Number(recipe?.recipe_revision)) ? Number(recipe.recipe_revision) : 1,
+    createdAt: recipe?.created_at || '',
+    createdBy: recipe?.created_by || '',
+    updatedAt: recipe?.updated_at || '',
+    updatedBy: recipe?.updated_by || '',
+    lastChangeReason: recipe?.last_change_reason || ''
   }
 }
 
@@ -467,6 +478,217 @@ function normalizeRouteRow(route) {
     lifecycleState: String(route?.lifecycle_state || 'active').toLowerCase(),
     isEnabled: route?.is_enabled !== false,
     recipeId: route?.recipe_id || ''
+  }
+}
+
+function createEmptyRecipeUsage() {
+  return {
+    routes: [],
+    deliveryGroups: [],
+    totalReferences: 0,
+    routedReferenceCount: 0,
+    deliveryGroupReferenceCount: 0
+  }
+}
+
+function buildRecipeUsageMap(recipes, deliveryGroups, routesByService) {
+  const usageByRecipeId = new Map()
+
+  const ensureUsage = (recipeId) => {
+    if (!usageByRecipeId.has(recipeId)) {
+      usageByRecipeId.set(recipeId, createEmptyRecipeUsage())
+    }
+    return usageByRecipeId.get(recipeId)
+  }
+
+  ;(Array.isArray(recipes) ? recipes : []).forEach((recipe) => {
+    if (recipe?.id) ensureUsage(recipe.id)
+  })
+
+  ;(Array.isArray(deliveryGroups) ? deliveryGroups : []).forEach((group) => {
+    ;(Array.isArray(group?.allowed_recipes) ? group.allowed_recipes : []).forEach((recipeId) => {
+      if (!recipeId) return
+      const usage = ensureUsage(recipeId)
+      usage.deliveryGroups.push({
+        deliveryGroupId: group.id || '',
+        deliveryGroupName: group.name || group.id || ''
+      })
+    })
+  })
+
+  Array.from(routesByService.entries()).forEach(([serviceId, routes]) => {
+    ;(Array.isArray(routes) ? routes : []).forEach((route) => {
+      if (!route?.recipeId) return
+      const usage = ensureUsage(route.recipeId)
+      usage.routes.push({
+        serviceId,
+        environmentId: route.environmentId || '',
+        environmentName: route.displayName || route.environmentId || ''
+      })
+    })
+  })
+
+  usageByRecipeId.forEach((usage) => {
+    usage.routes.sort((left, right) => {
+      const serviceCompare = String(left.serviceId || '').localeCompare(String(right.serviceId || ''))
+      if (serviceCompare !== 0) return serviceCompare
+      return String(left.environmentId || '').localeCompare(String(right.environmentId || ''))
+    })
+    usage.deliveryGroups.sort((left, right) =>
+      String(left.deliveryGroupId || '').localeCompare(String(right.deliveryGroupId || ''))
+    )
+    usage.routedReferenceCount = usage.routes.length
+    usage.deliveryGroupReferenceCount = usage.deliveryGroups.length
+    usage.totalReferences = usage.routedReferenceCount + usage.deliveryGroupReferenceCount
+  })
+
+  return usageByRecipeId
+}
+
+function decorateRecipesWithUsage(recipes, usageByRecipeId) {
+  return (Array.isArray(recipes) ? recipes : []).map((recipe) => {
+    const usage = usageByRecipeId.get(recipe.id) || createEmptyRecipeUsage()
+    return {
+      ...recipe,
+      usage
+    }
+  })
+}
+
+export async function loadAdminRecipeWorkspace(api, options = {}) {
+  const requestOptions = { ...options }
+  const [recipesResult, deliveryGroupsResult, servicesResult] = await Promise.allSettled([
+    api.get('/recipes', requestOptions),
+    api.get('/delivery-groups', requestOptions),
+    api.get('/services', requestOptions)
+  ])
+
+  if (recipesResult.status === 'rejected' || !Array.isArray(recipesResult.value)) {
+    return {
+      kind: 'failure',
+      errorMessage: formatApiError(
+        recipesResult.value,
+        'DXCP could not load recipe administration data right now. Refresh to try again.'
+      ),
+      viewModel: null
+    }
+  }
+
+  const degradedReasons = []
+  const recipes = recipesResult.value
+    .map(normalizeRecipe)
+    .filter((recipe) => recipe.id)
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  const deliveryGroups =
+    deliveryGroupsResult.status === 'fulfilled' && Array.isArray(deliveryGroupsResult.value)
+      ? deliveryGroupsResult.value
+      : []
+  if (
+    deliveryGroupsResult.status === 'rejected' ||
+    (deliveryGroupsResult.status === 'fulfilled' && !Array.isArray(deliveryGroupsResult.value))
+  ) {
+    degradedReasons.push('Delivery-group authorization context could not be refreshed.')
+  }
+
+  const services =
+    servicesResult.status === 'fulfilled' && Array.isArray(servicesResult.value)
+      ? servicesResult.value
+          .map((service) => service?.service_name || service?.name || '')
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
+      : []
+  if (servicesResult.status === 'rejected' || (servicesResult.status === 'fulfilled' && !Array.isArray(servicesResult.value))) {
+    degradedReasons.push('Service routing context could not be refreshed.')
+  }
+
+  const routesByService = new Map()
+  if (services.length > 0) {
+    const routeResults = await Promise.allSettled(
+      services.map(async (serviceId) => ({
+        serviceId,
+        rows: await api.get(`/admin/services/${encodeURIComponent(serviceId)}/environments`, requestOptions)
+      }))
+    )
+
+    routeResults.forEach((result) => {
+      if (result.status !== 'fulfilled') {
+        degradedReasons.push('Some service-environment routing reads could not be refreshed.')
+        return
+      }
+      if (!Array.isArray(result.value?.rows)) {
+        degradedReasons.push('Some service-environment routing reads could not be refreshed.')
+        return
+      }
+      routesByService.set(
+        result.value.serviceId,
+        result.value.rows.map(normalizeRouteRow).filter((row) => row.environmentId)
+      )
+    })
+  }
+
+  const usageByRecipeId = buildRecipeUsageMap(recipes, deliveryGroups, routesByService)
+
+  return {
+    kind: degradedReasons.length > 0 ? 'degraded' : 'ready',
+    errorMessage: '',
+    viewModel: {
+      recipes: decorateRecipesWithUsage(recipes, usageByRecipeId),
+      services,
+      deliveryGroups,
+      degradedReasons
+    }
+  }
+}
+
+export async function createAdminRecipe(api, payload) {
+  try {
+    const result = await api.post('/recipes', payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not create this recipe.'),
+        details: result?.details || null,
+        code: result?.code || ''
+      }
+    }
+    return { ok: true, recipe: normalizeRecipe(result) }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not create this recipe right now. Refresh to try again.' }
+  }
+}
+
+export async function updateAdminRecipe(api, recipeId, payload) {
+  try {
+    const result = await api.put(`/recipes/${encodeURIComponent(recipeId)}`, payload)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not update this recipe.'),
+        details: result?.details || null,
+        code: result?.code || ''
+      }
+    }
+    return { ok: true, recipe: normalizeRecipe(result) }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not update this recipe right now. Refresh to try again.' }
+  }
+}
+
+export async function deleteAdminRecipe(api, recipeId) {
+  try {
+    const result = await api.delete(`/admin/recipes/${encodeURIComponent(recipeId)}`)
+    if (result?.code) {
+      return {
+        ok: false,
+        errorMessage: formatApiError(result, 'DXCP could not delete this recipe.'),
+        details: result?.details || null,
+        code: result?.code || ''
+      }
+    }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, errorMessage: 'DXCP could not delete this recipe right now. Refresh to try again.' }
   }
 }
 
