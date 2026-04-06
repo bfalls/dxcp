@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import InfoTooltip from '../components/InfoTooltip.jsx'
 import LoadingText from '../components/LoadingText.jsx'
 import OperationalDataList from '../components/OperationalDataList.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import NewExperiencePageHeader from './NewExperiencePageHeader.jsx'
 import NewExperienceAdminWorkspaceShell, { NewExperienceAdminSectionStrip } from './NewExperienceAdminWorkspaceShell.jsx'
+import NewExperienceAdminDeliveryGroupsPage from './NewExperienceAdminDeliveryGroupsPage.jsx'
 import NewRefreshButton from './NewRefreshButton.jsx'
 import NewSectionDivider from './NewSectionDivider.jsx'
 import NewSegmentedTabs from './NewSegmentedTabs.jsx'
@@ -710,12 +711,6 @@ function EnvironmentsPanel({ api }) {
           ) : null}
 
           <div className="new-admin-surface-card">
-            <div className="new-section-header new-collection-header">
-              <div>
-                <h3>Environment list</h3>
-              </div>
-            </div>
-
             <div className="new-applications-chooser-toolbar">
               <label className="new-applications-search" htmlFor="admin-environment-search">
                 <span>Search</span>
@@ -1632,7 +1627,6 @@ function RecipesWorkspace({ api }) {
             <NewExplanation title={message.title} tone={message.tone || 'neutral'}>{message.body}</NewExplanation>
           ) : null}
           <div className="new-admin-surface-card">
-            <div className="new-section-header new-collection-header"><div><h3>Recipe list</h3></div></div>
             <div className="new-applications-chooser-toolbar">
               <label className="new-applications-search" htmlFor="admin-recipe-search">
                 <span>Search</span>
@@ -1794,21 +1788,23 @@ function PlaceholderPanel({ eyebrow, title, description, emptyTitle, emptyBody }
   )
 }
 
-export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
+export default function NewExperienceAdminPage({ role = 'UNKNOWN', api, adminRoute = 'root' }) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { groupId = '' } = useParams()
   const requestedTab = searchParams.get('tab')
+  const onDeliveryGroupRoute = adminRoute === 'delivery-groups-detail' || adminRoute === 'delivery-groups-create'
 
   useEffect(() => {
-    if (role !== 'PLATFORM_ADMIN') return
+    if (role !== 'PLATFORM_ADMIN' || onDeliveryGroupRoute) return
     if (ADMIN_TABS.some((tab) => tab.id === requestedTab)) return
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set('tab', DEFAULT_TAB)
     setSearchParams(nextParams, { replace: true })
-  }, [requestedTab, role, searchParams, setSearchParams])
+  }, [onDeliveryGroupRoute, requestedTab, role, searchParams, setSearchParams])
 
   const activeTab = useMemo(
-    () => (ADMIN_TABS.some((tab) => tab.id === requestedTab) ? requestedTab : DEFAULT_TAB),
-    [requestedTab]
+    () => (onDeliveryGroupRoute ? 'delivery-groups' : (ADMIN_TABS.some((tab) => tab.id === requestedTab) ? requestedTab : DEFAULT_TAB)),
+    [onDeliveryGroupRoute, requestedTab]
   )
 
   useNewExperienceAlertRail([])
@@ -1832,13 +1828,13 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
 
   useNewExperienceStickyRail(role === 'PLATFORM_ADMIN' ? stickyAdminStrip : null)
 
-  if (role !== 'PLATFORM_ADMIN') {
+  if (role !== 'PLATFORM_ADMIN' && activeTab !== 'delivery-groups') {
     return <BlockedAdminState role={role} />
   }
 
   let panel = null
   if (activeTab === 'delivery-groups') {
-    panel = <DeliveryGroupsPanel api={api} />
+    panel = <NewExperienceAdminDeliveryGroupsPage api={api} role={role} groupId={groupId} isCreateRoute={adminRoute === 'delivery-groups-create'} />
   } else if (activeTab === 'recipes') {
     panel = <RecipesPanel api={api} />
   } else if (activeTab === 'engine-adapters') {

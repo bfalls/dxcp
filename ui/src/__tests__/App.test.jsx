@@ -2301,6 +2301,166 @@ export async function runAllTests() {
     assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 
+  await runTest('New experience Delivery Groups collection opens an object route with summary-first detail', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'payments.owner@example.com',
+          description: 'Governance for payments',
+          services: ['payments-api', 'payments-worker'],
+          allowed_recipes: ['default'],
+          allowed_environments: ['sandbox', 'prod'],
+          guardrails: {
+            max_concurrent_deployments: 2,
+            daily_deploy_quota: 8,
+            daily_rollback_quota: 3
+          },
+          updated_at: '2026-03-01T00:00:00Z'
+        }
+      ],
+      environments: [
+        { id: 'sandbox', name: 'sandbox', display_name: 'Sandbox', type: 'non_prod', lifecycle_state: 'active', is_enabled: true },
+        { id: 'prod', name: 'prod', display_name: 'Production', type: 'prod', lifecycle_state: 'active', is_enabled: true }
+      ],
+      servicesList: [{ service_name: 'payments-api' }, { service_name: 'payments-worker' }]
+    })
+    const view = renderApp('/new/admin?tab=delivery-groups')
+
+    await view.findByRole('heading', { name: 'Delivery Groups' })
+    await view.findAllByText('Payments Core')
+    fireEvent.click(view.getByRole('button', { name: 'Open Payments Core' }))
+    await view.findByRole('heading', { name: 'Summary' })
+    await view.findAllByText('payments')
+    await view.findByText('Max 2 concurrent | Deploy 8/day | Rollback 3/day')
+    await view.findAllByText('Sandbox, Production')
+    assert.equal(view.getByRole('tab', { name: 'Details' }).getAttribute('aria-selected'), 'true')
+  })
+
+  await runTest('New experience Delivery Group object route supports back navigation and focused sub-tabs', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'payments.owner@example.com',
+          description: 'Governance for payments',
+          services: ['payments-api'],
+          allowed_recipes: ['default'],
+          guardrails: {
+            max_concurrent_deployments: 1,
+            daily_deploy_quota: 5,
+            daily_rollback_quota: 2
+          }
+        }
+      ],
+      servicesList: [{ service_name: 'payments-api' }]
+    })
+    const view = renderApp('/new/admin/delivery-groups/payments')
+
+    await view.findAllByText('Payments Core')
+    assert.equal(view.queryByRole('tab', { name: 'Review' }), null)
+    fireEvent.click(view.getByRole('tab', { name: 'Applications' }))
+    await view.findByText('payments-api')
+    fireEvent.click(view.getByRole('tab', { name: 'Guardrails' }))
+    await view.findByText('Daily deploy quota')
+    fireEvent.click(view.getByRole('button', { name: 'Back to Delivery Groups' }))
+    await view.findByRole('heading', { name: 'Delivery Groups' })
+  })
+
+  await runTest('New experience Delivery Group create mode renders direct save controls', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      servicesList: [{ service_name: 'payments-api' }, { service_name: 'payments-worker' }]
+    })
+    const view = renderApp('/new/admin/delivery-groups/create')
+
+    await view.findByText('Audit context could not be refreshed.')
+    const groupIdInput = await view.findByLabelText('Group ID')
+    const groupNameInput = await view.findByLabelText('Name')
+    const ownerEmailsInput = await view.findByLabelText('Owner emails')
+    fireEvent.change(groupIdInput, { target: { value: 'payments' } })
+    fireEvent.change(groupNameInput, { target: { value: 'Payments Core' } })
+    fireEvent.change(ownerEmailsInput, { target: { value: 'payments.owner@example.com' } })
+    await waitForCondition(() => view.getByLabelText('Group ID').value === 'payments')
+    await waitForCondition(() => view.getByLabelText('Name').value === 'Payments Core')
+    await waitForCondition(() => view.getByLabelText('Owner emails').value === 'payments.owner@example.com')
+    fireEvent.click(view.getByLabelText('Default Deploy'))
+    assert.ok(view.getByRole('button', { name: 'Save group' }))
+    assert.equal(view.queryByRole('button', { name: 'Review changes' }), null)
+  })
+
+  await runTest('New experience Delivery Group detail preserves coherent read-only posture for non-admins', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'owner@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-delivery-owners']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'DELIVERY_OWNER',
+      deployAllowed: true,
+      rollbackAllowed: false,
+      deliveryGroups: [
+        {
+          id: 'payments',
+          name: 'Payments Core',
+          owner: 'payments.owner@example.com',
+          services: ['payments-api'],
+          allowed_recipes: ['default'],
+          guardrails: {
+            max_concurrent_deployments: 1,
+            daily_deploy_quota: 5,
+            daily_rollback_quota: 2
+          }
+        }
+      ],
+      servicesList: [{ service_name: 'payments-api' }]
+    })
+    const view = renderApp('/new/admin/delivery-groups/payments')
+
+    await view.findAllByText('Payments Core')
+    await view.findByText('Read-only access')
+    await view.findAllByText('Platform Admin access is required to change Delivery Group membership, allowed recipes, or guardrails.')
+    assert.equal(view.queryByRole('button', { name: 'Save changes' }), null)
+    assert.equal(view.queryByRole('button', { name: 'Create group' }), null)
+  })
+
   await runTest('New experience admin route preserves the active workspace tab on refresh through the query string', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
@@ -2317,7 +2477,7 @@ export async function runAllTests() {
     })
     const view = renderApp('/new/admin?tab=recipes')
 
-    await view.findByText('Recipe list')
+    await view.findByRole('button', { name: 'Create recipe' })
     const recipesTab = view.getByRole('tab', { name: /Recipes/i })
     assert.equal(recipesTab.getAttribute('aria-selected'), 'true')
     assert.equal(view.queryByText('Sandbox'), null)

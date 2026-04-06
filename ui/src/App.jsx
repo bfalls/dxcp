@@ -4352,6 +4352,8 @@ export default function App() {
               element={<NewExperienceDeploymentDetailPage role={derivedRole} api={api} />}
             />
             <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
+            <Route path="/new/admin/delivery-groups/create" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-create" />} />
+            <Route path="/new/admin/delivery-groups/:groupId" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-detail" />} />
             <Route path="*" element={<NewExperienceUnavailableRoutePage role={derivedRole} />} />
           </Routes>
         )}

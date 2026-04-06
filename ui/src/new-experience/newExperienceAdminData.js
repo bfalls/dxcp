@@ -10,15 +10,18 @@ function parseGuardrailValue(value, fallbackValue = null) {
   return Number.isFinite(parsed) ? parsed : fallbackValue
 }
 
-function normalizeGroup(group, defaults) {
+function normalizeGroup(group, defaults, environmentNamesById = new Map()) {
   const guardrails = group?.guardrails || {}
   return {
     id: group?.id || '',
     name: group?.name || '',
-    owner: group?.owner || 'Not provided',
-    description: group?.description || 'No description provided.',
+    owner: group?.owner || '',
+    description: group?.description || '',
     services: Array.isArray(group?.services) ? group.services.slice().sort() : [],
     allowedRecipes: Array.isArray(group?.allowed_recipes) ? group.allowed_recipes.slice().sort() : [],
+    allowedEnvironments: Array.isArray(group?.allowed_environments)
+      ? group.allowed_environments.map((environmentId) => environmentNamesById.get(environmentId) || environmentId)
+      : [],
     guardrails: {
       maxConcurrentDeployments: parseGuardrailValue(
         guardrails.max_concurrent_deployments,
@@ -32,7 +35,12 @@ function normalizeGroup(group, defaults) {
         guardrails.daily_rollback_quota,
         parseGuardrailValue(group?.daily_rollback_quota, defaults.dailyRollbackQuota)
       )
-    }
+    },
+    createdAt: group?.created_at || '',
+    createdBy: group?.created_by || '',
+    updatedAt: group?.updated_at || '',
+    updatedBy: group?.updated_by || '',
+    lastChangeReason: group?.last_change_reason || ''
   }
 }
 
@@ -96,17 +104,29 @@ function normalizeEngineAdapter(adapter) {
 
 function buildDraft(group) {
   return {
-    id: group.id,
-    name: group.name,
-    owner: group.owner,
-    description: group.description,
-    services: group.services.slice(),
-    allowedRecipes: group.allowedRecipes.slice(),
-    dailyDeployQuota: String(group.guardrails.dailyDeployQuota ?? ''),
-    dailyRollbackQuota: String(group.guardrails.dailyRollbackQuota ?? ''),
-    maxConcurrentDeployments: String(group.guardrails.maxConcurrentDeployments ?? ''),
+    id: group?.id || '',
+    name: group?.name || '',
+    owner: group?.owner || '',
+    description: group?.description || '',
+    services: Array.isArray(group?.services) ? group.services.slice() : [],
+    allowedRecipes: Array.isArray(group?.allowedRecipes) ? group.allowedRecipes.slice() : [],
+    allowedEnvironments: Array.isArray(group?.allowedEnvironments) ? group.allowedEnvironments.slice() : [],
+    dailyDeployQuota: String(group?.guardrails?.dailyDeployQuota ?? ''),
+    dailyRollbackQuota: String(group?.guardrails?.dailyRollbackQuota ?? ''),
+    maxConcurrentDeployments: String(group?.guardrails?.maxConcurrentDeployments ?? ''),
     changeReason: ''
   }
+}
+
+function isValidEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
+}
+
+function parseOwnerEmails(ownerValue) {
+  return String(ownerValue || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function formatStrategies(recipeIds, recipesById) {
@@ -151,7 +171,22 @@ function buildPayload(baseGroup, draft) {
   const dailyRollbackQuota = Number(draft.dailyRollbackQuota)
   const maxConcurrentDeployments = Number(draft.maxConcurrentDeployments)
   const localErrors = []
+  const ownerEmails = parseOwnerEmails(draft.owner)
 
+  if (!String(draft.id || '').trim()) {
+    localErrors.push({ id: 'id', text: 'Delivery Group ID is required before DXCP can review this governance object.' })
+  }
+  if (!String(draft.name || '').trim()) {
+    localErrors.push({ id: 'name', text: 'Delivery Group name is required before DXCP can review this governance object.' })
+  }
+  if (ownerEmails.length === 0) {
+    localErrors.push({ id: 'owner', text: 'Add one or more owner email addresses before saving this Delivery Group.' })
+  } else if (ownerEmails.some((email) => !isValidEmailAddress(email))) {
+    localErrors.push({
+      id: 'owner-format',
+      text: 'Owner emails must be a comma-separated list of valid email addresses.'
+    })
+  }
   if (!Number.isInteger(dailyDeployQuota) || dailyDeployQuota <= 0) {
     localErrors.push({ id: 'daily-deploy-quota', text: 'Daily deploy quota must be a positive integer.' })
   }
@@ -169,12 +204,17 @@ function buildPayload(baseGroup, draft) {
   }
 
   const payload = {
-    id: baseGroup.id,
-    name: draft.name,
-    description: draft.description || null,
-    owner: draft.owner || null,
+    id: String(draft.id || '').trim(),
+    name: String(draft.name || '').trim(),
+    description: String(draft.description || '').trim() || null,
+    owner: ownerEmails.join(', '),
     services: draft.services.slice().sort(),
     allowed_recipes: draft.allowedRecipes.slice().sort(),
+    allowed_environments: Array.isArray(baseGroup?.allowedEnvironments)
+      ? baseGroup.allowedEnvironments.slice()
+      : Array.isArray(draft.allowedEnvironments)
+        ? draft.allowedEnvironments.slice()
+        : [],
     guardrails: {
       max_concurrent_deployments: maxConcurrentDeployments,
       daily_deploy_quota: dailyDeployQuota,
@@ -191,6 +231,45 @@ function buildPayload(baseGroup, draft) {
 
 function buildChangeSummary(baseGroup, draft, recipesById) {
   const changes = []
+  if (!baseGroup) {
+    return [
+      { label: 'Delivery Group ID', current: 'New object', proposed: draft.id || 'Not set' },
+      { label: 'Name', current: 'New object', proposed: draft.name || 'Not set' },
+      { label: 'Owners', current: 'New object', proposed: parseOwnerEmails(draft.owner).join(', ') || 'Not set' },
+      { label: 'Applications', current: 'New object', proposed: draft.services.length > 0 ? draft.services.join(', ') : 'None selected' },
+      {
+        label: 'Allowed Deployment Strategies',
+        current: 'New object',
+        proposed: formatStrategies(draft.allowedRecipes, recipesById)
+      },
+      {
+        label: 'Guardrails',
+        current: 'New object',
+        proposed: `Max ${draft.maxConcurrentDeployments || '0'} concurrent | Deploy ${draft.dailyDeployQuota || '0'}/day | Rollback ${draft.dailyRollbackQuota || '0'}/day`
+      }
+    ]
+  }
+  if (String(baseGroup.name || '') !== String(draft.name || '')) {
+    changes.push({
+      label: 'Name',
+      current: baseGroup.name || 'Not set',
+      proposed: draft.name || 'Not set'
+    })
+  }
+  if (String(baseGroup.description || '') !== String(draft.description || '')) {
+    changes.push({
+      label: 'Description',
+      current: baseGroup.description || 'Not set',
+      proposed: draft.description || 'Not set'
+    })
+  }
+  if (String(baseGroup.owner || '') !== String(draft.owner || '')) {
+    changes.push({
+      label: 'Owners',
+      current: baseGroup.owner || 'Not set',
+      proposed: draft.owner || 'Not set'
+    })
+  }
   if (String(baseGroup.guardrails.dailyDeployQuota) !== String(draft.dailyDeployQuota)) {
     changes.push({
       label: 'Daily deploy quota',
@@ -219,6 +298,14 @@ function buildChangeSummary(baseGroup, draft, recipesById) {
       proposed: formatStrategies(draft.allowedRecipes, recipesById)
     })
   }
+  const serviceDiff = listDiff(baseGroup.services, draft.services)
+  if (serviceDiff.added.length > 0 || serviceDiff.removed.length > 0) {
+    changes.push({
+      label: 'Applications',
+      current: baseGroup.services.length > 0 ? baseGroup.services.join(', ') : 'None selected',
+      proposed: draft.services.length > 0 ? draft.services.join(', ') : 'None selected'
+    })
+  }
   return changes
 }
 
@@ -226,7 +313,19 @@ function buildImpactPreview(baseGroup, draft, recipesById, validation) {
   const newlyBlocked = []
   const newlyAllowed = []
   const unchanged = ['Current running deployments stay unchanged until a future deployment is requested.']
-  const recipeDiff = listDiff(baseGroup.allowedRecipes, draft.allowedRecipes)
+  const recipeDiff = listDiff(baseGroup?.allowedRecipes || [], draft.allowedRecipes)
+  const serviceDiff = listDiff(baseGroup?.services || [], draft.services)
+
+  if (!baseGroup) {
+    if (draft.services.length > 0) {
+      newlyAllowed.push(`DXCP would place ${draft.services.length} application${draft.services.length === 1 ? '' : 's'} inside this governance boundary.`)
+    }
+    if (draft.allowedRecipes.length > 0) {
+      newlyAllowed.push(`DXCP would authorize ${draft.allowedRecipes.length} delivery ${draft.allowedRecipes.length === 1 ? 'strategy' : 'strategies'} for this group.`)
+    }
+    unchanged.push('Environment policy scope remains managed from the Delivery Group Environment Policy tab.')
+    return { newlyBlocked, newlyAllowed, unchanged }
+  }
 
   if (String(baseGroup.guardrails.dailyDeployQuota) !== String(draft.dailyDeployQuota)) {
     const nextValue = Number(draft.dailyDeployQuota)
@@ -259,10 +358,18 @@ function buildImpactPreview(baseGroup, draft, recipesById, validation) {
     const label = recipesById.get(recipeId)?.name || recipeId
     newlyAllowed.push(`Applications in this Deployment Group would gain access to ${label}.`)
   })
+  serviceDiff.removed.forEach((serviceId) => {
+    newlyBlocked.push(`${serviceId} would leave this Delivery Group and lose this policy scope.`)
+  })
+  serviceDiff.added.forEach((serviceId) => {
+    newlyAllowed.push(`${serviceId} would enter this Delivery Group and inherit its policy scope.`)
+  })
 
   if (validation.errors.length > 0) {
     unchanged.push('Impact preview remains partial until blocking review errors are resolved.')
   }
+
+  unchanged.push('Environment policy scope remains managed from the Delivery Group Environment Policy tab.')
 
   return { newlyBlocked, newlyAllowed, unchanged }
 }
@@ -284,13 +391,14 @@ function buildAuditSummary(auditEvents, group) {
 
 export async function loadAdminData(api, options = {}) {
   const requestOptions = { ...options }
-  const [groupsResult, recipesResult, servicesResult, settingsResult, adminSettingsResult, auditResult] = await Promise.allSettled([
+  const [groupsResult, recipesResult, servicesResult, settingsResult, adminSettingsResult, auditResult, environmentsResult] = await Promise.allSettled([
     api.get('/delivery-groups', requestOptions),
     api.get('/recipes', requestOptions),
     api.get('/services', requestOptions),
     api.get('/settings/public', requestOptions),
     api.get('/settings/admin', requestOptions),
-    api.get('/audit/events', requestOptions)
+    api.get('/audit/events', requestOptions),
+    api.get('/environments', requestOptions)
   ])
 
   if (groupsResult.status === 'rejected') {
@@ -319,9 +427,23 @@ export async function loadAdminData(api, options = {}) {
         ? adminSettingsResult.value?.daily_rollback_quota ?? 10
         : 10
   }
+  const degradedReasons = []
+
+  const environmentNamesById =
+    environmentsResult.status === 'fulfilled' && Array.isArray(environmentsResult.value)
+      ? new Map(
+          environmentsResult.value.map((environment) => [
+            environment?.id || environment?.environment_id || environment?.name || '',
+            environment?.display_name || environment?.displayName || environment?.name || environment?.environment_id || environment?.id || ''
+          ])
+        )
+      : new Map()
+  if (environmentsResult.status === 'rejected' || (environmentsResult.status === 'fulfilled' && !Array.isArray(environmentsResult.value))) {
+    degradedReasons.push('Environment scope context could not be refreshed.')
+  }
 
   const groups = groupsResult.value
-    .map((group) => normalizeGroup(group, adminDefaults))
+    .map((group) => normalizeGroup(group, adminDefaults, environmentNamesById))
     .filter((group) => group.id)
     .sort((left, right) => left.name.localeCompare(right.name))
 
@@ -341,7 +463,6 @@ export async function loadAdminData(api, options = {}) {
     }
   }
 
-  const degradedReasons = []
   const recipes =
     recipesResult.status === 'fulfilled' && Array.isArray(recipesResult.value)
       ? recipesResult.value.map(normalizeRecipe).filter((recipe) => recipe.id).sort((left, right) => left.name.localeCompare(right.name))
@@ -431,11 +552,15 @@ export async function reviewAdminGroupDraft(api, baseGroup, draft) {
 
 export async function saveAdminGroupDraft(api, groupId, payload) {
   try {
-    const result = await api.put(`/delivery-groups/${encodeURIComponent(groupId)}`, payload)
+    const result = groupId
+      ? await api.put(`/delivery-groups/${encodeURIComponent(groupId)}`, payload)
+      : await api.post('/delivery-groups', payload)
     if (result?.code) {
       return {
         ok: false,
-        errorMessage: formatApiError(result, 'DXCP could not save this Deployment Group right now.')
+        errorMessage: formatApiError(result, 'DXCP could not save this Deployment Group right now.'),
+        code: result?.code || '',
+        details: result?.details || null
       }
     }
     return { ok: true, group: result }
@@ -445,6 +570,23 @@ export async function saveAdminGroupDraft(api, groupId, payload) {
       errorMessage: 'DXCP could not save this Deployment Group right now. Refresh to try again.'
     }
   }
+}
+
+export function createEmptyAdminGroupDraft(adminDefaults = {}) {
+  return buildDraft({
+    id: '',
+    name: '',
+    owner: '',
+    description: '',
+    services: [],
+    allowedRecipes: [],
+    allowedEnvironments: [],
+    guardrails: {
+      dailyDeployQuota: adminDefaults.dailyDeployQuota ?? 25,
+      dailyRollbackQuota: adminDefaults.dailyRollbackQuota ?? 10,
+      maxConcurrentDeployments: 1
+    }
+  })
 }
 
 export function buildAdminViewModel(state, selectedGroupId, mode, draft, review, warningAcknowledged) {
