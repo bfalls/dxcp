@@ -2268,18 +2268,36 @@ export async function runAllTests() {
       role: 'PLATFORM_ADMIN',
       deployAllowed: true,
       rollbackAllowed: true,
-      adminEnvironments: [{ environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }]
+      adminEnvironments: [{ environment_id: 'sandbox', display_name: 'Sandbox', type: 'non_prod', is_enabled: true }],
+      deliveryGroups: [
+        {
+          id: 'default',
+          name: 'Default Delivery Group',
+          owner: 'dxcp.owner.wafer344@dralias.com',
+          description: 'Default governance boundary',
+          services: ['demo-service', 'demo-service-2'],
+          allowed_recipes: ['default'],
+          guardrails: {
+            max_concurrent_deployments: 1,
+            daily_deploy_quota: 26,
+            daily_rollback_quota: 10
+          }
+        }
+      ]
     })
     const view = renderApp('/new/admin')
 
     await view.findByRole('heading', { name: 'Deployment Engine' })
     assert.equal(view.queryByText('Sandbox'), null)
     fireEvent.click(view.getByRole('tab', { name: /Delivery Groups/i }))
-    await view.findByText('Delivery-group policy remains the independent guardrail')
+    await view.findByRole('heading', { name: 'Delivery Groups' })
+    await view.findByText('Default Delivery Group')
+    await view.findByText('Max 1 concurrent | Deploy 26/day | Rollback 10/day')
+    await view.findByText('dxcp.owner.wafer344@dralias.com')
     assert.equal(view.queryByText('Sandbox'), null)
     fireEvent.click(view.getByRole('tab', { name: /Environments/i }))
     await view.findByText('Sandbox')
-    assert.equal(view.queryByText('Delivery-group policy remains the independent guardrail'), null)
+    assert.equal(view.queryByText('Default Delivery Group'), null)
     assert.equal(view.getByRole('tab', { name: /Environments/i }).getAttribute('aria-selected'), 'true')
   })
 

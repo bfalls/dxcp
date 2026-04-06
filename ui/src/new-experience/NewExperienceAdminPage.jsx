@@ -22,6 +22,7 @@ import { useNewExperienceAlertRail, useNewExperienceStickyRail } from './NewExpe
 import {
   createAdminEnvironment,
   loadAdminEngineAdapterWorkspace,
+  loadAdminData,
   createAdminRecipe,
   deleteAdminEnvironment,
   deleteAdminRecipe,
@@ -167,6 +168,228 @@ function EnvironmentSummary({ rows }) {
         <span>Retired</span>
         <strong>{retiredCount}</strong>
       </div>
+    </div>
+  )
+}
+
+function parseDeliveryGroupOwners(ownerValue) {
+  if (!ownerValue) return []
+  return String(ownerValue)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function summarizeDeliveryGroupOwners(ownerValue) {
+  const owners = parseDeliveryGroupOwners(ownerValue)
+  if (owners.length === 0) return 'Owners not provided'
+  if (owners.length === 1) return owners[0]
+  if (owners.length === 2) return owners.join(', ')
+  return `${owners[0]}, ${owners[1]} +${owners.length - 2}`
+}
+
+function formatDeliveryGroupGuardrails(guardrails) {
+  const maxConcurrentDeployments = Number(guardrails?.maxConcurrentDeployments)
+  const dailyDeployQuota = Number(guardrails?.dailyDeployQuota)
+  const dailyRollbackQuota = Number(guardrails?.dailyRollbackQuota)
+
+  return [
+    Number.isFinite(maxConcurrentDeployments) ? `Max ${maxConcurrentDeployments} concurrent` : null,
+    Number.isFinite(dailyDeployQuota) ? `Deploy ${dailyDeployQuota}/day` : null,
+    Number.isFinite(dailyRollbackQuota) ? `Rollback ${dailyRollbackQuota}/day` : null
+  ]
+    .filter(Boolean)
+    .join(' | ')
+}
+
+function DeliveryGroupsSummary({ groups }) {
+  const serviceCount = groups.reduce((total, group) => total + (Array.isArray(group.services) ? group.services.length : 0), 0)
+  const recipeCount = groups.reduce(
+    (total, group) => total + (Array.isArray(group.allowedRecipes) ? group.allowedRecipes.length : 0),
+    0
+  )
+
+  return (
+    <div className="new-admin-inline-summary" aria-label="Delivery group summary">
+      <div className="new-admin-inline-summary-item">
+        <span>Configured</span>
+        <strong>{groups.length}</strong>
+      </div>
+      <div className="new-admin-inline-summary-item">
+        <span>Services</span>
+        <strong>{serviceCount}</strong>
+      </div>
+      <div className="new-admin-inline-summary-item">
+        <span>Allowed recipes</span>
+        <strong>{recipeCount}</strong>
+      </div>
+    </div>
+  )
+}
+
+function DeliveryGroupsPanel({ api }) {
+  const [workspaceState, setWorkspaceState] = useState({ kind: 'loading', viewModel: null, errorMessage: '' })
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const loadWorkspace = useCallback(async (options = {}) => {
+    setWorkspaceState((current) => ({
+      kind: current.kind === 'ready' || current.kind === 'degraded' || current.kind === 'empty' ? 'refreshing' : 'loading',
+      viewModel: current.viewModel,
+      errorMessage: ''
+    }))
+    const result = await loadAdminData(api, options)
+    setWorkspaceState(result)
+  }, [api])
+
+  useEffect(() => {
+    loadWorkspace()
+  }, [loadWorkspace])
+
+  const groups = useMemo(() => workspaceState.viewModel?.groups || [], [workspaceState.viewModel?.groups])
+  const degradedReasons = useMemo(
+    () => workspaceState.viewModel?.degradedReasons || [],
+    [workspaceState.viewModel?.degradedReasons]
+  )
+  const visibleGroups = useMemo(() => {
+    const normalizedSearchTerm = searchTerm.trim().toLowerCase()
+    if (!normalizedSearchTerm) return groups
+    return groups.filter((group) =>
+      [
+        group.id,
+        group.name,
+        group.owner,
+        ...(Array.isArray(group.services) ? group.services : []),
+        ...(Array.isArray(group.allowedRecipes) ? group.allowedRecipes : [])
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearchTerm)
+    )
+  }, [groups, searchTerm])
+  const hasNoSearchResults = groups.length > 0 && visibleGroups.length === 0
+
+  if (workspaceState.kind === 'loading') {
+    return (
+      <SectionCard className="new-admin-card">
+        <div className="new-card-loading" aria-label="Loading delivery groups" aria-live="polite" aria-busy="true">
+          <LoadingText>Loading...</LoadingText>
+          <div className="new-card-loading-lines" aria-hidden="true">
+            <div className="new-card-loading-line new-card-loading-line-1" />
+            <div className="new-card-loading-line new-card-loading-line-2" />
+            <div className="new-card-loading-line new-card-loading-line-3" />
+          </div>
+        </div>
+      </SectionCard>
+    )
+  }
+
+  if (workspaceState.kind === 'failure') {
+    return (
+      <SectionCard className="new-admin-card">
+        <NewStateBlock
+          eyebrow="Failure"
+          title="Delivery-group administration could not be loaded"
+          tone="danger"
+          actions={[{ label: 'Retry', onClick: () => loadWorkspace({ bypassCache: true }) }]}
+        >
+          {workspaceState.errorMessage || 'DXCP could not load delivery-group administration data right now.'}
+        </NewStateBlock>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <div className="new-admin-stack">
+      <SectionCard className="new-admin-card">
+        <div className="new-admin-panel-header">
+          <div>
+            <h3>Delivery Groups</h3>
+            <p>Review governance boundaries, service membership, ownership, and recipe authorization.</p>
+          </div>
+          <div className="new-admin-toolbar-actions">
+            <NewRefreshButton
+              onClick={() => loadWorkspace({ bypassCache: true })}
+              busy={workspaceState.kind === 'refreshing'}
+            />
+          </div>
+        </div>
+        <DeliveryGroupsSummary groups={groups} />
+        {degradedReasons.length > 0 ? (
+          <NewExplanation title="Supporting admin reads are degraded" tone="warning">
+            {degradedReasons.join(' ')}
+          </NewExplanation>
+        ) : null}
+
+        <div className="new-admin-surface-card">
+          <div className="new-section-header new-collection-header">
+            <div>
+              <h3>Delivery group list</h3>
+            </div>
+          </div>
+
+          <div className="new-applications-chooser-toolbar">
+            <label className="new-applications-search" htmlFor="admin-delivery-group-search">
+              <span>Search</span>
+              <input
+                id="admin-delivery-group-search"
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search delivery groups"
+                aria-label="Search delivery groups"
+              />
+            </label>
+          </div>
+
+          {groups.length === 0 ? (
+            <NewStateBlock
+              eyebrow="Empty"
+              title="No delivery groups configured"
+              actions={[{ label: 'Refresh', onClick: () => loadWorkspace({ bypassCache: true }) }]}
+            >
+              DXCP did not return any delivery-group policy rows for this environment.
+            </NewStateBlock>
+          ) : hasNoSearchResults ? (
+            <NewStateBlock
+              eyebrow="No results"
+              title="No delivery groups match this search"
+              tone="warning"
+              actions={[{ label: 'Clear search', onClick: () => setSearchTerm('') }]}
+            >
+              Try a different delivery-group ID, name, owner, service, or recipe identifier.
+            </NewStateBlock>
+          ) : (
+            <div className="new-admin-stack">
+              {visibleGroups.map((group) => (
+                <section key={group.id} className="new-admin-surface-card" aria-label={`${group.name || group.id} delivery group`}>
+                  <div className="new-section-header">
+                    <div>
+                      <h3>{group.name || group.id}</h3>
+                      <p>{group.description || 'No description provided.'}</p>
+                    </div>
+                  </div>
+                  <dl className="new-object-summary-grid">
+                    <dt>Group ID</dt>
+                    <dd>{group.id}</dd>
+                    <dt>Owners</dt>
+                    <dd>{summarizeDeliveryGroupOwners(group.owner)}</dd>
+                    <dt>Services</dt>
+                    <dd>{Array.isArray(group.services) && group.services.length > 0 ? group.services.join(', ') : 'No services assigned'}</dd>
+                    <dt>Allowed recipes</dt>
+                    <dd>
+                      {Array.isArray(group.allowedRecipes) && group.allowedRecipes.length > 0
+                        ? group.allowedRecipes.join(', ')
+                        : 'No allowed recipes configured'}
+                    </dd>
+                    <dt>Guardrails</dt>
+                    <dd>{formatDeliveryGroupGuardrails(group.guardrails)}</dd>
+                  </dl>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      </SectionCard>
     </div>
   )
 }
@@ -1615,15 +1838,7 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api }) {
 
   let panel = null
   if (activeTab === 'delivery-groups') {
-    panel = (
-      <PlaceholderPanel
-        eyebrow="Policy boundaries"
-        title="Delivery Groups"
-        description="Define governance boundaries, ownership, and rollout guardrails for groups of services."
-        emptyTitle="Delivery-group policy remains the independent guardrail"
-        emptyBody="Routing chooses a candidate recipe, but Delivery Group policy still authorizes that recipe separately. Delivery-group editing remains available on the existing admin surface while the new workspace continues to absorb governance workflows."
-      />
-    )
+    panel = <DeliveryGroupsPanel api={api} />
   } else if (activeTab === 'recipes') {
     panel = <RecipesPanel api={api} />
   } else if (activeTab === 'engine-adapters') {
