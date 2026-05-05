@@ -542,13 +542,6 @@ def resolve_environment_for_group(
 ) -> tuple[Optional[dict], Optional[JSONResponse]]:
     if not environment:
         return None, error_response(400, "ENVIRONMENT_REQUIRED", "environment is required")
-    allowed = group.get("allowed_environments")
-    if allowed is not None and environment not in allowed:
-        return None, _policy_denied(
-            "ENVIRONMENT_NOT_ALLOWED",
-            f"Environment {environment} not allowed for delivery group {group.get('id')}",
-            actor,
-        )
     env_entry = storage.get_environment_for_group(environment, group.get("id"))
     if not env_entry:
         return None, _policy_denied(
@@ -4148,30 +4141,33 @@ def get_service_delivery_status(
     environment: str = Query(...),
     authorization: Optional[str] = Header(None),
 ):
-    actor = get_actor(authorization)
-    rate_limiter.check_read(actor.actor_id)
-    service_entry = guardrails.validate_service(service)
-    group, group_error = resolve_delivery_group(service, actor)
-    if group_error:
-        return group_error
-    env_entry, env_error = resolve_environment_for_group(group, environment, actor)
-    if env_error:
-        return env_error
-    try:
-        guardrails.validate_environment(environment, service_entry, group)
-    except PolicyError as exc:
-        return _capability_error(exc.code, exc.message, actor)
-    deployments = storage.list_deployments(service, None, environment)
-    promotion_candidate = _promotion_candidate_for_service(service, environment, actor)
-    if not deployments:
+    def _empty_delivery_status(promotion_candidate_override=None):
         return {
             "service": service,
             "environment": environment,
             "hasDeployments": False,
             "latest": None,
             "currentRunning": None,
-            "promotionCandidate": promotion_candidate,
+            "promotionCandidate": promotion_candidate_override,
         }
+
+    actor = get_actor(authorization)
+    rate_limiter.check_read(actor.actor_id)
+    service_entry = guardrails.validate_service(service)
+    group, group_error = resolve_delivery_group(service, actor)
+    if group_error:
+        return _empty_delivery_status()
+    env_entry, env_error = resolve_environment_for_group(group, environment, actor)
+    if env_error:
+        return _empty_delivery_status()
+    try:
+        guardrails.validate_environment(environment, service_entry, group)
+    except PolicyError as exc:
+        return _empty_delivery_status()
+    deployments = storage.list_deployments(service, None, environment)
+    promotion_candidate = _promotion_candidate_for_service(service, environment, actor)
+    if not deployments:
+        return _empty_delivery_status(promotion_candidate)
     latest = deployments[0]
     latest_success_by_scope = _latest_success_by_scope(deployments)
     latest_success_id = latest_success_by_scope.get((service, environment), {}).get("id")

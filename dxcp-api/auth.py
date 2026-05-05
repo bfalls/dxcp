@@ -54,6 +54,10 @@ def _fetch_jwks(jwks_url: str) -> Dict[str, dict]:
 
 
 def _decode_jwt(token: str) -> dict:
+    if hasattr(SETTINGS, "refresh_oidc_settings") and (
+        not SETTINGS.oidc_issuer or not SETTINGS.oidc_audience or not _roles_claim_key() or not _jwks_url()
+    ):
+        SETTINGS.refresh_oidc_settings()
     if not SETTINGS.oidc_issuer:
         _auth_error(500, "OIDC_CONFIG_MISSING", "DXCP_OIDC_ISSUER is required")
     if not SETTINGS.oidc_audience:

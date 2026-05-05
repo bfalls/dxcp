@@ -123,6 +123,50 @@ async def test_delivery_status_current_running_and_superseded(tmp_path: Path, mo
     assert body["currentRunning"]["version"] == "1.0.2"
 
 
+async def test_delivery_status_prefers_environment_policy_over_stale_legacy_allowlist(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        default_group = main.storage.get_delivery_group("default")
+        assert default_group is not None
+        default_group["allowed_environments"] = ["prod"]
+        main.storage.update_delivery_group(default_group)
+        _insert_deployment(main.storage, "dep-1", "SUCCEEDED", "2024-01-01T00:00:00Z")
+        response = await client.get(
+            "/v1/services/demo-service/delivery-status?environment=sandbox",
+            headers=auth_header(["dxcp-observers"]),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hasDeployments"] is True
+    assert body["latest"]["id"] == "dep-1"
+
+
+async def test_delivery_status_returns_empty_payload_when_environment_not_allowed(tmp_path: Path, monkeypatch):
+    async with _client_and_state(tmp_path, monkeypatch) as (client, main):
+        default_group = main.storage.get_delivery_group("default")
+        assert default_group is not None
+        default_group["allowed_environments"] = ["prod"]
+        main.storage.update_delivery_group(default_group)
+        conn = main.storage._connect()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM delivery_group_environment_policy WHERE delivery_group_id = ? AND environment_id = ?", ("default", "sandbox"))
+        conn.commit()
+        conn.close()
+        response = await client.get(
+            "/v1/services/demo-service/delivery-status?environment=sandbox",
+            headers=auth_header(["dxcp-observers"]),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "service": "demo-service",
+        "environment": "sandbox",
+        "hasDeployments": False,
+        "latest": None,
+        "currentRunning": None,
+        "promotionCandidate": None,
+    }
+
+
 async def test_deployments_list_outcomes_and_kinds(tmp_path: Path, monkeypatch):
     async with _client_and_state(tmp_path, monkeypatch) as (client, main):
         _insert_deployment(main.storage, "dep-1", "SUCCEEDED", "2024-01-01T00:00:00Z", version="1.0.0")

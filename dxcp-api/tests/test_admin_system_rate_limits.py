@@ -246,3 +246,24 @@ async def test_get_system_rate_limits_falls_back_for_missing_build_register_quot
     assert body["read_rpm"] == 77
     assert body["mutate_rpm"] == 12
     assert body["daily_quota_build_register"] == 50
+    assert body["source"] == "ssm"
+
+
+async def test_get_system_rate_limits_falls_back_to_runtime_when_ssm_unavailable(tmp_path: Path, monkeypatch):
+    async with _client(tmp_path, monkeypatch, store=None) as (client, main):
+        main.SETTINGS.ssm_prefix = ""
+        main.SETTINGS.read_rpm = 91
+        main.SETTINGS.mutate_rpm = 19
+        main.SETTINGS.daily_quota_build_register = 44
+        response = await client.get(
+            "/v1/admin/system/rate-limits",
+            headers=auth_header(["dxcp-platform-admins"]),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "read_rpm": 91,
+        "mutate_rpm": 19,
+        "daily_quota_build_register": 44,
+        "source": "runtime",
+    }

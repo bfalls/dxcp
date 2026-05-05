@@ -2,6 +2,7 @@ import React from 'react'
 import PageHeader from '../components/PageHeader.jsx'
 import SectionCard from '../components/SectionCard.jsx'
 import InfoTooltip from '../components/InfoTooltip.jsx'
+import NewSegmentedTabs from '../new-experience/NewSegmentedTabs.jsx'
 
 function parseOwnerEmails(ownerValue) {
   if (!ownerValue) return []
@@ -33,6 +34,13 @@ function normalizeFoundationEnvironment(row) {
     is_enabled: row?.is_enabled !== false
   }
 }
+
+const SYSTEM_SETTINGS_TABS = [
+  { id: 'operations', label: 'Operations' },
+  { id: 'ci-publishers', label: 'CI Publishers' },
+  { id: 'exposure', label: 'Exposure' },
+  { id: 'identity', label: 'Identity' }
+]
 
 export default function AdminPage({
   api,
@@ -154,6 +162,7 @@ export default function AdminPage({
   const [killSwitchPhrase, setKillSwitchPhrase] = React.useState('')
   const [killSwitchReason, setKillSwitchReason] = React.useState('')
   const [killSwitchStepConfirmed, setKillSwitchStepConfirmed] = React.useState(false)
+  const [systemSettingsSection, setSystemSettingsSection] = React.useState('operations')
   const [foundationEnvRows, setFoundationEnvRows] = React.useState([])
   const [foundationEnvDraft, setFoundationEnvDraft] = React.useState({
     environment_id: '',
@@ -222,6 +231,340 @@ export default function AdminPage({
       setKillSwitchReason('')
       setKillSwitchStepConfirmed(false)
     }
+  }
+
+  const renderSystemSettingsOperations = () => (
+    <div className="new-admin-stack">
+      <div className="new-admin-editor-note">
+        <strong>Operational safeguards</strong>
+        <p>Use these controls for emergency posture changes and platform-wide safety limits.</p>
+      </div>
+      <div>
+        <h2>Mutation Kill Switch</h2>
+        <div className="list-item admin-detail two-col">
+          <div>Status</div>
+          <div>
+            <strong>{currentlyDisabled ? 'Mutations: DISABLED' : 'Mutations: ENABLED'}</strong>
+          </div>
+        </div>
+        <div className="helper space-8">When disabled, DXCP operates in read-only mode.</div>
+        <div className="helper">Impact:</div>
+        <div className="helper">- Deploys blocked</div>
+        <div className="helper">- Rollbacks blocked</div>
+        <div className="helper">- Build publishing blocked</div>
+        <div className="helper">- Reads still available</div>
+        {systemMutationsDisabledError && <div className="helper space-8">{systemMutationsDisabledError}</div>}
+        {systemMutationsDisabledNote && <div className="helper space-8">{systemMutationsDisabledNote}</div>}
+        <div className="space-12" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            className={`button ${currentlyDisabled ? '' : 'danger'}`}
+            onClick={openKillSwitchDialog}
+            disabled={systemMutationsDisabledSaving || systemMutationsDisabledLoading}
+          >
+            {currentlyDisabled ? 'Enable mutations' : 'Disable mutations'}
+          </button>
+        </div>
+        {killSwitchDialogOpen && (
+          <div className="card space-12">
+            <h2>{currentlyDisabled ? 'Enable mutations' : 'Disable mutations'}</h2>
+            <div className="helper">
+              {currentlyDisabled
+                ? 'This will re-enable all mutating API endpoints immediately.'
+                : 'This will put DXCP into read-only mode immediately.'}
+            </div>
+            {!currentlyDisabled && (
+              <div className="field space-8">
+                <label htmlFor="kill-switch-confirm-phrase">Type exact phrase to continue</label>
+                <input
+                  id="kill-switch-confirm-phrase"
+                  value={killSwitchPhrase}
+                  onChange={(e) => setKillSwitchPhrase(e.target.value)}
+                  onInput={(e) => setKillSwitchPhrase(e.target.value)}
+                  placeholder={disablePhraseRequired}
+                  autoComplete="off"
+                />
+                <div className="helper">Required phrase: {disablePhraseRequired}</div>
+              </div>
+            )}
+            <div className="field">
+              <label htmlFor="kill-switch-reason">Reason (optional)</label>
+              <textarea
+                id="kill-switch-reason"
+                rows={3}
+                value={killSwitchReason}
+                onChange={(e) => setKillSwitchReason(e.target.value)}
+                onInput={(e) => setKillSwitchReason(e.target.value)}
+              />
+            </div>
+            {!killSwitchStepConfirmed ? (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  className="button secondary"
+                  onClick={() => setKillSwitchStepConfirmed(true)}
+                  disabled={!canAcknowledgeStepOne}
+                >
+                  Continue
+                </button>
+                <button className="button secondary" onClick={closeKillSwitchDialog}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  className={`button ${currentlyDisabled ? '' : 'danger'}`}
+                  onClick={confirmKillSwitchChange}
+                  disabled={!canConfirmKillSwitchChange}
+                >
+                  {systemMutationsDisabledSaving
+                    ? 'Saving...'
+                    : currentlyDisabled
+                      ? 'Confirm enable mutations'
+                      : 'Confirm disable mutations'}
+                </button>
+                <button className="button secondary" onClick={closeKillSwitchDialog} disabled={systemMutationsDisabledSaving}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div>
+        <h2>Rate limits</h2>
+        <div className="helper">Changing rate limits affects platform safety and cost controls.</div>
+        <div className="row space-12">
+          <div className="field">
+            <label htmlFor="system-read-rpm">Read RPM</label>
+            <input
+              id="system-read-rpm"
+              type="number"
+              min="1"
+              max="5000"
+              step="1"
+              value={systemRateLimitDraft.read_rpm}
+              onChange={(e) => handleSystemRateLimitDraftChange('read_rpm', e.target.value)}
+              onInput={(e) => handleSystemRateLimitDraftChange('read_rpm', e.target.value)}
+              disabled={systemRateLimitLoading || systemRateLimitSaving}
+            />
+            <div className="helper">Integer between 1 and 5000.</div>
+          </div>
+          <div className="field">
+            <label htmlFor="system-mutate-rpm">Mutate RPM</label>
+            <input
+              id="system-mutate-rpm"
+              type="number"
+              min="1"
+              max="5000"
+              step="1"
+              value={systemRateLimitDraft.mutate_rpm}
+              onChange={(e) => handleSystemRateLimitDraftChange('mutate_rpm', e.target.value)}
+              onInput={(e) => handleSystemRateLimitDraftChange('mutate_rpm', e.target.value)}
+              disabled={systemRateLimitLoading || systemRateLimitSaving}
+            />
+            <div className="helper">Integer between 1 and 5000.</div>
+          </div>
+          <div className="field">
+            <label htmlFor="system-daily-build-register-quota">Daily build registration quota</label>
+            <input
+              id="system-daily-build-register-quota"
+              type="number"
+              min="0"
+              max="5000"
+              step="1"
+              value={systemRateLimitDraft.daily_quota_build_register}
+              onChange={(e) => handleSystemRateLimitDraftChange('daily_quota_build_register', e.target.value)}
+              onInput={(e) => handleSystemRateLimitDraftChange('daily_quota_build_register', e.target.value)}
+              disabled={systemRateLimitLoading || systemRateLimitSaving}
+            />
+            <div className="helper">
+              Applies to CI build registration across the system (scoped per CI actor_id in counters).
+            </div>
+          </div>
+        </div>
+        {systemRateLimitError && <div className="helper space-8">{systemRateLimitError}</div>}
+        {systemRateLimitNote && <div className="helper space-8">{systemRateLimitNote}</div>}
+        <div className="space-12">
+          <button
+            className="button"
+            onClick={saveSystemRateLimits}
+            disabled={systemRateLimitSaving || systemRateLimitLoading || !systemRateLimitDirty}
+          >
+            {systemRateLimitSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderSystemSettingsCiPublishers = () => (
+    <div className="new-admin-stack">
+      <div className="new-admin-editor-note">
+        <strong>CI publisher matching</strong>
+        <p>Manage the named CI identities that are allowed to register builds and the token claims DXCP should match.</p>
+      </div>
+      <div>
+        <h2>CI publishers</h2>
+        <div className="helper">Manage named CI publishers and token match rules.</div>
+        {Array.isArray(systemCiPublishersList) && systemCiPublishersList.length > 0 ? (
+          <table className="space-12" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Name</th>
+                <th style={{ textAlign: 'left' }}>Provider</th>
+                <th style={{ textAlign: 'left' }}>Match rules</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemCiPublishersList.map((publisher) => (
+                <tr key={`${publisher?.name || 'publisher'}-${publisher?.provider || 'custom'}`}>
+                  <td>{publisher?.name || '-'}</td>
+                  <td>{publisher?.provider || '-'}</td>
+                  <td>{summarizePublisherRules(publisher)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="helper space-8">No CI publishers configured.</div>
+        )}
+        <div className="field space-12">
+          <label htmlFor="system-ci-publishers">Publishers JSON (View/Edit)</label>
+          <textarea
+            id="system-ci-publishers"
+            rows={12}
+            value={systemCiPublishersDraft}
+            onChange={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
+            onInput={(e) => handleSystemCiPublishersDraftChange(e.target.value)}
+            disabled={systemCiPublishersLoading || systemCiPublishersSaving}
+          />
+          <div className="helper">PUT payload format: {"{ \"publishers\": [ ... ] }"}.</div>
+        </div>
+        {systemCiPublishersError && <div className="helper space-8">{systemCiPublishersError}</div>}
+        {systemCiPublishersNote && <div className="helper space-8">{systemCiPublishersNote}</div>}
+        <div className="space-12">
+          <button
+            className="button"
+            onClick={saveSystemCiPublishers}
+            disabled={systemCiPublishersSaving || systemCiPublishersLoading || !systemCiPublishersDirty}
+          >
+            {systemCiPublishersSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderSystemSettingsExposure = () => (
+    <div className="new-admin-stack">
+      <div className="new-admin-editor-note">
+        <strong>Build Provenance Exposure</strong>
+        <p>Control which provenance metadata DXCP exposes to operators across deploy and history surfaces.</p>
+      </div>
+      <div>
+        <h2>Build Provenance Exposure</h2>
+        <div className="helper">Organization-wide controls for provenance visibility in DXCP.</div>
+        <div className="checklist space-12">
+          <label className="check-item">
+            <input
+              type="checkbox"
+              checked={systemUiExposurePolicyDraft.artifactRef.display === true}
+              onChange={(e) => handleSystemUiExposurePolicyToggle('artifactRef', e.target.checked)}
+              disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving}
+            />
+            <span>Show artifact references</span>
+          </label>
+          <label className="check-item">
+            <input
+              type="checkbox"
+              checked={systemUiExposurePolicyDraft.externalLinks.display === true}
+              onChange={(e) => handleSystemUiExposurePolicyToggle('externalLinks', e.target.checked)}
+              disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving}
+            />
+            <span>Show external links (commit and CI run)</span>
+          </label>
+        </div>
+        <div className="helper">Controls whether DXCP displays outbound links derived from build metadata.</div>
+        {systemUiExposurePolicyError && <div className="helper space-8">{systemUiExposurePolicyError}</div>}
+        {systemUiExposurePolicyNote && <div className="helper space-8">{systemUiExposurePolicyNote}</div>}
+        <div className="space-12">
+          <button
+            className="button"
+            onClick={saveSystemUiExposurePolicy}
+            disabled={systemUiExposurePolicySaving || systemUiExposurePolicyLoading || !systemUiExposurePolicyDirty}
+          >
+            {systemUiExposurePolicySaving ? 'Saving...' : 'Save exposure policy'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderSystemSettingsIdentity = () => (
+    <div className="new-admin-stack">
+      <div className="new-admin-editor-note">
+        <strong>Identity inspection</strong>
+        <p>Review the token claims DXCP sees for your current session and copy a short-lived access token for API debugging.</p>
+      </div>
+      <div>
+        <h2>Who am I</h2>
+        <div className="helper">Identity fields seen by DXCP for CI publisher matching.</div>
+        <div className="space-8">
+          <button className="button secondary" onClick={handleCopyAccessToken} disabled={copyTokenBusy}>
+            {copyTokenBusy ? 'Copying...' : 'Copy access token'}
+          </button>
+        </div>
+        <div className="helper">Copies your current Auth0 access token for API debugging.</div>
+        <div className="helper">Treat as a secret; expires quickly.</div>
+        {copyTokenError && <div className="helper space-8">{copyTokenError}</div>}
+        {copyTokenNote && <div className="helper space-8">{copyTokenNote}</div>}
+        {whoamiError && <div className="helper space-8">{whoamiError}</div>}
+        <div className="space-8">
+          <button className="button secondary" onClick={() => loadWhoAmI({ force: true })} disabled={whoamiLoading}>
+            {whoamiLoading ? 'Loading...' : 'Refresh identity'}
+          </button>
+        </div>
+        {whoamiData && (
+          <div className="list space-12">
+            <div className="list-item admin-detail">
+              <div>actor_id</div>
+              <div>{whoamiData.actor_id || '-'}</div>
+            </div>
+            <div className="list-item admin-detail">
+              <div>sub</div>
+              <div>{whoamiData.sub || '-'}</div>
+            </div>
+            <div className="list-item admin-detail">
+              <div>email</div>
+              <div>{whoamiData.email || '-'}</div>
+            </div>
+            <div className="list-item admin-detail">
+              <div>iss</div>
+              <div>{whoamiData.iss || '-'}</div>
+            </div>
+            <div className="list-item admin-detail">
+              <div>aud</div>
+              <div>
+                {Array.isArray(whoamiData.aud)
+                  ? whoamiData.aud.join(', ')
+                  : (whoamiData.aud || '-')}
+              </div>
+            </div>
+            <div className="list-item admin-detail">
+              <div>azp</div>
+              <div>{whoamiData.azp || '-'}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderSystemSettingsContent = () => {
+    if (systemSettingsSection === 'ci-publishers') return renderSystemSettingsCiPublishers()
+    if (systemSettingsSection === 'exposure') return renderSystemSettingsExposure()
+    if (systemSettingsSection === 'identity') return renderSystemSettingsIdentity()
+    return renderSystemSettingsOperations()
   }
 
   const headerAction =
@@ -1461,6 +1804,23 @@ export default function AdminPage({
         </SectionCard>
       )}
       {adminTab === 'system-settings' && isPlatformAdmin && (
+        <SectionCard className="new-admin-surface-card">
+          <div className="new-section-header">
+            <div>
+              <h2>System Settings</h2>
+              <div className="helper">Configure platform-wide guardrails, CI registration posture, provenance visibility, and identity diagnostics.</div>
+            </div>
+          </div>
+          <NewSegmentedTabs
+            ariaLabel="System settings sections"
+            activeTab={systemSettingsSection}
+            onChange={setSystemSettingsSection}
+            tabs={SYSTEM_SETTINGS_TABS}
+          />
+          {renderSystemSettingsContent()}
+        </SectionCard>
+      )}
+      {adminTab === 'system-settings' && isPlatformAdmin && false && (
         <SectionCard>
           <h2>Mutation Kill Switch</h2>
           <div className="list-item admin-detail two-col">

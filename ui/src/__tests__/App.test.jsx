@@ -2530,6 +2530,44 @@ export async function runAllTests() {
     assert.equal(view.getByRole('tab', { name: /^Engine$/i }).getAttribute('aria-selected'), 'true')
   })
 
+  await runTest('New experience system settings route renders segmented sections and saves exposure policy', async () => {
+    window.__DXCP_AUTH0_FACTORY__ = async () => ({
+      isAuthenticated: async () => true,
+      getUser: async () => ({ email: 'admin@example.com' }),
+      getTokenSilently: async () => buildFakeJwt(['dxcp-platform-admins']),
+      loginWithRedirect: async () => {},
+      logout: async () => {},
+      handleRedirectCallback: async () => {}
+    })
+    globalThis.fetch = buildFetchMock({
+      role: 'PLATFORM_ADMIN',
+      deployAllowed: true,
+      rollbackAllowed: true,
+      uiExposureArtifactRefDisplay: false,
+      uiExposureExternalLinksDisplay: false
+    })
+    const view = renderApp('/new/admin?tab=system-settings')
+
+    await view.findByRole('heading', { name: 'System Settings' })
+    await view.findByRole('tablist', { name: 'System settings sections' })
+    assert.equal(view.getByRole('tab', { name: 'Operations' }).getAttribute('aria-selected'), 'true')
+
+    fireEvent.click(view.getByRole('tab', { name: 'Exposure' }))
+    await view.findByRole('heading', { name: 'Build Provenance Exposure' })
+    const artifactToggle = view.getByLabelText('Show artifact references')
+    const externalToggle = view.getByLabelText('Show external links (commit and CI run)')
+    assert.equal(artifactToggle.checked, false)
+    assert.equal(externalToggle.checked, false)
+
+    fireEvent.click(externalToggle)
+    fireEvent.click(view.getByRole('button', { name: 'Save exposure policy' }))
+    await view.findByText('Build provenance exposure policy saved.')
+
+    fireEvent.click(view.getByRole('tab', { name: 'Identity' }))
+    await view.findByRole('heading', { name: 'Who Am I' })
+    await view.findByText('admin@example.com')
+  })
+
   await runTest('New experience admin environments use readable lifecycle and type labels', async () => {
     window.__DXCP_AUTH0_FACTORY__ = async () => ({
       isAuthenticated: async () => true,
@@ -2655,7 +2693,8 @@ export async function runAllTests() {
     await view.findByText('PLATFORM_ADMIN')
     fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'System Settings' }))
-    await view.findByText('Build Provenance Exposure')
+    fireEvent.click(view.getByRole('tab', { name: 'Exposure' }))
+    await view.findByRole('heading', { name: 'Build Provenance Exposure' })
 
     const artifactToggle = view.getByLabelText('Show artifact references')
     const externalToggle = view.getByLabelText('Show external links (commit and CI run)')
@@ -2978,7 +3017,8 @@ export async function runAllTests() {
 
     fireEvent.click(view.getByRole('link', { name: 'Admin' }))
     fireEvent.click(view.getByRole('button', { name: 'System Settings' }))
-    await view.findByText('Build Provenance Exposure')
+    fireEvent.click(view.getByRole('tab', { name: 'Exposure' }))
+    await view.findByRole('heading', { name: 'Build Provenance Exposure' })
     fireEvent.click(view.getByLabelText('Show external links (commit and CI run)'))
     fireEvent.click(view.getByRole('button', { name: 'Save exposure policy' }))
     await view.findByText('Build provenance exposure policy saved.')

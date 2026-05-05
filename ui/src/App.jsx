@@ -4351,9 +4351,9 @@ export default function App() {
               path="/new/deployments/:deploymentId"
               element={<NewExperienceDeploymentDetailPage role={derivedRole} api={api} />}
             />
-            <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} api={api} />} />
-            <Route path="/new/admin/delivery-groups/create" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-create" />} />
-            <Route path="/new/admin/delivery-groups/:groupId" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-detail" />} />
+            <Route path="/new/admin" element={<NewExperienceAdminPage role={derivedRole} api={api} copyAccessTokenToClipboard={copyAccessTokenToClipboard} />} />
+            <Route path="/new/admin/delivery-groups/create" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-create" copyAccessTokenToClipboard={copyAccessTokenToClipboard} />} />
+            <Route path="/new/admin/delivery-groups/:groupId" element={<NewExperienceAdminPage role={derivedRole} api={api} adminRoute="delivery-groups-detail" copyAccessTokenToClipboard={copyAccessTokenToClipboard} />} />
             <Route path="*" element={<NewExperienceUnavailableRoutePage role={derivedRole} />} />
           </Routes>
         )}

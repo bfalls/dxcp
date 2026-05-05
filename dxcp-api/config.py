@@ -229,6 +229,17 @@ class Settings:
         except Exception:
             return value
 
+    def refresh_oidc_settings(self) -> None:
+        self.oidc_issuer = self._get("oidc/issuer", "DXCP_OIDC_ISSUER", self.oidc_issuer or "", str)
+        self.oidc_audience = self._get("oidc/audience", "DXCP_OIDC_AUDIENCE", self.oidc_audience or "", str)
+        self.oidc_jwks_url = self._get("oidc/jwks_url", "DXCP_OIDC_JWKS_URL", self.oidc_jwks_url or "", str)
+        self.oidc_roles_claim = self._get(
+            "oidc/roles_claim",
+            "DXCP_OIDC_ROLES_CLAIM",
+            self.oidc_roles_claim or "https://dxcp.example/claims/roles",
+            str,
+        )
+
     def _parse_ci_publishers(self, value: Optional[str]) -> list[CiPublisher]:
         raw = str(value or "").strip()
         if not raw:

@@ -66,6 +66,12 @@ const ADMIN_TABS = [
 ]
 
 const DEFAULT_TAB = 'engine-adapters'
+const SYSTEM_SETTINGS_SECTIONS = [
+  { id: 'operations', label: 'Operations' },
+  { id: 'ci-publishers', label: 'CI Publishers' },
+  { id: 'exposure', label: 'Exposure' },
+  { id: 'identity', label: 'Identity' }
+]
 
 function BlockedAdminState({ role }) {
   useNewExperienceAlertRail([
@@ -1788,7 +1794,592 @@ function PlaceholderPanel({ eyebrow, title, description, emptyTitle, emptyBody }
   )
 }
 
-export default function NewExperienceAdminPage({ role = 'UNKNOWN', api, adminRoute = 'root' }) {
+function SystemSettingsPanel({ api, copyAccessTokenToClipboard }) {
+  const [activeSection, setActiveSection] = useState('operations')
+  const [systemRateLimitDraft, setSystemRateLimitDraft] = useState({ read_rpm: '', mutate_rpm: '', daily_quota_build_register: '' })
+  const [systemRateLimitBaseline, setSystemRateLimitBaseline] = useState({ read_rpm: '', mutate_rpm: '', daily_quota_build_register: '' })
+  const [systemRateLimitLoading, setSystemRateLimitLoading] = useState(false)
+  const [systemRateLimitSaving, setSystemRateLimitSaving] = useState(false)
+  const [systemRateLimitError, setSystemRateLimitError] = useState('')
+  const [systemRateLimitNote, setSystemRateLimitNote] = useState('')
+  const [systemCiPublishersDraft, setSystemCiPublishersDraft] = useState('[]')
+  const [systemCiPublishersBaseline, setSystemCiPublishersBaseline] = useState('[]')
+  const [systemCiPublishersList, setSystemCiPublishersList] = useState([])
+  const [systemCiPublishersLoading, setSystemCiPublishersLoading] = useState(false)
+  const [systemCiPublishersSaving, setSystemCiPublishersSaving] = useState(false)
+  const [systemCiPublishersError, setSystemCiPublishersError] = useState('')
+  const [systemCiPublishersNote, setSystemCiPublishersNote] = useState('')
+  const [systemUiExposurePolicyDraft, setSystemUiExposurePolicyDraft] = useState(normalizeUiExposurePolicy())
+  const [systemUiExposurePolicyBaseline, setSystemUiExposurePolicyBaseline] = useState(normalizeUiExposurePolicy())
+  const [systemUiExposurePolicyLoading, setSystemUiExposurePolicyLoading] = useState(false)
+  const [systemUiExposurePolicySaving, setSystemUiExposurePolicySaving] = useState(false)
+  const [systemUiExposurePolicyError, setSystemUiExposurePolicyError] = useState('')
+  const [systemUiExposurePolicyNote, setSystemUiExposurePolicyNote] = useState('')
+  const [systemMutationsDisabled, setSystemMutationsDisabled] = useState(false)
+  const [systemMutationsDisabledLoading, setSystemMutationsDisabledLoading] = useState(false)
+  const [systemMutationsDisabledSaving, setSystemMutationsDisabledSaving] = useState(false)
+  const [systemMutationsDisabledError, setSystemMutationsDisabledError] = useState('')
+  const [systemMutationsDisabledNote, setSystemMutationsDisabledNote] = useState('')
+  const [whoamiData, setWhoamiData] = useState(null)
+  const [whoamiLoading, setWhoamiLoading] = useState(false)
+  const [whoamiError, setWhoamiError] = useState('')
+  const [copyTokenBusy, setCopyTokenBusy] = useState(false)
+  const [copyTokenNote, setCopyTokenNote] = useState('')
+  const [copyTokenError, setCopyTokenError] = useState('')
+  const [killSwitchDialogOpen, setKillSwitchDialogOpen] = useState(false)
+  const [killSwitchPhrase, setKillSwitchPhrase] = useState('')
+  const [killSwitchReason, setKillSwitchReason] = useState('')
+  const [killSwitchStepConfirmed, setKillSwitchStepConfirmed] = useState(false)
+
+  const systemRateLimitDirty = useMemo(
+    () =>
+      String(systemRateLimitDraft.read_rpm).trim() !== String(systemRateLimitBaseline.read_rpm).trim() ||
+      String(systemRateLimitDraft.mutate_rpm).trim() !== String(systemRateLimitBaseline.mutate_rpm).trim() ||
+      String(systemRateLimitDraft.daily_quota_build_register).trim() !== String(systemRateLimitBaseline.daily_quota_build_register).trim(),
+    [systemRateLimitBaseline, systemRateLimitDraft]
+  )
+  const systemCiPublishersDirty = useMemo(
+    () => String(systemCiPublishersDraft).trim() !== String(systemCiPublishersBaseline).trim(),
+    [systemCiPublishersBaseline, systemCiPublishersDraft]
+  )
+  const systemUiExposurePolicyDirty = useMemo(
+    () =>
+      systemUiExposurePolicyDraft.artifactRef.display !== systemUiExposurePolicyBaseline.artifactRef.display ||
+      systemUiExposurePolicyDraft.externalLinks.display !== systemUiExposurePolicyBaseline.externalLinks.display,
+    [systemUiExposurePolicyBaseline, systemUiExposurePolicyDraft]
+  )
+
+  const currentlyDisabled = systemMutationsDisabled === true
+  const disablingMutations = !currentlyDisabled
+  const disablePhraseRequired = 'DISABLE MUTATIONS'
+  const phraseAccepted = !disablingMutations || killSwitchPhrase === disablePhraseRequired
+  const canAcknowledgeStepOne = phraseAccepted && !systemMutationsDisabledSaving
+  const canConfirmKillSwitchChange = killSwitchStepConfirmed && phraseAccepted && !systemMutationsDisabledSaving && !systemMutationsDisabledLoading
+
+  const loadSystemRateLimits = useCallback(async (options = {}) => {
+    setSystemRateLimitError('')
+    setSystemRateLimitNote('')
+    setSystemRateLimitLoading(true)
+    try {
+      const data = await api.get('/admin/system/rate-limits', { bypassCache: true, cacheTtlMs: options?.force ? 0 : 2000 })
+      if (data?.code) {
+        setSystemRateLimitError(formatApiError(data, 'Failed to load system rate limits.'))
+        return
+      }
+      const next = {
+        read_rpm: String(data?.read_rpm ?? ''),
+        mutate_rpm: String(data?.mutate_rpm ?? ''),
+        daily_quota_build_register: String(data?.daily_quota_build_register ?? '')
+      }
+      setSystemRateLimitDraft(next)
+      setSystemRateLimitBaseline(next)
+    } catch (err) {
+      setSystemRateLimitError('Failed to load system rate limits.')
+    } finally {
+      setSystemRateLimitLoading(false)
+    }
+  }, [api])
+
+  const loadSystemCiPublishers = useCallback(async (options = {}) => {
+    setSystemCiPublishersError('')
+    setSystemCiPublishersNote('')
+    setSystemCiPublishersLoading(true)
+    try {
+      const data = await api.get('/admin/system/ci-publishers', { bypassCache: true, cacheTtlMs: options?.force ? 0 : 2000 })
+      if (data?.code) {
+        setSystemCiPublishersError(formatApiError(data, 'Failed to load CI publishers.'))
+        return
+      }
+      const publishers = Array.isArray(data?.publishers) ? data.publishers : []
+      const next = formatCiPublishersJson(publishers)
+      setSystemCiPublishersList(publishers)
+      setSystemCiPublishersDraft(next)
+      setSystemCiPublishersBaseline(next)
+    } catch (err) {
+      setSystemCiPublishersError('Failed to load CI publishers.')
+    } finally {
+      setSystemCiPublishersLoading(false)
+    }
+  }, [api])
+
+  const loadSystemUiExposurePolicy = useCallback(async (options = {}) => {
+    setSystemUiExposurePolicyError('')
+    setSystemUiExposurePolicyNote('')
+    setSystemUiExposurePolicyLoading(true)
+    try {
+      const data = await api.get('/admin/system/ui-exposure-policy', { bypassCache: true, cacheTtlMs: options?.force ? 0 : 2000 })
+      if (data?.code) {
+        setSystemUiExposurePolicyError(formatApiError(data, 'Failed to load build provenance exposure policy.'))
+        return
+      }
+      const next = normalizeUiExposurePolicy(data?.policy)
+      setSystemUiExposurePolicyDraft(next)
+      setSystemUiExposurePolicyBaseline(next)
+    } catch (err) {
+      setSystemUiExposurePolicyError('Failed to load build provenance exposure policy.')
+    } finally {
+      setSystemUiExposurePolicyLoading(false)
+    }
+  }, [api])
+
+  const loadSystemMutationsDisabled = useCallback(async (options = {}) => {
+    setSystemMutationsDisabledError('')
+    setSystemMutationsDisabledNote('')
+    setSystemMutationsDisabledLoading(true)
+    try {
+      const data = await api.get('/admin/system/mutations-disabled', { bypassCache: true, cacheTtlMs: options?.force ? 0 : 2000 })
+      if (data?.code) {
+        setSystemMutationsDisabledError(formatApiError(data, 'Failed to load mutation kill switch status.'))
+        return
+      }
+      setSystemMutationsDisabled(data?.mutations_disabled === true)
+    } catch (err) {
+      setSystemMutationsDisabledError('Failed to load mutation kill switch status.')
+    } finally {
+      setSystemMutationsDisabledLoading(false)
+    }
+  }, [api])
+
+  const loadWhoAmI = useCallback(async (options = {}) => {
+    setWhoamiError('')
+    setWhoamiLoading(true)
+    try {
+      const data = await api.get('/whoami', { bypassCache: true, cacheTtlMs: options?.force ? 0 : 2000 })
+      if (data?.code) {
+        setWhoamiError(formatApiError(data, 'Failed to load identity.'))
+        return
+      }
+      setWhoamiData(data || null)
+    } catch (err) {
+      setWhoamiError('Failed to load identity.')
+    } finally {
+      setWhoamiLoading(false)
+    }
+  }, [api])
+
+  const loadAll = useCallback((options = {}) => {
+    loadSystemRateLimits(options)
+    loadSystemCiPublishers(options)
+    loadSystemUiExposurePolicy(options)
+    loadSystemMutationsDisabled(options)
+    loadWhoAmI(options)
+  }, [loadSystemCiPublishers, loadSystemMutationsDisabled, loadSystemRateLimits, loadSystemUiExposurePolicy, loadWhoAmI])
+
+  useEffect(() => {
+    loadAll()
+  }, [loadAll])
+
+  const handleCopyAccessToken = useCallback(async () => {
+    if (!copyAccessTokenToClipboard) {
+      setCopyTokenError('Copy access token is unavailable in this view.')
+      return
+    }
+    setCopyTokenBusy(true)
+    setCopyTokenNote('')
+    setCopyTokenError('')
+    const result = await copyAccessTokenToClipboard()
+    if (result?.ok) {
+      setCopyTokenNote(result.message || 'Copied.')
+    } else {
+      setCopyTokenError(result?.message || 'Copy failed. Use DevTools header copy instead.')
+    }
+    setCopyTokenBusy(false)
+  }, [copyAccessTokenToClipboard])
+
+  const saveSystemRateLimits = useCallback(async () => {
+    setSystemRateLimitError('')
+    setSystemRateLimitNote('')
+    const readParsed = parseSystemRateLimitValue(systemRateLimitDraft.read_rpm, 'Read RPM')
+    if (readParsed.error) return setSystemRateLimitError(readParsed.error)
+    const mutateParsed = parseSystemRateLimitValue(systemRateLimitDraft.mutate_rpm, 'Mutate RPM')
+    if (mutateParsed.error) return setSystemRateLimitError(mutateParsed.error)
+    const dailyParsed = parseSystemRateLimitValue(systemRateLimitDraft.daily_quota_build_register, 'Daily build registration quota', 0, 5000)
+    if (dailyParsed.error) return setSystemRateLimitError(dailyParsed.error)
+    setSystemRateLimitSaving(true)
+    try {
+      const payload = { read_rpm: readParsed.value, mutate_rpm: mutateParsed.value, daily_quota_build_register: dailyParsed.value }
+      const result = await api.put('/admin/system/rate-limits', payload)
+      if (result?.code) {
+        setSystemRateLimitError(formatApiError(result, 'Failed to save system rate limits.'))
+        return
+      }
+      const next = {
+        read_rpm: String(result?.read_rpm ?? payload.read_rpm),
+        mutate_rpm: String(result?.mutate_rpm ?? payload.mutate_rpm),
+        daily_quota_build_register: String(result?.daily_quota_build_register ?? payload.daily_quota_build_register)
+      }
+      setSystemRateLimitDraft(next)
+      setSystemRateLimitBaseline(next)
+      setSystemRateLimitNote('System rate limits saved.')
+    } catch (err) {
+      setSystemRateLimitError('Failed to save system rate limits.')
+    } finally {
+      setSystemRateLimitSaving(false)
+    }
+  }, [api, systemRateLimitDraft])
+
+  const saveSystemCiPublishers = useCallback(async () => {
+    setSystemCiPublishersError('')
+    setSystemCiPublishersNote('')
+    const parsed = parseCiPublishersValue(systemCiPublishersDraft)
+    if (parsed.error) return setSystemCiPublishersError(parsed.error)
+    setSystemCiPublishersSaving(true)
+    try {
+      const payload = { publishers: parsed.value }
+      const result = await api.put('/admin/system/ci-publishers', payload)
+      if (result?.code) {
+        setSystemCiPublishersError(formatApiError(result, 'Failed to save CI publishers.'))
+        return
+      }
+      const publishers = Array.isArray(result?.publishers) ? result.publishers : payload.publishers
+      const next = formatCiPublishersJson(publishers)
+      setSystemCiPublishersList(publishers)
+      setSystemCiPublishersDraft(next)
+      setSystemCiPublishersBaseline(next)
+      setSystemCiPublishersNote('CI publishers saved.')
+    } catch (err) {
+      setSystemCiPublishersError('Failed to save CI publishers.')
+    } finally {
+      setSystemCiPublishersSaving(false)
+    }
+  }, [api, systemCiPublishersDraft])
+
+  const saveSystemUiExposurePolicy = useCallback(async () => {
+    setSystemUiExposurePolicyError('')
+    setSystemUiExposurePolicyNote('')
+    setSystemUiExposurePolicySaving(true)
+    try {
+      const payload = normalizeUiExposurePolicy(systemUiExposurePolicyDraft)
+      const result = await api.put('/admin/system/ui-exposure-policy', payload)
+      if (result?.code) {
+        setSystemUiExposurePolicyError(formatApiError(result, 'Failed to save build provenance exposure policy.'))
+        return
+      }
+      const next = normalizeUiExposurePolicy(result?.policy ?? payload)
+      setSystemUiExposurePolicyDraft(next)
+      setSystemUiExposurePolicyBaseline(next)
+      setSystemUiExposurePolicyNote('Build provenance exposure policy saved.')
+    } catch (err) {
+      setSystemUiExposurePolicyError('Failed to save build provenance exposure policy.')
+    } finally {
+      setSystemUiExposurePolicySaving(false)
+    }
+  }, [api, systemUiExposurePolicyDraft])
+
+  const saveSystemMutationsDisabled = useCallback(async (nextValue, reason = '') => {
+    setSystemMutationsDisabledError('')
+    setSystemMutationsDisabledNote('')
+    setSystemMutationsDisabledSaving(true)
+    try {
+      const payload = { mutations_disabled: nextValue === true }
+      const trimmedReason = String(reason || '').trim()
+      if (trimmedReason) payload.reason = trimmedReason
+      const result = await api.put('/admin/system/mutations-disabled', payload)
+      if (result?.code) {
+        setSystemMutationsDisabledError(formatApiError(result, 'Failed to update mutation kill switch status.'))
+        return false
+      }
+      const updated = result?.mutations_disabled === true
+      setSystemMutationsDisabled(updated)
+      setSystemMutationsDisabledNote(updated ? 'Mutations disabled.' : 'Mutations enabled.')
+      return true
+    } catch (err) {
+      setSystemMutationsDisabledError('Failed to update mutation kill switch status.')
+      return false
+    } finally {
+      setSystemMutationsDisabledSaving(false)
+    }
+  }, [api])
+
+  const openKillSwitchDialog = () => {
+    if (systemMutationsDisabledLoading || systemMutationsDisabledSaving) return
+    setKillSwitchDialogOpen(true)
+    setKillSwitchPhrase('')
+    setKillSwitchReason('')
+    setKillSwitchStepConfirmed(false)
+  }
+
+  const closeKillSwitchDialog = () => {
+    if (systemMutationsDisabledSaving) return
+    setKillSwitchDialogOpen(false)
+    setKillSwitchPhrase('')
+    setKillSwitchReason('')
+    setKillSwitchStepConfirmed(false)
+  }
+
+  const confirmKillSwitchChange = async () => {
+    if (!canConfirmKillSwitchChange) return
+    const ok = await saveSystemMutationsDisabled(disablingMutations, killSwitchReason)
+    if (ok) closeKillSwitchDialog()
+  }
+
+  return (
+    <SectionCard className="new-admin-card">
+      <div className="new-admin-panel-header">
+        <div>
+          <h3>System Settings</h3>
+        </div>
+        <div className="new-admin-toolbar-actions">
+          <NewRefreshButton
+            onClick={() => loadAll({ force: true })}
+            busy={systemRateLimitLoading || systemCiPublishersLoading || systemUiExposurePolicyLoading || systemMutationsDisabledLoading || whoamiLoading}
+          />
+        </div>
+      </div>
+      <div className="new-admin-panel-region">
+        <NewSegmentedTabs
+          ariaLabel="System settings sections"
+          activeTab={activeSection}
+          onChange={setActiveSection}
+          tabs={SYSTEM_SETTINGS_SECTIONS}
+        />
+        {activeSection === 'operations' && (
+          <div className="new-admin-stack">
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>System Freeze</h3></div></div>
+              <div className="new-admin-editor-note">
+                <strong>Current platform posture</strong>
+                <p>{currentlyDisabled ? 'DXCP is currently blocking deployments and changes. Use this control only for platform-wide emergencies.' : 'DXCP is currently allowing deployments and changes. Use this control only for platform-wide emergencies.'}</p>
+              </div>
+              <dl className="new-object-summary-grid">
+                <dt>Status</dt>
+                <dd>{currentlyDisabled ? 'System frozen' : 'Changes allowed'}</dd>
+                <dt>Deploys</dt>
+                <dd>{currentlyDisabled ? 'Blocked' : 'Allowed'}</dd>
+                <dt>Rollbacks</dt>
+                <dd>{currentlyDisabled ? 'Blocked' : 'Allowed'}</dd>
+                <dt>Reads</dt>
+                <dd>Allowed</dd>
+              </dl>
+              {systemMutationsDisabledError ? <NewExplanation title="Kill switch update failed" tone="danger">{systemMutationsDisabledError}</NewExplanation> : null}
+              {systemMutationsDisabledNote ? <NewExplanation title="Kill switch updated" tone="neutral">{systemMutationsDisabledNote}</NewExplanation> : null}
+              <div className="new-admin-inline-actions">
+                <button className={`button ${currentlyDisabled ? '' : 'danger'}`} onClick={openKillSwitchDialog} disabled={systemMutationsDisabledSaving || systemMutationsDisabledLoading}>
+                  {currentlyDisabled ? 'Allow changes' : 'Freeze system'}
+                </button>
+              </div>
+              {killSwitchDialogOpen ? (
+                <div className="new-admin-editor-note">
+                  <strong>{currentlyDisabled ? 'Allow changes' : 'Freeze system'}</strong>
+                  <p>{currentlyDisabled ? 'This will allow deployments and changes again immediately.' : 'This will block deployments and changes immediately across DXCP.'}</p>
+                  {!currentlyDisabled ? (
+                    <label className="new-field" htmlFor="new-system-kill-switch-phrase">
+                      <span>Type exact phrase to continue</span>
+                      <input id="new-system-kill-switch-phrase" value={killSwitchPhrase} onChange={(event) => setKillSwitchPhrase(event.target.value)} placeholder={disablePhraseRequired} autoComplete="off" />
+                    </label>
+                  ) : null}
+                  <label className="new-field" htmlFor="new-system-kill-switch-reason">
+                    <span>Reason</span>
+                    <textarea id="new-system-kill-switch-reason" rows={3} value={killSwitchReason} onChange={(event) => setKillSwitchReason(event.target.value)} placeholder="Optional incident or change note" />
+                  </label>
+                  {!currentlyDisabled ? <p className="new-operational-text">Required phrase: {disablePhraseRequired}</p> : null}
+                  <div className="new-admin-inline-actions">
+                    {!killSwitchStepConfirmed ? (
+                      <>
+                        <button className="button secondary" onClick={() => setKillSwitchStepConfirmed(true)} disabled={!canAcknowledgeStepOne}>Continue</button>
+                        <button className="button secondary" onClick={closeKillSwitchDialog}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className={`button ${currentlyDisabled ? '' : 'danger'}`} onClick={confirmKillSwitchChange} disabled={!canConfirmKillSwitchChange}>
+                          {systemMutationsDisabledSaving ? 'Saving...' : currentlyDisabled ? 'Confirm allow changes' : 'Confirm system freeze'}
+                        </button>
+                        <button className="button secondary" onClick={closeKillSwitchDialog} disabled={systemMutationsDisabledSaving}>Cancel</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </SectionCard>
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>Rate Limits</h3></div></div>
+              <div className="new-admin-editor-note">
+                <strong>Platform safety and cost controls</strong>
+                <p>These limits apply globally across the control plane and CI build registration flows.</p>
+              </div>
+              <div className="new-intent-entry-grid">
+                <label className="new-field" htmlFor="new-system-read-rpm">
+                  <span>Read RPM</span>
+                  <input id="new-system-read-rpm" type="number" min="1" max="5000" step="1" value={systemRateLimitDraft.read_rpm} onChange={(event) => { setSystemRateLimitDraft((current) => ({ ...current, read_rpm: event.target.value })); setSystemRateLimitError(''); setSystemRateLimitNote('') }} disabled={systemRateLimitLoading || systemRateLimitSaving} />
+                </label>
+                <label className="new-field" htmlFor="new-system-mutate-rpm">
+                  <span>Mutate RPM</span>
+                  <input id="new-system-mutate-rpm" type="number" min="1" max="5000" step="1" value={systemRateLimitDraft.mutate_rpm} onChange={(event) => { setSystemRateLimitDraft((current) => ({ ...current, mutate_rpm: event.target.value })); setSystemRateLimitError(''); setSystemRateLimitNote('') }} disabled={systemRateLimitLoading || systemRateLimitSaving} />
+                </label>
+                <label className="new-field" htmlFor="new-system-daily-build-quota">
+                  <span>Daily build registration quota</span>
+                  <input id="new-system-daily-build-quota" type="number" min="0" max="5000" step="1" value={systemRateLimitDraft.daily_quota_build_register} onChange={(event) => { setSystemRateLimitDraft((current) => ({ ...current, daily_quota_build_register: event.target.value })); setSystemRateLimitError(''); setSystemRateLimitNote('') }} disabled={systemRateLimitLoading || systemRateLimitSaving} />
+                </label>
+              </div>
+              <p className="new-operational-text">Daily build registration quota applies across the system and is scoped per CI `actor_id` in counters.</p>
+              {systemRateLimitError ? <NewExplanation title="Rate limits could not be saved" tone="danger">{systemRateLimitError}</NewExplanation> : null}
+              {systemRateLimitNote ? <NewExplanation title="Rate limits updated" tone="neutral">{systemRateLimitNote}</NewExplanation> : null}
+              <div className="new-admin-inline-actions">
+                <button className="button" onClick={saveSystemRateLimits} disabled={systemRateLimitSaving || systemRateLimitLoading || !systemRateLimitDirty}>{systemRateLimitSaving ? 'Saving...' : 'Save'}</button>
+              </div>
+            </SectionCard>
+          </div>
+        )}
+        {activeSection === 'ci-publishers' && (
+          <div className="new-admin-stack">
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>CI Publishers</h3></div></div>
+              <div className="new-admin-editor-note">
+                <strong>Named CI identity rules</strong>
+                <p>Manage allowlisted CI identities and the token claim match rules DXCP uses during build registration.</p>
+              </div>
+              {Array.isArray(systemCiPublishersList) && systemCiPublishersList.length > 0 ? (
+                <OperationalDataList
+                  ariaLabel="CI publishers"
+                  columns={[
+                    { key: 'name', label: 'Name', width: 'minmax(180px, 1fr)' },
+                    { key: 'provider', label: 'Provider', width: 'minmax(120px, 0.7fr)' },
+                    { key: 'rules', label: 'Match rules', width: 'minmax(280px, 1.6fr)' }
+                  ]}
+                  rows={systemCiPublishersList.map((publisher) => ({ ...publisher, rules: summarizePublisherRules(publisher) }))}
+                  getRowKey={(row) => `${row?.name || 'publisher'}-${row?.provider || 'custom'}`}
+                  renderCell={(row, column) => <span className="new-operational-text">{row[column.key] || '-'}</span>}
+                />
+              ) : (
+                <p className="new-operational-text">No CI publishers configured.</p>
+              )}
+              <label className="new-field" htmlFor="new-system-ci-publishers">
+                <span>Publishers JSON</span>
+                <textarea className="new-code-textarea" id="new-system-ci-publishers" rows={12} value={systemCiPublishersDraft} onChange={(event) => { setSystemCiPublishersDraft(event.target.value); setSystemCiPublishersError(''); setSystemCiPublishersNote('') }} disabled={systemCiPublishersLoading || systemCiPublishersSaving} />
+              </label>
+              <p className="new-operational-text">PUT payload format: {`{ "publishers": [ ... ] }`}.</p>
+              {systemCiPublishersError ? <NewExplanation title="CI publishers could not be saved" tone="danger">{systemCiPublishersError}</NewExplanation> : null}
+              {systemCiPublishersNote ? <NewExplanation title="CI publishers updated" tone="neutral">{systemCiPublishersNote}</NewExplanation> : null}
+              <div className="new-admin-inline-actions">
+                <button className="button" onClick={saveSystemCiPublishers} disabled={systemCiPublishersSaving || systemCiPublishersLoading || !systemCiPublishersDirty}>{systemCiPublishersSaving ? 'Saving...' : 'Save'}</button>
+              </div>
+            </SectionCard>
+          </div>
+        )}
+        {activeSection === 'exposure' && (
+          <div className="new-admin-stack">
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>Build Provenance Exposure</h3></div></div>
+              <div className="new-admin-editor-note">
+                <strong>Operator-facing provenance visibility</strong>
+                <p>Choose whether DXCP displays artifact references and outbound links derived from build metadata.</p>
+              </div>
+              <div className="checklist">
+                <label className="check-item">
+                  <input type="checkbox" checked={systemUiExposurePolicyDraft.artifactRef.display === true} onChange={(event) => { setSystemUiExposurePolicyDraft((current) => ({ ...current, artifactRef: { display: event.target.checked } })); setSystemUiExposurePolicyError(''); setSystemUiExposurePolicyNote('') }} disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving} />
+                  <span>Show artifact references</span>
+                </label>
+                <label className="check-item">
+                  <input type="checkbox" checked={systemUiExposurePolicyDraft.externalLinks.display === true} onChange={(event) => { setSystemUiExposurePolicyDraft((current) => ({ ...current, externalLinks: { display: event.target.checked } })); setSystemUiExposurePolicyError(''); setSystemUiExposurePolicyNote('') }} disabled={systemUiExposurePolicyLoading || systemUiExposurePolicySaving} />
+                  <span>Show external links (commit and CI run)</span>
+                </label>
+              </div>
+              {systemUiExposurePolicyError ? <NewExplanation title="Exposure policy could not be saved" tone="danger">{systemUiExposurePolicyError}</NewExplanation> : null}
+              {systemUiExposurePolicyNote ? <NewExplanation title="Exposure policy updated" tone="neutral">{systemUiExposurePolicyNote}</NewExplanation> : null}
+              <div className="new-admin-inline-actions">
+                <button className="button" onClick={saveSystemUiExposurePolicy} disabled={systemUiExposurePolicySaving || systemUiExposurePolicyLoading || !systemUiExposurePolicyDirty}>{systemUiExposurePolicySaving ? 'Saving...' : 'Save exposure policy'}</button>
+              </div>
+            </SectionCard>
+          </div>
+        )}
+        {activeSection === 'identity' && (
+          <div className="new-admin-stack">
+            <SectionCard className="new-admin-surface-card">
+              <div className="new-section-header"><div><h3>Who Am I</h3></div></div>
+              <div className="new-admin-editor-note">
+                <strong>Identity fields seen by DXCP</strong>
+                <p>Use this to confirm the claims DXCP sees for CI publisher matching and API debugging.</p>
+              </div>
+              <div className="new-admin-inline-actions">
+                <button className="button secondary" onClick={handleCopyAccessToken} disabled={copyTokenBusy || !copyAccessTokenToClipboard}>{copyTokenBusy ? 'Copying...' : 'Copy access token'}</button>
+                <button className="button secondary" onClick={() => loadWhoAmI({ force: true })} disabled={whoamiLoading}>{whoamiLoading ? 'Loading...' : 'Refresh identity'}</button>
+              </div>
+              <p className="new-operational-text">Treat copied tokens as secrets. They expire quickly.</p>
+              {copyTokenError ? <NewExplanation title="Access token copy failed" tone="danger">{copyTokenError}</NewExplanation> : null}
+              {copyTokenNote ? <NewExplanation title="Access token copied" tone="neutral">{copyTokenNote}</NewExplanation> : null}
+              {whoamiError ? <NewExplanation title="Identity could not be loaded" tone="danger">{whoamiError}</NewExplanation> : null}
+              {whoamiData ? (
+                <dl className="new-object-summary-grid">
+                  <dt>actor_id</dt><dd>{whoamiData.actor_id || '-'}</dd>
+                  <dt>sub</dt><dd>{whoamiData.sub || '-'}</dd>
+                  <dt>email</dt><dd>{whoamiData.email || '-'}</dd>
+                  <dt>iss</dt><dd>{whoamiData.iss || '-'}</dd>
+                  <dt>aud</dt><dd>{Array.isArray(whoamiData.aud) ? whoamiData.aud.join(', ') : (whoamiData.aud || '-')}</dd>
+                  <dt>azp</dt><dd>{whoamiData.azp || '-'}</dd>
+                </dl>
+              ) : null}
+            </SectionCard>
+          </div>
+        )}
+      </div>
+    </SectionCard>
+  )
+}
+
+function parseSystemRateLimitValue(value, label, min = 1, max = 5000) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return { error: `${label} is required.` }
+  if (!/^\d+$/.test(raw)) return { error: `${label} must be an integer.` }
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return { error: `${label} must be between ${min} and ${max}.` }
+  }
+  return { value: parsed }
+}
+
+function parseCiPublishersValue(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return { error: 'Publishers JSON is required.' }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    return { error: 'Publishers JSON must be valid JSON.' }
+  }
+  if (!Array.isArray(parsed)) return { error: 'Publishers JSON must be an array.' }
+  for (const publisher of parsed) {
+    if (!publisher || typeof publisher !== 'object' || Array.isArray(publisher)) {
+      return { error: 'Each publisher must be an object.' }
+    }
+    if (typeof publisher.name !== 'string' || !publisher.name.trim()) {
+      return { error: 'Each publisher must have a non-empty name.' }
+    }
+    if (typeof publisher.provider !== 'string' || !publisher.provider.trim()) {
+      return { error: 'Each publisher must have a provider.' }
+    }
+  }
+  return { value: parsed }
+}
+
+function formatCiPublishersJson(value) {
+  return JSON.stringify(Array.isArray(value) ? value : [], null, 2)
+}
+
+function normalizeUiExposurePolicy(policy) {
+  return {
+    artifactRef: { display: policy?.artifactRef?.display === true },
+    externalLinks: { display: policy?.externalLinks?.display === true }
+  }
+}
+
+function formatApiError(result, fallbackMessage) {
+  if (result && result.code) return `${result.code}: ${result.message}`
+  return fallbackMessage
+}
+
+function summarizePublisherRules(publisher) {
+  const counts = [
+    ['iss', Array.isArray(publisher?.issuers) ? publisher.issuers.length : 0],
+    ['aud', Array.isArray(publisher?.audiences) ? publisher.audiences.length : 0],
+    ['azp', Array.isArray(publisher?.authorized_party_azp) ? publisher.authorized_party_azp.length : 0],
+    ['sub', Array.isArray(publisher?.subjects) ? publisher.subjects.length : 0],
+    ['sub_prefix', Array.isArray(publisher?.subject_prefixes) ? publisher.subject_prefixes.length : 0],
+    ['email', Array.isArray(publisher?.emails) ? publisher.emails.length : 0]
+  ]
+  return counts.map(([label, count]) => `${label}:${count}`).join(' ')
+}
+
+export default function NewExperienceAdminPage({ role = 'UNKNOWN', api, adminRoute = 'root', copyAccessTokenToClipboard }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { groupId = '' } = useParams()
   const requestedTab = searchParams.get('tab')
@@ -1842,15 +2433,7 @@ export default function NewExperienceAdminPage({ role = 'UNKNOWN', api, adminRou
   } else if (activeTab === 'environments') {
     panel = <EnvironmentsPanel api={api} />
   } else if (activeTab === 'system-settings') {
-    panel = (
-      <PlaceholderPanel
-        eyebrow="Platform controls"
-        title="System Settings"
-        description="Configure platform-wide guardrails, operational limits, and administrative posture."
-        emptyTitle="System settings remain unchanged in this stage"
-        emptyBody="This stage focuses on Option A deploy alignment, explicit routing, and environment lifecycle governance without widening the platform-settings surface."
-      />
-    )
+    panel = <SystemSettingsPanel api={api} copyAccessTokenToClipboard={copyAccessTokenToClipboard} />
   }
 
   return (

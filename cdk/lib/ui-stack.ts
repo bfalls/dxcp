@@ -1,5 +1,5 @@
 import * as cdk from "aws-cdk-lib";
-import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from "aws-cdk-lib";
+import { CfnOutput, RemovalPolicy, Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
@@ -24,11 +24,32 @@ export class UiStack extends Stack {
 
     const apiDomainWithPort = cdk.Fn.select(2, cdk.Fn.split("/", props.apiEndpoint));
     const apiDomain = cdk.Fn.select(0, cdk.Fn.split(":", apiDomainWithPort));
+    const spaRewriteFunction = new cloudfront.Function(this, "DxcpSpaRewriteFunction", {
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri || "/";
+  if (uri.startsWith("/v1")) {
+    return request;
+  }
+  if (uri === "/" || !uri.includes(".")) {
+    request.uri = "/index.html";
+  }
+  return request;
+}
+      `),
+    });
 
     const distribution = new cloudfront.Distribution(this, "DxcpUiDistribution", {
       defaultBehavior: {
         origin: new origins.S3Origin(bucket, { originAccessIdentity: oai }),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        functionAssociations: [
+          {
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+            function: spaRewriteFunction,
+          },
+        ],
       },
       additionalBehaviors: {
         "/v1": {
@@ -47,20 +68,6 @@ export class UiStack extends Stack {
         },
       },
       defaultRootObject: "index.html",
-      errorResponses: [
-        {
-          httpStatus: 403,
-          responseHttpStatus: 200,
-          responsePagePath: "/index.html",
-          ttl: Duration.minutes(1),
-        },
-        {
-          httpStatus: 404,
-          responseHttpStatus: 200,
-          responsePagePath: "/index.html",
-          ttl: Duration.minutes(1),
-        },
-      ],
     });
 
     new CfnOutput(this, "UiBucketName", { value: bucket.bucketName });

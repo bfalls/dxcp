@@ -38,9 +38,6 @@ class Guardrails:
         if not env or not isinstance(env, str):
             raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment is required")
         if delivery_group:
-            group_allowed = delivery_group.get("allowed_environments")
-            if group_allowed is not None and env not in group_allowed:
-                raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment not allowed for delivery group")
             env_entry = self.storage.get_environment_for_group(env, delivery_group.get("id"))
             if not env_entry:
                 raise PolicyError(400, "INVALID_ENVIRONMENT", "Environment is not configured")

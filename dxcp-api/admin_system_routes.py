@@ -248,6 +248,19 @@ def _read_rate_limits_from_ssm() -> dict:
     }
 
 
+def _read_rate_limits_with_fallback() -> dict:
+    try:
+        return _read_rate_limits_from_ssm()
+    except Exception:
+        logger.warning("event=admin.system_rate_limits.read_fallback source=runtime")
+        return {
+            "read_rpm": int(SETTINGS.read_rpm),
+            "mutate_rpm": int(SETTINGS.mutate_rpm),
+            "daily_quota_build_register": int(SETTINGS.daily_quota_build_register),
+            "source": "runtime",
+        }
+
+
 def _read_rate_limits_from_ssm_for_audit() -> dict:
     """Best-effort read for audit logging; tolerates invalid existing values."""
     prefix = _ssm_prefix()
@@ -510,12 +523,7 @@ def register_admin_system_routes(
         role_error = require_role(actor, {Role.PLATFORM_ADMIN}, "view system rate limits")
         if role_error:
             return role_error
-        try:
-            return _read_rate_limits_from_ssm()
-        except ValueError as exc:
-            return error_response(500, "INTERNAL_ERROR", str(exc))
-        except Exception:
-            return error_response(500, "INTERNAL_ERROR", "Unable to read system rate limits from SSM")
+        return _read_rate_limits_with_fallback()
 
     @app.put("/v1/admin/system/rate-limits")
     def update_system_rate_limits(

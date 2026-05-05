@@ -2370,6 +2370,14 @@ body {
   resize: vertical;
 }
 
+.new-field textarea.new-code-textarea {
+  font-family: "Cascadia Code", "Fira Code", Consolas, "SFMono-Regular", Menlo, Monaco, monospace !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+  white-space: pre;
+  tab-size: 2;
+}
+
 .new-field-full {
   grid-column: 1 / -1;
 }

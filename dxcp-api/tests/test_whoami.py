@@ -116,3 +116,38 @@ async def test_whoami_rejects_unknown_role(tmp_path: Path, monkeypatch):
         response = await client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
     assert response.json()["code"] == "AUTHZ_ROLE_REQUIRED"
+
+
+async def test_whoami_recovers_when_oidc_settings_are_missing_at_runtime(tmp_path: Path, monkeypatch):
+    main = _load_main(tmp_path)
+    mock_jwks(monkeypatch)
+    token = build_token(["dxcp-platform-admins"], subject="auth0|recover")
+
+    monkeypatch.delenv("DXCP_OIDC_ISSUER", raising=False)
+    monkeypatch.delenv("DXCP_OIDC_AUDIENCE", raising=False)
+    monkeypatch.delenv("DXCP_OIDC_JWKS_URL", raising=False)
+    monkeypatch.delenv("DXCP_OIDC_ROLES_CLAIM", raising=False)
+
+    main.SETTINGS.ssm_prefix = "/dxcp/config"
+    main.SETTINGS.oidc_issuer = ""
+    main.SETTINGS.oidc_audience = ""
+    main.SETTINGS.oidc_jwks_url = ""
+    main.SETTINGS.oidc_roles_claim = ""
+
+    values = {
+        "/dxcp/config/oidc/issuer": ISSUER,
+        "/dxcp/config/oidc/audience": AUDIENCE,
+        "/dxcp/config/oidc/jwks_url": "https://dxcp.example/.well-known/jwks.json",
+        "/dxcp/config/oidc/roles_claim": "https://dxcp.example/claims/roles",
+    }
+
+    monkeypatch.setattr(main.SETTINGS, "_read_ssm", lambda name: values.get(name))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["actor_id"] == "auth0|recover"
